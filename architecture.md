@@ -3,11 +3,12 @@
 ## 1. 시스템 개요
 
 ### 1.1 프로젝트 목적
-FANUC CNC 자동선반을 웹 기반으로 모니터링하고 제한적 원격 제어를 수행하는 스마트팩토리 시스템 구축
+FANUC CNC 자동선반을 웹 기반으로 모니터링하고 원격 제어(조작반 제어 및 스케줄러)를 수행하는 스마트팩토리 시스템 구축
 
 ### 1.2 시스템 범위
 - **모니터링**: 장비 상태, 알람, 생산 현황 실시간 확인
-- **제한적 원격 제어**: 스케줄러를 통한 프로그램 실행 (직접 NC 조작 불가)
+- **원격 제어 모듈**: NC 옵셋 조작, 조작반 제어 (EDIT, MEM, MDI 등), 카메라 제어 (확장 예정)
+- **스케줄러**: 프로그램 순차 실행 (Memory / DNC 모드 지원)
 - **POP/MES 연계**: 생산실적 집계, 작업지시 관리
 - **데이터 관리**: 프로그램 전송, 백업, 이력 관리
 
@@ -81,18 +82,37 @@ FANUC CNC 자동선반을 웹 기반으로 모니터링하고 제한적 원격 �
 │                                                                      │
 ├─ [ Machines 메뉴 ] ─────────────────────────────────────────────────│
 │   │                                                                  │
-│   ├─ [ Operation Panel ]                    [모든 사용자]            │
+│   ├─ [ 원격제어 모드 (Remote Control) ]     [관리자/AS + 제어권 필요] │
 │   │       │                                                          │
 │   │       ▼                                                          │
-│   │   ┌─────────────────────────────────────────────┐                │
-│   │   │ Operation Panel (2분할 레이아웃)             │                │
-│   │   │ ─────────────────────────────────────────── │                │
-│   │   │ [좌측: CNC 모니터 영역]  [우측: 기계 조작반 영역] │                │
-│   │   │ · 프로그램 정보          · 모드 선택 (EDIT,   │                │
-│   │   │ · 모달 / 좌표계          │ MEM, MDI 등)       │                │
-│   │   │ · 스핀들 RPM/부하        · 조작 버튼류        │                │
-│   │   │ · 실시간 상태 모니터링   · 오버라이드 다이얼  │                │
-│   │   └─────────────────────────────────────────────┘                │
+│   │   ┌─────────────────────────────────────────────────────────┐    │
+│   │   │ 원격제어 모드 (2분할 레이아웃)                          │    │
+│   │   │ ───────────────────────────────────────────────────────│    │
+│   │   │ ※ 진입 조건: 제어권 + 원격제어 인터록 충족 필요        │    │
+│   │   │                                                         │    │
+│   │   │ ┌───────────────────────┬─────────────────────────────┐ │    │
+│   │   │ │ [좌측: 장비 상세]     │ [우측: 가상 조작반]         │ │    │
+│   │   │ │ ─────────────────     │ ─────────────────────────── │ │    │
+│   │   │ │ · 현재 프로그램/블록  │ · 모드 선택                 │ │    │
+│   │   │ │ · 좌표계 (절대/기계)  │   [EDIT][MEM][MDI]          │ │    │
+│   │   │ │ · 스핀들 RPM/부하     │   [JOG][REF][HANDLE]        │ │    │
+│   │   │ │ · 이송 속도           │                             │ │    │
+│   │   │ │ · 인터록 상태         │ · 실행 제어                 │ │    │
+│   │   │ │ · 알람 상태           │   [CYCLE START][FEED HOLD]  │ │    │
+│   │   │ │                       │   [SINGLE BLOCK][DRY RUN]   │ │    │
+│   │   │ │                       │                             │ │    │
+│   │   │ │                       │ · 오버라이드                │ │    │
+│   │   │ │                       │   이송: [====●====] 100%    │ │    │
+│   │   │ │                       │   스핀들: [====●====] 100%  │ │    │
+│   │   │ │                       │                             │ │    │
+│   │   │ │                       │ · 리셋/알람                 │ │    │
+│   │   │ │                       │   [RESET][ALARM CLR]        │ │    │
+│   │   │ └───────────────────────┴─────────────────────────────┘ │    │
+│   │   │                                                         │    │
+│   │   │ [원격제어 인터록 상태 바]                               │    │
+│   │   │ ● 원격허용ON  ● 현장조작OFF  ● 비상정지OFF  ● 도어닫힘 │    │
+│   │   │ ※ 현장 작업자 조작 시 자동 잠금 (현장 우선)           │    │
+│   │   └─────────────────────────────────────────────────────────┘    │
 │   │                                                                  │
 │   ├─ [ Scheduler ]                          [관리자/AS 전용]         │
 │   │       │                                                          │
@@ -296,7 +316,7 @@ FANUC CNC 자동선반을 웹 기반으로 모니터링하고 제한적 원격 �
 | 메뉴 | 일반 사용자 | 관리자 (Admin) | AS 담당자 |
 |------|:-----------:|:--------------:|:---------:|
 | **Dashboard** | ✅ 조회 | ✅ 조회 | ✅ 조회 |
-| **Machines > Operation Panel** | ✅ 조회 | ✅ 조회 | ✅ 조회 |
+| **Machines > 원격제어 모드** | ✅ 조회만 | ✅ 조회 + 제어** | ✅ 전체 |
 | **Machines > Scheduler** | ⛔ 표시만 | ✅ 조회 + 제어* | ✅ 전체 |
 | **Machines > Transfer** | ⛔ 표시만 | ✅ INPUT/OUTPUT/백업 | ✅ 전체 |
 | **Machines > POP (장비별)** | ✅ 조회 | ✅ 조회 | ✅ 조회 |
@@ -308,7 +328,9 @@ FANUC CNC 자동선반을 웹 기반으로 모니터링하고 제한적 원격 �
 | **장비 설정** | ⛔ 표시만 | ✅ 수정 | ✅ 수정 |
 | **템플릿 관리** | ⛔ 표시만 | ⛔ 표시만 | ✅ 전체 |
 
-> **\*제어 권한 주의**: 스케줄러 시작/정지/리셋 등 제어 기능은 **제어권(원격제어 허가) 획득 후** 실행 가능 (섹션 9.3 참조)
+> **\*제어 권한 주의**: 스케줄러 시작/정지/리셋 등 제어 기능은 **제어권 획득 후** 실행 가능 (섹션 9.3 참조)
+>
+> **\*\*원격제어 모드 주의**: 가상 조작반을 통한 직접 제어는 **제어권 + 원격제어 인터록 조건** 모두 충족 필요. 현장 작업자 조작 감지 시 자동 잠금 (섹션 9.3.4 참조)
 
 ---
 
@@ -377,7 +399,8 @@ FANUC CNC 자동선반을 웹 기반으로 모니터링하고 제한적 원격 �
 - **책임 범위**:
   - FOCAS2 라이브러리를 통한 CNC 직접 통신
   - 실시간 데이터 수집 (좌표, 모달, 알람, 카운터 등)
-  - PMC 신호 읽기/쓰기
+  - PMC 신호 읽기/쓰기 및 원격 조작반 명령 처리
+  - **스케줄러 순차 실행 로직** (Cycle Start, M20 감지, 다음 프로그램 등록)
   - 템플릿 기반 데이터 추상화
   - MQTT를 통한 Server 통신
   - **로컬 캐싱을 통한 오프라인 동작 지원**
@@ -416,7 +439,53 @@ Server 연결 시도
 **캐시 정책**:
 - 캐시 유효기간: 무제한 (버전 기반 갱신)
 - Server 복구 시: 자동으로 버전 체크 후 필요 시 갱신
-- 오프라인 모드: 모니터링만 가능, 명령 전송 불가 (Server 경유 필요)
+
+#### 오프라인 모드 정책 (Fail-Closed)
+
+**정의**: Server 다운 또는 미연결 상태에서 Agent의 동작 범위
+
+**허용 기능** (Server 연결 불필요):
+| 기능 | 설명 |
+|------|------|
+| 실시간 모니터링 | FOCAS를 통한 장비 상태/좌표/알람 수집 |
+| 로컬 데이터 캐시 | 수집 데이터 로컬 저장 (Server 복구 시 동기화) |
+| 알람 로깅 | 발생 알람 로컬 기록 |
+
+**차단 기능** (Server 연결 필수 - Fail-Closed):
+| 기능 | 사유 |
+|------|------|
+| 원격 제어 | 제어권 검증 불가 (Redis 접근 필요) |
+| 스케줄러 실행 | 명령 승인 및 상태 동기화 불가 |
+| 명령 실행 | Server 경유 필수 (감사 로그, 권한 검증) |
+| Transfer | 파일 저장소 접근 불가 |
+
+**동작 흐름**:
+```
+Server 연결 끊김 감지
+        │
+        ▼
+┌─────────────────────────────────────────┐
+│ 오프라인 모드 진입                        │
+│ ─────────────────────────────────────── │
+│ ✓ 모니터링 계속 (로컬 캐시에 저장)       │
+│ ✗ 원격 제어 차단                         │
+│ ✗ 스케줄러 차단 (진행 중이면 일시정지)    │
+│ ✗ 명령 실행 차단                         │
+└─────────────────────────────────────────┘
+        │
+   [Server 복구]
+        │
+        ▼
+┌─────────────────────────────────────────┐
+│ 온라인 모드 복귀                          │
+│ ─────────────────────────────────────── │
+│ 1. 캐시 데이터 동기화 (Server로 전송)    │
+│ 2. 템플릿 버전 체크 및 갱신              │
+│ 3. 제어 기능 활성화                      │
+└─────────────────────────────────────────┘
+```
+
+**예외 운영절차**: 추후 Phase에서 정의 (예: 로컬 비상 제어 모드)
 
 #### CNC Controller
 - FANUC CNC 컨트롤러
@@ -529,6 +598,466 @@ system/broadcast                 # 전체 브로드캐스트
 | command | 1 | 명령은 최소 1회 전달 보장 |
 | response | 1 | 응답 유실 방지 |
 | alarm | 2 | 알람은 정확히 1회 전달 |
+
+#### 2.4.4 Agent↔Server 명령/응답 프로토콜
+
+**통신 방식**: MQTT 비동기 요청/응답
+
+**correlation_id 기반 매칭**:
+- Server가 명령 전송 시 고유 `correlation_id` 생성
+- Agent는 응답 시 동일 `correlation_id` 포함
+- Server는 `correlation_id`로 요청-응답 매칭
+
+**2단계 응답 구조**:
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ Server                              Agent                           │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  [1] Command 전송 ─────────────────────────────────────────────────▶│
+│      (QoS 1)                                                        │
+│      {                                                              │
+│        correlationId: "uuid-xxx",                                   │
+│        command: "CYCLE_START",                                      │
+│        machineId: "MC-001",                                         │
+│        params: {...},                                               │
+│        timestamp: "..."                                             │
+│      }                                                              │
+│                                                                     │
+│  [2] RECEIVED 응답 ◀───────────────────────────────────────────────│
+│      (QoS 1, 수신 ACK)                                              │
+│      {                                                              │
+│        correlationId: "uuid-xxx",                                   │
+│        phase: "RECEIVED",                                           │
+│        status: "OK",                                                │
+│        timestamp: "..."                                             │
+│      }                                                              │
+│                                                                     │
+│  [3] RESULT 응답 ◀─────────────────────────────────────────────────│
+│      (QoS 1, 실행 결과)                                             │
+│      {                                                              │
+│        correlationId: "uuid-xxx",                                   │
+│        phase: "RESULT",                                             │
+│        status: "SUCCESS" | "FAILURE",                               │
+│        error?: { code, message },                                   │
+│        data?: {...},                                                │
+│        timestamp: "..."                                             │
+│      }                                                              │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**메시지 스키마**:
+```typescript
+// 명령 메시지 (Server → Agent)
+interface CommandMessage {
+  correlationId: string;          // UUID, Server 생성
+  command: CommandType;           // 명령 종류
+  machineId: string;
+  params?: Record<string, any>;   // 명령별 파라미터
+  timestamp: string;              // ISO 8601
+}
+
+// 응답 메시지 (Agent → Server)
+interface ResponseMessage {
+  correlationId: string;          // 요청의 correlationId와 동일
+  phase: 'RECEIVED' | 'RESULT';   // 응답 단계
+  status: 'OK' | 'SUCCESS' | 'FAILURE';
+  error?: {
+    code: string;                 // 에러 코드
+    message: string;              // 에러 메시지
+  };
+  data?: Record<string, any>;     // 실행 결과 데이터
+  timestamp: string;
+}
+
+// 명령 종류
+type CommandType =
+  | 'CYCLE_START'                 // 사이클 스타트
+  | 'FEED_HOLD'                   // 피드 홀드
+  | 'RESET'                       // 리셋
+  | 'MODE_CHANGE'                 // 모드 변경
+  | 'PMC_WRITE'                   // PMC 쓰기
+  | 'PROGRAM_SELECT'              // 프로그램 선택
+  | 'OVERRIDE_SET'                // 오버라이드 설정
+  | 'SCHEDULER_START'             // 스케줄러 시작
+  | 'SCHEDULER_STOP';             // 스케줄러 정지
+```
+
+**타임아웃 정책**:
+| 단계 | 타임아웃 | 설명 |
+|------|----------|------|
+| RECEIVED | 1초 | 수신 확인 (Agent 응답성 검증) |
+| RESULT | 5초 (설정 가능) | 실행 완료 대기 |
+
+**타임아웃 흐름**:
+```
+Command 전송
+     │
+     ├─ [1초 내 RECEIVED 없음] ─────▶ 통신 오류 처리
+     │                               (Agent 오프라인 또는 네트워크 문제)
+     │
+     ├─ [RECEIVED 수신] ────────────▶ RESULT 대기 시작
+     │       │
+     │       ├─ [5초 내 RESULT 없음] ─▶ 타임아웃 처리
+     │       │                         ※ 재전송 금지 (중복 실행 방지)
+     │       │                         ※ 상태 조회로 결과 확인
+     │       │
+     │       └─ [RESULT 수신] ────────▶ 완료 처리
+     │
+     └─ [RECEIVED.status = ERROR] ──▶ 즉시 실패 처리
+                                      (인터록 불충족 등)
+```
+
+**재전송 금지 정책**:
+- RESULT 타임아웃 후 **재전송 금지** (중복 실행 방지)
+- Agent가 실행을 완료했으나 응답만 유실된 경우 대비
+- **Command 상태 조회 API**로 실제 실행 결과 확인
+- 사용자에게 "실행 상태 확인 중" 표시 후 결과 안내
+
+**Command 상태 조회 API**:
+```
+GET /api/machines/{machineId}/commands/{correlationId}
+```
+
+**응답 형식**:
+```typescript
+interface CommandStatusResponse {
+  correlationId: string;
+  machineId: string;
+  command: CommandType;
+  status: 'PENDING' | 'RECEIVED' | 'SUCCESS' | 'FAILURE' | 'TIMEOUT' | 'UNKNOWN';
+  createdAt: string;          // 명령 생성 시각
+  receivedAt?: string;        // Agent 수신 확인 시각
+  completedAt?: string;       // 실행 완료 시각
+  error?: {
+    code: string;
+    message: string;
+  };
+  result?: Record<string, any>;
+}
+```
+
+**상태 정의**:
+| 상태 | 설명 |
+|------|------|
+| `PENDING` | 명령 전송됨, Agent 수신 대기 중 |
+| `RECEIVED` | Agent가 수신 확인 (RECEIVED 응답), 실행 대기 중 |
+| `SUCCESS` | 실행 완료 (성공) |
+| `FAILURE` | 실행 실패 |
+| `TIMEOUT` | RESULT 타임아웃 (Agent 응답 없음) |
+| `UNKNOWN` | 해당 correlationId 없음 (만료 또는 잘못된 ID) |
+
+**사용 시나리오**:
+```
+RESULT 타임아웃 발생
+        │
+        ▼
+GET /machines/{id}/commands/{correlationId}
+        │
+        ├─ [SUCCESS] ────▶ "실행 완료" 표시 (응답만 유실)
+        ├─ [FAILURE] ────▶ 에러 메시지 표시
+        ├─ [RECEIVED] ───▶ "실행 중..." 표시, 폴링 계속
+        ├─ [TIMEOUT] ────▶ "응답 없음" 표시, 장비 상태 확인 권고
+        └─ [UNKNOWN] ────▶ "명령 이력 없음" 표시
+```
+
+**Command 로그 보존**:
+- 보존 기간: 24시간 (설정 가능)
+- 보존 위치: DB (command_logs 테이블)
+- 24시간 이후: 조회 시 `UNKNOWN` 반환
+
+**에러 코드**:
+| 코드 | 단계 | 설명 |
+|------|------|------|
+| `INTERLOCK_VIOLATION` | RECEIVED | 인터록 조건 불충족 |
+| `INVALID_COMMAND` | RECEIVED | 잘못된 명령 |
+| `MACHINE_OFFLINE` | RECEIVED | 장비 연결 끊김 |
+| `FOCAS_ERROR` | RESULT | FOCAS 통신 오류 |
+| `EXECUTION_FAILED` | RESULT | 실행 실패 |
+| `TIMEOUT` | RESULT | Agent 내부 타임아웃 |
+
+#### 2.4.5 MQTT/DB Idempotency (중복 방지)
+
+**목적**: QoS 2에서도 발생 가능한 중복 메시지 처리 및 데이터 정합성 보장
+
+**Dedupe 키 구조**:
+| 데이터 유형 | Dedupe 키 | 처리 방식 |
+|-------------|-----------|-----------|
+| Alarm 이벤트 | `eventId` + `machineId` | UPSERT (INSERT ON CONFLICT IGNORE) |
+| Command Response | `correlationId` + `machineId` | UPSERT (상태 업데이트) |
+| Command Log | `correlationId` + `machineId` | UPSERT (최신 상태로 갱신) |
+| Status Update | `machineId` + `timestamp` (초 단위) | 덮어쓰기 (최신 우선) |
+
+**구현 방식**:
+```typescript
+// Alarm 이벤트 - eventId 기반 dedupe
+interface AlarmEvent {
+  eventId: string;         // UUID, Agent 생성 (중복 방지 키)
+  machineId: string;
+  alarmNo: number;
+  alarmMsg: string;
+  occurredAt: string;
+  clearedAt?: string;
+}
+
+// DB 저장 (PostgreSQL UPSERT)
+// INSERT INTO alarms (...) VALUES (...)
+// ON CONFLICT (event_id, machine_id) DO NOTHING;
+
+// Command Response - correlationId 기반 dedupe
+interface CommandLog {
+  correlationId: string;   // 중복 방지 키
+  machineId: string;
+  command: CommandType;
+  status: CommandStatus;
+  createdAt: Date;
+  updatedAt: Date;         // 상태 변경 시 갱신
+}
+
+// DB 저장 (상태 업데이트)
+// INSERT INTO command_logs (...) VALUES (...)
+// ON CONFLICT (correlation_id, machine_id)
+// DO UPDATE SET status = EXCLUDED.status, updated_at = NOW();
+```
+
+**MQTT 수신 측 처리 흐름**:
+```
+메시지 수신
+     │
+     ▼
+Dedupe 키 추출 (eventId/correlationId + machineId)
+     │
+     ▼
+DB UPSERT 실행
+     │
+     ├─ [새 레코드] ────▶ INSERT 성공
+     │
+     └─ [중복] ──────────▶ IGNORE 또는 UPDATE (데이터 유형에 따라)
+                           ※ 에러 없이 정상 처리로 간주
+```
+
+**주의사항**:
+- `eventId`는 **Agent에서 생성** (서버에서 생성하면 중복 불가능)
+- `correlationId`는 **Server에서 생성** (명령 전송 시)
+- QoS 2라도 네트워크 재전송, Agent 재시작 등으로 중복 가능
+- **중복 메시지는 에러가 아닌 정상 케이스로 처리**
+
+### 2.5 인증 시스템 (JWT 기반)
+
+#### 2.5.1 토큰 구조
+
+**방식**: JWT (Access Token + Refresh Token)
+
+| 토큰 | 만료 시간 | 저장 위치 | 용도 |
+|------|-----------|-----------|------|
+| Access Token | 5~15분 (설정 가능) | 메모리 (JS 변수) | API 요청 인증 |
+| Refresh Token | 7~30일 (설정 가능) | HttpOnly + Secure 쿠키 | Access Token 재발급 |
+
+**Access Token Payload**:
+```typescript
+interface AccessTokenPayload {
+  sub: string;          // 사용자 ID
+  role: 'user' | 'admin' | 'as';
+  sessionId: string;    // 세션 식별자 (제어권 연동)
+  iat: number;          // 발급 시각
+  exp: number;          // 만료 시각
+}
+```
+
+**Refresh Token Payload**:
+```typescript
+interface RefreshTokenPayload {
+  sub: string;          // 사용자 ID
+  jti: string;          // 토큰 고유 ID (무효화용)
+  iat: number;
+  exp: number;
+}
+```
+
+#### 2.5.2 토큰 발급/갱신 흐름
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                           로그인 흐름                               │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Client                              Server                         │
+│     │                                   │                           │
+│     │  POST /auth/login                 │                           │
+│     │  { username, password }           │                           │
+│     │──────────────────────────────────▶│                           │
+│     │                                   │  1. 자격증명 검증         │
+│     │                                   │  2. Access Token 생성     │
+│     │                                   │  3. Refresh Token 생성    │
+│     │                                   │  4. jti를 DB에 저장       │
+│     │                                   │                           │
+│     │  200 OK                           │                           │
+│     │  { accessToken: "..." }           │                           │
+│     │  Set-Cookie: refresh=...; HttpOnly; Secure; SameSite=Strict   │
+│     │◀──────────────────────────────────│                           │
+│     │                                   │                           │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                      Access Token 갱신 흐름                         │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Client                              Server                         │
+│     │                                   │                           │
+│     │  POST /auth/refresh               │                           │
+│     │  Cookie: refresh=<old_token>      │                           │
+│     │──────────────────────────────────▶│                           │
+│     │                                   │  1. Refresh Token 검증    │
+│     │                                   │  2. jti 유효성 확인 (DB)  │
+│     │                                   │  3. 새 Access Token 생성  │
+│     │                                   │  4. Refresh Token Rotation│
+│     │                                   │     - 새 Refresh 발급     │
+│     │                                   │     - 기존 jti 무효화     │
+│     │                                   │     - 새 jti DB 저장      │
+│     │                                   │                           │
+│     │  200 OK                           │                           │
+│     │  { accessToken: "..." }           │                           │
+│     │  Set-Cookie: refresh=<new_token>; HttpOnly; Secure            │
+│     │◀──────────────────────────────────│                           │
+│     │                                   │                           │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### 2.5.3 Refresh Token Rotation
+
+**목적**: Refresh Token 탈취 시 피해 최소화
+
+**동작 방식**:
+1. `/auth/refresh` 호출 시 **새 Refresh Token 발급**
+2. **기존 Refresh Token (jti) 즉시 무효화**
+3. 새 jti를 DB에 저장
+
+**탈취 감지**:
+```
+정상 사용자가 갱신 시도 → 이미 무효화된 jti 발견
+   ↓
+해당 사용자의 모든 Refresh Token 무효화 (전체 세션 종료)
+   ↓
+재로그인 필요
+```
+
+#### 2.5.4 토큰 무효화 (Revocation)
+
+**jti 기반 무효화**:
+- DB에 `revoked_tokens` 테이블 또는 Redis에 무효화된 jti 저장
+- Refresh Token 검증 시 jti가 무효화 목록에 있으면 거부
+
+**무효화 시나리오**:
+| 시나리오 | 동작 |
+|----------|------|
+| 로그아웃 | 현재 세션의 jti 무효화 |
+| 전체 로그아웃 | 해당 사용자의 모든 jti 무효화 |
+| 비밀번호 변경 | 해당 사용자의 모든 jti 무효화 |
+| 관리자 강제 해제 | 특정 사용자의 모든 jti 무효화 |
+
+```typescript
+interface RevokedToken {
+  jti: string;
+  userId: string;
+  revokedAt: Date;
+  reason: 'logout' | 'logout_all' | 'password_change' | 'admin_revoke';
+  expireAt: Date;       // 원본 토큰 만료 시각 (이후 삭제 가능)
+}
+```
+
+#### 2.5.5 REST API 인증
+
+**헤더 형식**:
+```
+Authorization: Bearer <access_token>
+```
+
+**인증 미들웨어 흐름**:
+```
+요청 수신
+    │
+    ▼
+Authorization 헤더 확인
+    │
+    ├─ [없음] ──────────▶ 401 Unauthorized
+    │
+    ▼
+Bearer 토큰 추출
+    │
+    ▼
+JWT 서명 검증
+    │
+    ├─ [실패] ──────────▶ 401 Unauthorized (INVALID_TOKEN)
+    │
+    ▼
+만료 시각 확인
+    │
+    ├─ [만료됨] ─────────▶ 401 Unauthorized (TOKEN_EXPIRED)
+    │                      Client는 /auth/refresh 호출
+    ▼
+요청 처리 (req.user에 payload 저장)
+```
+
+#### 2.5.6 WebSocket 인증
+
+**연결 시 인증 방식 (확정)**:
+- **Refresh Token (HttpOnly 쿠키) 기반 핸드셰이크 인증**
+  - WebSocket 연결 요청 시 브라우저가 자동으로 쿠키 포함
+  - 서버는 Refresh Token 검증 후 연결 승인
+  - 연결 승인 시 서버 메모리에 사용자 정보 매핑 (connectionId → userId)
+
+**⚠️ 중요: 연결 후 토큰 메시지 전달 방식은 사용하지 않음**
+- WebSocket 메시지로 Access Token을 전달하는 방식 **금지**
+- 인증은 **핸드셰이크 시점에만** 수행 (쿠키 검증)
+- REST API: Authorization: Bearer (Access Token)
+- WebSocket: HttpOnly 쿠키 (Refresh Token)
+
+**인증 흐름**:
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        WebSocket 연결 요청                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Client                              Server                         │
+│     │                                   │                           │
+│     │  WebSocket Handshake              │                           │
+│     │  Cookie: refresh=<token>          │                           │
+│     │──────────────────────────────────▶│                           │
+│     │                                   │  1. Refresh Token 검증    │
+│     │                                   │  2. jti 유효성 확인 (DB)  │
+│     │                                   │  3. 사용자 정보 추출      │
+│     │                                   │                           │
+│     │  [검증 성공]                      │                           │
+│     │◀──────────────────────────────────│  4. 연결 승인             │
+│     │  Connection Established           │  5. connectionId 매핑     │
+│     │                                   │                           │
+│     │  [검증 실패]                      │                           │
+│     │◀──────────────────────────────────│  HTTP 401 + 연결 거부     │
+│     │  Connection Rejected              │                           │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**재연결 처리**:
+```
+WebSocket 연결 끊김 감지
+        │
+        ▼
+자동 재연결 시도 (쿠키 포함)
+        │
+        ├─ [Refresh Token 유효] ──▶ 재연결 성공
+        │
+        └─ [Refresh Token 만료] ──▶ 401 응답
+                                        │
+                                        ▼
+                                   로그인 화면 리다이렉트
+```
+
+**토큰 갱신 (REST API 경유)**:
+- Access Token 만료 임박 시 (만료 1분 전)
+- 백그라운드에서 `/auth/refresh` REST 호출
+- WebSocket 연결은 Refresh Token이 유효한 한 유지됨
 
 ---
 
@@ -714,7 +1243,7 @@ interface EquipmentTemplate {
       operationMode: PMCAddress;     // 운전 모드 (MEM/MDI/JOG 등)
       cycleRunning: PMCAddress;      // 사이클 실행 중
       alarmActive: PMCAddress;       // 알람 발생
-      programEnd: PMCAddress;        // 프로그램 종료 (M30 신호)
+      programEnd: PMCAddress;        // 프로그램 종료 (M20 신호)
       // ...
     };
 
@@ -741,6 +1270,25 @@ interface EquipmentTemplate {
     hasCAxisIndexing: boolean;
     hasYAxis: boolean;
     // ...
+  };
+
+  // 스케줄러 설정 (Scheduler 모드 전용)
+  scheduler: {
+    // One Cycle Stop 설정
+    oneCycleStopSupported: boolean;      // One Cycle Stop 신호 지원 여부
+    oneCycleStopPmcAddress?: PMCAddress; // PMC 주소 (지원 시)
+    fallbackToSingleBlock: boolean;      // 미지원 시 Single Block+M20 대체
+
+    // 카운트 이벤트 설정
+    countEvent: 'M20';                   // 카운트 증가 트리거 (M20 감지)
+    countEventPmcAddress?: PMCAddress;   // M20 감지용 PMC 주소 (옵션)
+
+    // 카운트 표시 동기화 (CNC Write-back)
+    countDisplay: {
+      macroNo: number;                   // CNC 매크로 변수 번호 (예: 500 → #500)
+      // Agent가 pcCount 변경 시 cnc_wrmacro(macroNo, pcCount) 호출
+      // CNC 화면에서 매크로 변수를 표시하여 작업자가 수량 확인
+    };
   };
 }
 
@@ -888,10 +1436,11 @@ CNC Controller
 **목적**: 프로그램 순차 실행 자동화 (자동선반)
 
 **핵심 특징**:
-- 10~20개 항목의 실행 대기열
-- 위에서 아래로 순차 실행
-- 사이클 완료 감지 (FOCAS M30 신호)
-- 인터록 위반 시 자동 정지
+- **순차 실행 대기열**: 10~20개 항목을 1번부터 차례대로 실행
+- **실행 모드 지원**: 설비 상태 및 설정에 따라 **Memory 모드** 또는 **DNC 모드**로 실행
+- **사이클 완료 감지**: FOCAS M20(프로그램 종료) 신호를 감지하여 다음 항목으로 전환
+- **인터록 위반 시 자동 정지**: 안전 조건 위반 시 즉시 중단
+- **작업 완료 알림**: 대기열의 모든 프로그램이 완료되면 사용자에게 알림 후 종료
 
 ### 6.2 FOCAS 통신 지속성 정책 (화면 전환과 무관)
 
@@ -963,12 +1512,255 @@ CNC Controller
 | Status | 상태 (Ready, Running, Completed, Error) |
 | X (Delete) | 행 삭제 버튼 |
 
-**삭제 행위 (Row Deletion)**:
-- 사용자가 `X` 버튼을 클릭하면 해당 행(Row)을 대기열에서 **즉시 제거**
-- 제거된 자리는 **하단의 행들이 위로 이동**하며 자동으로 채움
-- 실행 중인 행이 삭제되는 경우, 스케줄러는 즉시 중단되거나 다음 행으로 넘어가는 정책에 따름 (기본은 안전을 위해 정지)
+**삭제/수정 정책 (확정)**:
+
+| 상태 | 삭제 | 수정 | 서버 응답 |
+|------|------|------|-----------|
+| `Ready` (대기) | ✅ 가능 | ✅ 가능 | 200 OK |
+| `Running` (실행 중) | ❌ **불가** | ❌ **불가** | **409 Conflict** |
+| `Completed` (완료) | ✅ 가능 | ✅ 가능 | 200 OK |
+| `Error` (에러) | ✅ 가능 | ✅ 가능 | 200 OK |
+
+**Running 행 보호**:
+```typescript
+// API: DELETE /api/scheduler/{machineId}/items/{itemId}
+// API: PATCH /api/scheduler/{machineId}/items/{itemId}
+
+// 서버 검증 로직
+if (item.status === 'Running') {
+  return {
+    status: 409,
+    error: {
+      code: 'SCHEDULER_ITEM_RUNNING',
+      message: '실행 중인 항목은 삭제/수정할 수 없습니다. 정지 후 시도하세요.'
+    }
+  };
+}
+```
+
+**Auto-Pull 동작 (자동 당김)**:
+- 삭제 시 아래 행들이 **자동으로 위로 이동**하여 빈 자리 채움
+- 순서(order) 값 자동 재정렬
+
+```
+삭제 전:
+┌──────┬────────┬────────┐
+│ #1   │ O0001  │ Ready  │  ← 삭제 대상
+│ #2   │ O0002  │ Ready  │
+│ #3   │ O0003  │ Ready  │
+└──────┴────────┴────────┘
+
+삭제 후 (Auto-Pull):
+┌──────┬────────┬────────┐
+│ #1   │ O0002  │ Ready  │  ← 자동으로 올라옴
+│ #2   │ O0003  │ Ready  │  ← 자동으로 올라옴
+└──────┴────────┴────────┘
+```
+
+**UI 동작**:
+- `X` 버튼 클릭 시 확인 팝업 표시
+- Running 상태 항목: `X` 버튼 **비활성화** (disabled) 또는 숨김
+- 삭제 완료 후 테이블 자동 갱신
 
 ### 6.4 스케줄러 실행 흐름
+
+#### 6.4.1 실행 및 정지 시퀀스 (One Cycle Stop 적용)
+
+**정지 매커니즘 (One Cycle Stop)**:
+- 사용자가 [정지] 버튼을 누르면 즉시 멈추지 않고 **"현재 가공 중인 제품 1개를 완료하고"** 정지함.
+- 장비가 `M20` (Cycle End)에 도달하면 자동으로 정지 상태가 됨.
+
+**⚠️ 구현 순서 (우선순위 기반 - 확정)**:
+
+| 우선순위 | 방식 | 조건 | 설명 |
+|----------|------|------|------|
+| **1순위** | One Cycle Stop 신호 제어 | PMC/FOCAS로 제어 가능 시 | 장비의 One Cycle Stop 기능 직접 사용 |
+| **2순위** | Single Block + M20 대기 | 1순위 불가 시 | Single Block 모드 ON → M20 대기 |
+| **3순위 (금지)** | ❌ Force Stop | - | **사용 금지** (안전 문제) |
+
+**1순위: One Cycle Stop 신호 제어**
+```
+정지 요청
+    │
+    ▼
+PMC 'One Cycle Stop' 신호 ON (FOCAS cnc_wrpmcrng)
+    │
+    ▼
+장비가 현재 사이클 완료 후 자동 정지
+    │
+    ▼
+M20 감지 → 스케줄러 일시정지 상태로 전환
+```
+
+**2순위: Single Block + M20 대기 (Fallback)**
+```
+정지 요청 (One Cycle Stop 불가)
+    │
+    ▼
+Single Block 모드 ON (FOCAS)
+    │
+    ▼
+M20 도달 대기 (블록 단위 실행)
+    │
+    ▼
+M20 감지 → Single Block OFF → 스케줄러 일시정지
+```
+
+**3순위: Force Stop (금지)**
+- **Reset**, **Feed Hold 후 Reset** 등 즉시 정지 명령은 **사용 금지**
+- 가공 중 강제 정지는 공구 파손, 제품 불량, 장비 손상 위험
+- 비상 상황은 **현장 비상정지 버튼** 사용 (원격 제어 범위 외)
+
+**구현 시 장비별 확인 필요**:
+```typescript
+// Template에서 Scheduler 관련 설정 정의 (섹션 4.2 참조)
+interface SchedulerConfig {
+  // One Cycle Stop 설정
+  oneCycleStopSupported: boolean;      // 1순위 사용 가능 여부
+  oneCycleStopPmcAddress?: PMCAddress; // PMC 주소 (지원 시)
+  fallbackToSingleBlock: boolean;      // 2순위 Fallback 사용
+
+  // 카운트 이벤트 설정 (Scheduler 모드용)
+  countEvent: 'M20';                   // 카운트 증가 이벤트 (M20 감지)
+
+  // 카운트 표시 동기화 설정
+  countDisplay: {
+    macroNo: number;                   // CNC 매크로 변수 번호 (예: 500 → #500)
+    // Agent가 pcCount 변경 시 cnc_wrmacro(macroNo, pcCount) 호출
+  };
+}
+```
+
+#### 6.4.2 카운터 정책 (Normal / Scheduler 분리)
+
+**목표**: Scheduler 사용 시 CNC 내장 Parts Counter의 `[Part count up]` 알람 유발을 회피
+
+**카운트 모드 비교**:
+
+| 구분 | Normal 모드 | Scheduler 모드 |
+|------|-------------|----------------|
+| **SoT (Source of Truth)** | CNC (내장 카운터) | PC (Agent) |
+| **카운트 주체** | CNC 자체 | Agent가 직접 관리 |
+| **카운트 이벤트** | CNC 내장 로직 | M20 감지 시 pcCount++ |
+| **CNC Write-back** | ❌ 없음 | ✅ 매크로 변수에 동기화 |
+| **CNC Parts Counter** | 사용 | **사용 안 함** (OFF) |
+| **알람 위험** | 없음 | 회피됨 |
+
+---
+
+##### 6.4.2.1 Normal 모드 (비스케줄러)
+
+**정책**: CNC 내장 카운터/사이클타임 값을 **읽기 전용**으로 표시
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Normal 모드 카운트                           │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  CNC Controller                         Agent / Server              │
+│  (SoT = CNC)                                                        │
+│     │                                       │                       │
+│     │  Parts Counter 값                     │                       │
+│     │  cnc_rdparam() 또는 PMC 읽기          │                       │
+│     │──────────────────────────────────────▶│                       │
+│     │                                       │  화면 표시만           │
+│     │  Cycle Time 값                        │  (Write-back 없음)     │
+│     │  cnc_rdparam() 또는 PMC 읽기          │                       │
+│     │──────────────────────────────────────▶│                       │
+│     │                                       │                       │
+│     │        ※ Agent는 CNC 값을 수정하지 않음                      │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**동작**:
+- Agent는 CNC 내장 Parts Counter 값을 FOCAS로 읽어 표시
+- CNC가 자체적으로 카운트 관리 (M20, M02 등에서 증가)
+- Agent는 **읽기 전용** — CNC에 카운트 값을 쓰지 않음
+
+---
+
+##### 6.4.2.2 Scheduler 모드 (PC-side Counting)
+
+**정책**: SoT = PC(Agent), CNC 내장 Parts Counter **사용 안 함**
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                      Scheduler 모드 카운트                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  CNC Controller                         Agent (SoT = PC)            │
+│     │                                       │                       │
+│     │  M20 신호 감지                        │                       │
+│     │  (PMC 또는 FOCAS 상태)                │                       │
+│     │──────────────────────────────────────▶│                       │
+│     │                                       │  pcCount++             │
+│     │                                       │  DB/메모리 저장        │
+│     │                                       │                       │
+│     │  cnc_wrmacro(#macroNo, pcCount)       │                       │
+│     │◀──────────────────────────────────────│                       │
+│     │                                       │  CNC 표시용 동기화     │
+│     │  CNC 화면에서 매크로 변수 표시        │                       │
+│     │  (작업자가 수량 확인 가능)            │                       │
+│     │                                       │                       │
+│     │        ※ CNC Parts Counter는 OFF 유지                        │
+│     │        ※ [Part count up] 알람 회피                           │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**카운트 이벤트**:
+- **M20 감지**: Agent가 FOCAS/PMC로 M20 신호 감지 시 `pcCount++`
+- 감지 방식: PMC 신호 또는 `cnc_statinfo`의 프로그램 종료 상태
+
+**CNC 표시 동기화 (Write-back)**:
+```typescript
+// Agent에서 pcCount 변경 시마다 실행
+async function syncCountToMacro(handle: number, pcCount: number): Promise<void> {
+  const macroNo = template.scheduler.countDisplay.macroNo;  // Template에서 가져옴
+
+  // FOCAS cnc_wrmacro로 CNC 매크로 변수에 pcCount 쓰기
+  await focas.cnc_wrmacro(handle, macroNo, 10, pcCount);  // 10 = double 타입
+
+  // CNC 화면에서 해당 매크로 변수(#macroNo)를 표시하도록 설정
+  // 작업자가 현재 생산 수량 확인 가능
+}
+```
+
+**목표 수량 판단**:
+- Agent가 `pcCount >= targetCount` 확인 시 다음 스케줄러 항목으로 전환
+- CNC의 Parts Counter 비교 로직은 사용 안 함
+
+---
+
+##### 6.4.2.3 CNC Parts Counter 알람 회피
+
+**문제 상황**:
+- CNC 내장 Parts Counter가 활성화된 상태에서 외부(PC)가 카운트를 관리하면
+- CNC가 예상과 다른 카운트 증가를 감지하여 `[Part count up]` 알람 발생 가능
+
+**해결책**:
+- **Scheduler 모드에서는 CNC Parts Counter 기능을 OFF**
+- 카운트 SoT를 PC(Agent)로 일원화
+- CNC 표시는 매크로 변수를 통한 간접 표시로 대체
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ 모드별 Parts Counter 설정                                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Normal 모드:                                                       │
+│  └─ CNC Parts Counter: ON (CNC가 자체 관리)                        │
+│                                                                     │
+│  Scheduler 모드:                                                    │
+│  └─ CNC Parts Counter: OFF (Agent가 관리, 알람 회피)               │
+│  └─ 표시: 매크로 변수(#macroNo)로 pcCount 동기화                   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.4.3 (참고) 실행 흐름도
+
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -988,37 +1780,34 @@ CNC Controller
                           ▼                    ▼
 ┌─────────────────────────────┐    ┌─────────────────────────────────┐
 │  2. 첫 번째 항목 실행        │    │  스케줄러 시작 거부              │
-│  - Main PGM 선택            │    │  - 불충족 조건 표시              │
-│  - FOCAS 사이클 스타트      │    │  - 사용자에게 알림               │
+│  - Main/Sub PGM 등록        │    │  - 불충족 조건 표시              │
+│  - FOCAS 사이클 스타트 수행  │    │  - 사용자에게 알림               │
 └─────────────────────────────┘    └─────────────────────────────────┘
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    3. 사이클 실행 모니터링                           │
 │              - 인터록 조건 지속 감시 (200ms 주기)                    │
-│              - 사이클 완료 신호 대기 (M30)                           │
+│              - 사이클 완료 신호 대기 (FOCAS M20)                     │
 └─────────────────────────────────────────────────────────────────────┘
            │                    │                    │
-     [사이클 완료]        [인터록 위반]          [정지 요청]
+     [M20 감지/완료]       [인터록 위반]          [정지 요청]
            │                    │                    │
            ▼                    ▼                    ▼
 ┌─────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐
-│ 4. COUNT 증가   │  │ 원격 제어 시퀀스 중단 │  │ 1사이클 완료 후 정지│
-│ PRESET 도달?    │  │ (인터록 위반 발생)  │  │ (수동 중지)         │
+│ 4. 완료 상태 표시 │  │ 원격 제어 시퀀스 중단 │  │ 1사이클 완료 후 정지│
+│    COUNT 증가     │  │ (인터록 위반 발생)  │  │ (수동 중지)         │
 └─────────────────┘  │ ───────────────     │  └─────────────────────┘
       │      │       │ **즉시 FOCAS 명령**   │
-   [Yes]  [No]       │ **전송 중단**         │
+    [계속] [리스트완료]│ **전송 중단**         │
       │      │       │ - 원격 조작 불가 상태 │
       ▼      └─────────────┐ - 현장 조작 우선권 전환 │
 ┌─────────────────┐        │ - 알람 기록/사용자 알림│
-│ 5. 다음 항목으로│        │ └─────────────────────┘
-│ (리스트 없으면  │        │
-│  스케줄러 종료) │        │
-└─────────────────┘        │
-      │                    │
-      └────────────────────┤
-                           ▼
-                    [3번으로 반복]
+│ 5. 다음 항목 실행│        │ └─────────────────────┘
+│ (PGM 등록/스타트)│  ┌───────────────┐
+└─────────────────┘  │ 6. 작업종료알림 │
+      │              └───────────────┘
+      └────────────────────┘
 ```
 
 ### 6.5 스케줄러 제어 버튼
@@ -1026,7 +1815,7 @@ CNC Controller
 | 버튼 | 동작 | 비고 |
 |------|------|------|
 | 시작 | 스케줄러 실행 시작 | 인터록 확인 후 실행 |
-| 정지 | 현재 사이클 완료 후 정지 | FOCAS 1사이클 정지 신호 |
+| 정지 | **One Cycle Stop** 실행 | 현재 가공 완료 후 정지 (FOCAS 제어) |
 | 리셋 | 대기열 전체 초기화 | 확인 팝업 후 실행 |
 | 삭제 | 선택 항목 삭제 | 항상 표시, 확인 팝업 |
 
@@ -1058,9 +1847,12 @@ CNC Controller
 > **기술 검증 포인트**: '가동 중 백업 허용 범위'는 FANUC/FOCAS 지원 범위를 확인한 후, 문제가 없으면 허용 (검증 필요)
 
 **동시 동작 시 주의사항**:
-- 대부분의 Transfer 작업은 읽기 동작이므로 스케줄러와 병행 가능
-- 프로그램 INPUT(서버→CNC) 시에는 실행 중인 프로그램과 다른 번호여야 함
-- 구현 시 FOCAS API 동시 호출 테스트 필요
+- 스케줄러와 Transfer 기능은 병렬로 수행 가능 (Multi-threaded Agent)
+- 프로그램 INPUT(서버→CNC) 시에는 **실행 중이지 않은** 프로그램 번호 사용 필수
+- **Transfer 및 백업 제한 정책**:
+  - `가동 중`: 백업(읽기)만 허용 (검증 후 제한적 허용)
+  - `정지 중`: 모든 Transfer 작업 허용
+  - ※ 구현 시 FOCAS API의 동시 호출 안정성을 반드시 사전 검증(Checklist) 후 적용
 
 ### 7.2 Transfer 기능 구성
 
@@ -1109,9 +1901,9 @@ interface TransferSettings {
 - 원격에서 잘못된 복원 시 장비 손상 또는 안전 문제 발생 가능
 - 현장 담당자가 직접 장비 상태를 확인한 후 수행해야 함
 
-**복원 가능 방법**:
-- Agent가 설치된 로컬 PC에서 직접 실행
-- 또는 현장에서 CNC 컨트롤러 직접 조작
+**복원 가능 방법 (확정)**:
+- Agent가 설치된 로컬 PC에서 직접 실행 (Console App)
+- 또는 현장에서 CNC 컨트롤러 직접 조작 (Memory Card 등)
 
 **원격에서 가능한 작업**:
 | 작업 | 원격 가능 | 비고 |
@@ -1342,9 +2134,69 @@ interface InterlockCheck {
 }
 ```
 
-#### 9.2.2 명령 검증 체인
+**인터록 평가 책임 분리 (Authoritative Agent)**:
+
+| 구분 | Server | Agent |
+|------|--------|-------|
+| **역할** | 사전 검증 (정책/권한) | **최종 평가 (Authoritative)** |
+| **검증 항목** | 인증, 권한, 제어권, 명령 유효성 | **안전 인터록 조건 (PMC 실시간)** |
+| **인터록 데이터** | UI 표시용 캐시 (참고용) | 실시간 PMC 읽기 (판단 근거) |
+| **실행 승인** | 정책적 허용 여부만 판단 | **안전 기반 최종 승인** |
+
+**핵심 원칙**:
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ ⚠️ Server는 안전 인터록을 근거로 실행을 "허용"하는 판단을 하지 않는다 │
+│                                                                     │
+│ - Server의 인터록 캐시는 UI 표시 전용                               │
+│ - 실행 승인 근거로 사용 금지 (네트워크 지연, 캐시 불일치 위험)       │
+│ - Agent만이 실시간 PMC 상태를 읽고 최종 판단                        │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**인터록 거부 응답 (Agent → Server)**:
+```typescript
+// Agent가 인터록 불충족으로 거부 시 응답
+{
+  correlationId: "uuid-xxx",
+  phase: "RECEIVED",              // 즉시 거부 (실행 전)
+  status: "REJECTED",
+  error: {
+    code: "INTERLOCK_BLOCKED",
+    message: "인터록 조건 불충족",
+    subcode: "DOOR_OPEN",         // 구체적 불충족 조건
+    blockedBy: ["doorClosed"],    // 불충족 조건 목록
+    interlockState: {             // 현재 인터록 상태 전체
+      doorClosed: false,
+      chuckClamped: true,
+      spindleStopped: true,
+      remoteEnabled: true
+    }
+  },
+  timestamp: "..."
+}
+```
+
+**인터록 subcode 목록**:
+| subcode | 설명 |
+|---------|------|
+| `DOOR_OPEN` | 안전 도어 열림 |
+| `CHUCK_UNCLAMPED` | 척 클램프 해제 |
+| `SPINDLE_RUNNING` | 스핀들 회전 중 |
+| `REMOTE_DISABLED` | 원격 허용 스위치 OFF |
+| `LOCAL_OPERATION` | 현장 조작 감지 |
+| `EMERGENCY_STOP` | 비상정지 활성화 |
+| `MULTIPLE_CONDITIONS` | 복수 조건 불충족 |
+
+#### 9.2.2 명령 검증 체인 (Server-Agent 분리)
+
 ```
 사용자 명령 요청
+       │
+       ▼
+══════════════════════════════════════════════════════════════════════
+                         [ Server 사전 검증 ]
+══════════════════════════════════════════════════════════════════════
        │
        ▼
 ┌──────────────────┐
@@ -1358,19 +2210,46 @@ interface InterlockCheck {
        │
        ▼
 ┌──────────────────┐
-│ 3. 명령 유효성   │  → 실패 시: 400 Bad Request
+│ 3. 제어권 확인   │  → 실패 시: 409 CONTROL_LOCKED
 └──────────────────┘
        │
        ▼
 ┌──────────────────┐
-│ 4. 인터록 확인   │  → 실패 시: 409 Conflict + 상세 사유
+│ 4. 명령 유효성   │  → 실패 시: 400 Bad Request
 └──────────────────┘
        │
        ▼
 ┌──────────────────┐
-│ 5. 명령 실행     │
+│ 5. Agent로 전송  │  → MQTT command (QoS 1)
+└──────────────────┘
+       │
+       ▼
+══════════════════════════════════════════════════════════════════════
+                      [ Agent 최종 검증 + 실행 ]
+══════════════════════════════════════════════════════════════════════
+       │
+       ▼
+┌──────────────────┐
+│ 6. 인터록 확인   │  → 실패 시: REJECTED + INTERLOCK_BLOCKED
+│   (Authoritative)│     (subcode + blockedBy 포함)
+└──────────────────┘
+       │
+       ▼
+┌──────────────────┐
+│ 7. FOCAS 실행    │  → 실패 시: RESULT + FAILURE
+└──────────────────┘
+       │
+       ▼
+┌──────────────────┐
+│ 8. 결과 응답     │  → RESULT + SUCCESS
 └──────────────────┘
 ```
+
+**Server 인터록 캐시 정책**:
+- Agent가 주기적으로 전송하는 `status` 메시지에서 인터록 상태 수신
+- **UI 표시 전용**으로만 사용 (사용자에게 현재 상태 안내)
+- 실행 승인 판단에 **절대 사용 금지**
+- 캐시 갱신 주기: Agent status 수신 시 (200ms)
 
 #### 9.2.3 실패 대응 전략
 
@@ -1399,30 +2278,441 @@ interface AuditLog {
 
 제어 명령, 설정 변경, **제어권 획득/반납** 이력이 감사 로그에 기록됨
 
-### 9.3 제어권 (원격제어 허가) 정책
+### 9.3 원격 제어 및 제어권 정책
 
-**목적**: 다중 관리자 접속 환경에서 동시 제어로 인한 장비 오동작 및 데이터 충돌 방지
+**목적**: 원격 조작의 안전성을 확보하고 다중 관리자 접속 환경에서 제어 충돌을 방지
 
-#### 9.3.1 기본 원칙
+#### 9.3.1 원격 제어 모듈 구성
+
+원격 제어는 크게 두 가지 영역으로 구분되어 서비스됨:
+
+1. **원격 제어 모듈 (Remote Control Module)**
+   - **NC 옵셋 조작**: 툴 옵셋(Tool Offset), 워크 옵셋(Work Offset) 데이터 읽기 및 쓰기
+   - **조작반 제어 (Soft Panel)**: CNC 모드(EDIT, MEM, MDI, JOG, REF 등) 선택 및 주요 버튼(SINGLE BLOCK, FEED HOLD 등) 제어
+   - **카메라 제어**: 현장 상황 모니터링용 카메라 ON/OFF 및 화면 연동 (향후 확장 예정)
+
+2. **스케줄러 (Scheduler Module)**
+   - **순차 실행**: 프로그램 번호 및 목표 수량을 미리 리스트업하고 순차적으로 실행
+   - **모드 전환**: 장비 및 작업 특성에 맞게 Memory 실행 또는 DNC 실행 방식으로 동작
+   - **자동화 시퀀스**: 프로그램 등록 -> 사이클 스타트 -> 완료 감지 -> 다음 항목 진행으로 이어지는 무인 자동화 워크플로우 지원
+
+#### 9.3.2 원격제어 모드 화면 구성
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│ 원격제어 모드                           [현재 제어자: admin01] [제어 종료]      │
+├─────────────────────────────────────────┬───────────────────────────────────────┤
+│                                         │                                       │
+│  ┌─ 장비 상세 정보 (좌측) ────────────┐ │  ┌─ 가상 조작반 (우측) ─────────────┐ │
+│  │                                    │ │  │                                  │ │
+│  │  [현재 프로그램]                   │ │  │  ┌─ 모드 선택 ─────────────────┐ │ │
+│  │  O0001 (MAIN)  N00150              │ │  │  │ [EDIT] [MEM] [MDI]          │ │ │
+│  │  G01 X50.0 Z-30.0 F0.2             │ │  │  │ [JOG]  [REF] [HANDLE]       │ │ │
+│  │                                    │ │  │  └─────────────────────────────┘ │ │
+│  │  [좌표계]                          │ │  │                                  │ │
+│  │  ┌───────┬─────────┬─────────┐    │ │  │  ┌─ 실행 제어 ─────────────────┐ │ │
+│  │  │       │ 절대    │ 기계    │    │ │  │  │                             │ │ │
+│  │  │ X     │ 50.000  │ 150.000 │    │ │  │  │  [CYCLE    ] [FEED  ]       │ │ │
+│  │  │ Y     │  0.000  │   0.000 │    │ │  │  │  [ START   ] [ HOLD ]       │ │ │
+│  │  │ Z     │-30.000  │  70.000 │    │ │  │  │                             │ │ │
+│  │  └───────┴─────────┴─────────┘    │ │  │  │  [SINGLE  ] [DRY   ]        │ │ │
+│  │                                    │ │  │  │  [ BLOCK  ] [ RUN  ]        │ │ │
+│  │  [스핀들]                          │ │  │  │                             │ │ │
+│  │  RPM: 3000    부하: 45%            │ │  │  └─────────────────────────────┘ │ │
+│  │                                    │ │  │                                  │ │
+│  │  [이송]                            │ │  │  ┌─ 이송 오버라이드 ───────────┐ │ │
+│  │  F: 200 mm/min  Override: 100%     │ │  │  │  ◀ [====●=====] ▶  100%    │ │ │
+│  │                                    │ │  │  └─────────────────────────────┘ │ │
+│  │  [인터록 상태]                     │ │  │                                  │ │
+│  │  ● 도어닫힘  ● 척클램프  ● 원격허용│ │  │  ┌─ 스핀들 오버라이드 ─────────┐ │ │
+│  │  ○ 현장조작중 (원격 제어 잠금)    │ │  │  │  ◀ [====●=====] ▶  100%    │ │ │
+│  │                                    │ │  │  └─────────────────────────────┘ │ │
+│  │  [알람]                            │ │  │                                  │ │
+│  │  현재 알람 없음                    │ │  │  ┌─ 비상/리셋 ─────────────────┐ │ │
+│  └────────────────────────────────────┘ │  │  │  [RESET] [ALARM CLR]        │ │ │
+│                                         │  │  └─────────────────────────────┘ │ │
+│                                         │  │                                  │ │
+│                                         │  └──────────────────────────────────┘ │
+│                                         │                                       │
+├─────────────────────────────────────────┴───────────────────────────────────────┤
+│ [원격제어 인터록 상태]  ● 원격허용 ON  ● 현장조작 OFF  ● 비상정지 OFF          │
+│ ※ 현장 작업자가 조작반을 터치하면 자동으로 원격 제어가 잠깁니다                │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 9.3.3 가상 조작반 키 구성 및 PMC 매핑
+
+가상 조작반의 각 버튼은 실제 CNC 조작반의 PMC LADDER 신호와 1:1로 매핑됨:
+
+```typescript
+interface VirtualPanelKey {
+  keyId: string;                    // 키 식별자
+  displayName: string;              // 표시명
+  keyType: 'momentary' | 'toggle' | 'selector';  // 키 타입
+  pmcOutput: PMCAddress;            // 출력할 PMC 주소 (Agent → CNC)
+  pmcFeedback?: PMCAddress;         // 피드백 PMC 주소 (CNC → Agent, 상태 확인용)
+  requiresInterlock: boolean;       // 원격제어 인터록 필요 여부
+  safetyLevel: 'normal' | 'caution' | 'critical';  // 안전 등급
+}
+
+// 가상 조작반 키 정의 (Template에서 정의)
+interface VirtualPanelConfig {
+  // 모드 선택 키 (Selector)
+  modeKeys: {
+    edit: VirtualPanelKey;          // EDIT 모드
+    memory: VirtualPanelKey;        // MEMORY (자동) 모드
+    mdi: VirtualPanelKey;           // MDI 모드
+    jog: VirtualPanelKey;           // JOG (수동) 모드
+    ref: VirtualPanelKey;           // REF (원점복귀) 모드
+    handle: VirtualPanelKey;        // HANDLE (핸들) 모드
+  };
+
+  // 실행 제어 키 (Momentary)
+  controlKeys: {
+    cycleStart: VirtualPanelKey;    // 사이클 스타트
+    feedHold: VirtualPanelKey;      // 피드 홀드
+    reset: VirtualPanelKey;         // 리셋
+    alarmClear: VirtualPanelKey;    // 알람 클리어
+  };
+
+  // 토글 키 (Toggle)
+  toggleKeys: {
+    singleBlock: VirtualPanelKey;   // 싱글 블록 ON/OFF
+    dryRun: VirtualPanelKey;        // 드라이 런 ON/OFF
+    optionalStop: VirtualPanelKey;  // 옵셔널 스톱 ON/OFF
+    blockSkip: VirtualPanelKey;     // 블록 스킵 ON/OFF
+  };
+
+  // 오버라이드 (Analog)
+  overrides: {
+    feedRate: {                     // 이송 오버라이드
+      pmcAddress: PMCAddress;
+      min: number;                  // 최소값 (예: 0)
+      max: number;                  // 최대값 (예: 200)
+      step: number;                 // 단계 (예: 10)
+    };
+    spindleRate: {                  // 스핀들 오버라이드
+      pmcAddress: PMCAddress;
+      min: number;
+      max: number;
+      step: number;
+    };
+  };
+}
+```
+
+#### 9.3.4 원격제어 전용 인터록 조건
+
+**⚠️ 중요: 현장 작업자 안전을 위한 필수 인터록**
+
+원격제어 모드는 현장 작업자와의 충돌 방지를 위해 **별도의 인터록 조건**이 필요함:
+
+```typescript
+interface RemoteControlInterlock {
+  // 원격제어 허용 조건 (모두 충족해야 원격제어 가능)
+  conditions: {
+    // [필수] 원격 허용 스위치
+    remoteEnabled: {
+      pmcAddress: PMCAddress;       // 현장 조작반의 "원격허용" 키 스위치
+      description: "현장에서 원격허용 스위치가 ON 상태";
+      required: true;               // 반드시 필요
+    };
+
+    // [필수] 현장 조작 감지
+    localOperationOff: {
+      pmcAddress: PMCAddress;       // 현장 조작반 터치 감지 신호
+      description: "현장 작업자가 조작반을 조작하지 않는 상태";
+      required: true;
+    };
+
+    // [필수] 비상정지 해제
+    emergencyStopOff: {
+      pmcAddress: PMCAddress;       // E-STOP 신호
+      description: "비상정지 버튼이 눌리지 않은 상태";
+      required: true;
+    };
+
+    // [필수] 기본 안전 인터록 (기존 인터록과 동일)
+    doorClosed: {
+      pmcAddress: PMCAddress;
+      description: "안전 도어 닫힘";
+      required: true;
+    };
+
+    // [선택] 장비별 추가 조건 (Template에서 정의)
+    customConditions: InterlockCondition[];
+  };
+
+  // 원격제어 중단 조건 (하나라도 발생하면 즉시 중단)
+  breakConditions: {
+    localOperationDetected: "현장 작업자가 조작반 터치";
+    emergencyStopPressed: "비상정지 버튼 눌림";
+    remoteDisabled: "원격허용 스위치 OFF";
+    connectionLost: "네트워크 연결 끊김";
+    heartbeatTimeout: "Heartbeat 타임아웃";
+  };
+}
+```
+
+**원격제어 인터록 동작 흐름:**
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    원격제어 모드 진입 요청                          │
+└─────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│              원격제어 인터록 조건 확인 (AND 로직)                   │
+│  ┌────────────────────────────────────────────────────────────┐    │
+│  │ ☑ 원격허용 스위치 ON (현장 조작반)                         │    │
+│  │ ☑ 현장 조작 OFF (아무도 조작반을 터치하지 않음)            │    │
+│  │ ☑ 비상정지 OFF                                             │    │
+│  │ ☑ 안전 도어 닫힘                                           │    │
+│  │ ☑ 제어권 획득 완료                                         │    │
+│  └────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────┘
+              │                              │
+        [모든 조건 충족]              [조건 불충족]
+              │                              │
+              ▼                              ▼
+┌─────────────────────────┐    ┌─────────────────────────────────────┐
+│  원격제어 모드 활성화    │    │  진입 거부 + 불충족 조건 표시        │
+│  가상 조작반 사용 가능   │    │  예: "현장에서 원격허용 스위치를     │
+└─────────────────────────┘    │       ON으로 전환해 주세요"          │
+              │                └─────────────────────────────────────┘
+              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                 원격제어 모드 실행 중 (지속 감시)                   │
+│         인터록 조건을 200ms 주기로 지속적으로 모니터링              │
+└─────────────────────────────────────────────────────────────────────┘
+              │                              │
+     [조건 유지됨]               [조건 위반 감지]
+              │                              │
+              ▼                              ▼
+┌─────────────────────────┐    ┌─────────────────────────────────────┐
+│  조작 계속 가능          │    │  즉시 원격제어 잠금                  │
+└─────────────────────────┘    │  - 진행 중인 명령 중단               │
+                               │  - "현장 작업자 조작 감지" 알림      │
+                               │  - 조건 복구 시 자동 재개 없음       │
+                               │    (재승인 필요)                     │
+                               └─────────────────────────────────────┘
+```
+
+#### 9.3.5 현장-원격 충돌 방지 정책
+
+| 상황 | 동작 | 우선순위 |
+|------|------|----------|
+| 원격제어 중 현장 작업자가 조작반 터치 | 원격제어 **즉시 잠금**, 현장 우선 | 현장 > 원격 |
+| 현장 조작 중 원격에서 제어 요청 | 요청 **거부**, "현장 조작 중" 표시 | 현장 > 원격 |
+| 원격허용 스위치 OFF로 전환 | 원격제어 **즉시 잠금** | 현장 > 원격 |
+| 비상정지 발생 | 원격제어 **즉시 잠금**, 장비 정지 | 안전 최우선 |
+| 네트워크 끊김 | 원격제어 **즉시 잠금**, 현재 상태 유지 | 안전 > 원격 |
+
+**원칙**: **현장 작업자의 안전과 조작이 항상 원격보다 우선**
+
+#### 9.3.6 PMC 직접 제어 인터페이스
+
+가상 조작반 키 입력은 FOCAS API를 통해 PMC 신호로 직접 전달됨:
+
+```typescript
+// Agent에서 PMC 쓰기 흐름
+interface PMCWriteCommand {
+  machineId: string;
+  keyId: string;                    // 가상 키 식별자
+  action: 'press' | 'release' | 'toggle' | 'setValue';
+  value?: number;                   // 오버라이드 값 등
+
+  // Agent에서 처리
+  // 1. keyId → Template의 pmcOutput 주소 조회
+  // 2. 원격제어 인터록 조건 확인
+  // 3. FOCAS cnc_wrpmcrng() 호출로 PMC 신호 출력
+  // 4. pmcFeedback 주소로 실제 동작 확인
+  // 5. 결과 응답
+}
+
+// FOCAS 함수 매핑
+// - 모드 선택: cnc_wrpmcrng() → 해당 모드 PMC 비트 ON
+// - 버튼 Press: cnc_wrpmcrng() → 해당 PMC 비트 ON
+// - 버튼 Release: cnc_wrpmcrng() → 해당 PMC 비트 OFF
+// - 오버라이드: cnc_wrpmcrng() → 해당 PMC 워드에 값 쓰기
+```
+
+#### 9.3.7 제어권 기본 원칙
 - **장비 단위(machineId) 독점 제어**: 제어권은 장비별로 단 1개만 존재
-- **선 승인 후 조작**: 제어 명령(스케줄러 시작/정지/리셋, 설정 저장 등) 실행 전에 반드시 "제어실행요청"을 통해 제어권을 먼저 획득해야 함
+- **선 승인 후 조작**: 제어 명령(옵셋 변경, 모드 전환, 스케줄러 시작 등) 실행 전에 반드시 "제어실행요청"을 통해 제어권을 먼저 획득해야 함
 - **인터록 연동**: 제어권 요청은 시스템의 모든 인터록 조건이 만족될 때만 승인됨
 
-#### 9.3.2 제어권 획득 및 표시
+#### 9.3.8 제어권 저장소 및 구현 (Redis 기반)
+
+**저장소**: Redis (TTL 기반 분산 락)
+
+**락 키 구조**:
+```
+control_lock:{machineId}
+```
+- 단일 장비 단위로 제어권 관리
+- 예: `control_lock:MC-001`, `control_lock:MC-002`
+
+**락 데이터 구조**:
+```typescript
+interface ControlLock {
+  ownerId: string;      // 제어권 보유 사용자 ID
+  sessionId: string;    // 세션 식별자 (브라우저 탭 단위)
+  acquiredAt: string;   // 획득 시각 (ISO 8601)
+  lastHeartbeat: string; // 마지막 Heartbeat 시각
+}
+```
+
+**TTL 정책**:
+| 항목 | 값 | 설명 |
+|------|-----|------|
+| 기본 TTL | 60초 | 락 자동 만료 시간 |
+| Heartbeat 주기 | 30초 | 클라이언트에서 TTL 연장 요청 |
+| Heartbeat 연장 | 60초 | 매 Heartbeat 시 TTL 리셋 |
+
+**Heartbeat 구현 상세**:
+```typescript
+// 프론트엔드 sessionId 관리
+// 탭 단위 UUID - sessionStorage에 저장 (탭 종료 시 자동 삭제)
+const getOrCreateSessionId = (): string => {
+  let sessionId = sessionStorage.getItem('controlSessionId');
+  if (!sessionId) {
+    sessionId = crypto.randomUUID();
+    sessionStorage.setItem('controlSessionId', sessionId);
+  }
+  return sessionId;
+};
+
+// Heartbeat API
+// POST /api/control-lock/{machineId}/heartbeat
+// Body: { sessionId: string }
+// Response: 200 OK | 401 Unauthorized | 403 Forbidden (세션 불일치)
+```
+
+**Heartbeat 흐름**:
+```
+제어권 획득 성공
+        │
+        ▼
+┌─────────────────────────────────────────┐
+│ Heartbeat 타이머 시작 (30초 주기)        │
+│ setInterval(sendHeartbeat, 30000)       │
+└─────────────────────────────────────────┘
+        │
+        ▼ (매 30초)
+┌─────────────────────────────────────────┐
+│ POST /control-lock/{machineId}/heartbeat│
+│ { sessionId: <탭 UUID> }                │
+└─────────────────────────────────────────┘
+        │
+        ├─ [200 OK] ────────────▶ Redis TTL 60초로 리셋
+        │
+        ├─ [403 Forbidden] ─────▶ 세션 불일치 (다른 탭/사용자)
+        │                         → 제어권 상실 처리
+        │
+        └─ [네트워크 오류] ──────▶ 재시도 (최대 2회)
+                                   → 실패 시 제어권 상실 경고
+```
+
+**서버 검증 로직**:
+```
+Heartbeat 요청 수신
+        │
+        ▼
+Redis에서 control_lock:{machineId} 조회
+        │
+        ├─ [락 없음] ────────────▶ 404 Not Found
+        │
+        ▼
+ownerId 검증 (요청자 == 락 소유자)
+        │
+        ├─ [불일치] ─────────────▶ 403 Forbidden
+        │
+        ▼
+sessionId 검증 (요청 sessionId == 락 sessionId)
+        │
+        ├─ [불일치] ─────────────▶ 403 Forbidden (세션 불일치)
+        │
+        ▼
+Redis EXPIRE 60초로 TTL 연장
+        │
+        ▼
+200 OK + lastHeartbeat 갱신
+```
+
+**락 연산 규칙**:
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ 연산       │ 조건                        │ 결과                    │
+├─────────────────────────────────────────────────────────────────────┤
+│ 획득       │ 락 없음 + 인터록 충족       │ SET + TTL 60초          │
+│ (Acquire)  │ 락 있음                     │ 거부 (현재 제어자 정보) │
+├─────────────────────────────────────────────────────────────────────┤
+│ 연장       │ ownerId + sessionId 일치    │ TTL 리셋 60초           │
+│ (Heartbeat)│ 불일치                      │ 거부                    │
+├─────────────────────────────────────────────────────────────────────┤
+│ 해제       │ ownerId + sessionId 일치    │ DEL                     │
+│ (Release)  │ 불일치                      │ 거부                    │
+├─────────────────────────────────────────────────────────────────────┤
+│ 만료       │ TTL 도달 (Heartbeat 없음)   │ 자동 삭제               │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Redis 명령 예시**:
+```redis
+# 락 획득 (NX: 없을 때만, EX: TTL)
+SET control_lock:MC-001 '{"ownerId":"admin01","sessionId":"abc123",...}' NX EX 60
+
+# 락 연장 (Lua 스크립트로 atomic 처리)
+# ownerId+sessionId 검증 후 EXPIRE
+
+# 락 해제
+# ownerId+sessionId 검증 후 DEL
+```
+
+**감사 로그 (DB 저장)**:
+```typescript
+interface ControlLockAuditLog {
+  id: string;
+  machineId: string;
+  event: 'ACQUIRED' | 'RELEASED' | 'FORCED_RELEASE' | 'EXPIRED';
+  ownerId: string;
+  sessionId: string;
+  timestamp: Date;
+  reason?: string;        // 강제 해제 시 사유
+  releasedBy?: string;    // 강제 해제한 관리자 ID
+}
+```
+- Redis에는 **현재 상태만** 저장
+- DB에는 **이벤트 로그만** 저장 (이력 추적용)
+
+**Redis 장애 대응 (Fail-Closed)**:
+```
+Redis 연결 실패 시:
+├─ 제어권 획득 → 거부 (제어 차단)
+├─ 제어 명령 실행 → 거부 (제어 차단)
+├─ Heartbeat → 무시 (기존 락 유지되지 않음)
+└─ 모니터링 → 정상 동작 (제어권 무관)
+
+※ Fail-Closed 정책: 안전을 위해 불확실한 상태에서는 제어 차단
+```
+
+#### 9.3.9 제어권 획득 및 표시
 - **획득 방법**: UI 우측 상단의 "제어실행요청" 버튼 클릭
 - **제어자 표시**:
   - 현재 제어자가 없는 경우: "제어 요청 가능" 상태 표시
   - 이미 제어자가 있는 경우: "현재 제어자: [사용자ID]" 표시 및 다른 관리자의 요청 제한
 - **승인 실패**: 인터록 조건 불충족 시 실패 사유(막고 있는 인터록 항목)를 UI에 표시
 
-#### 9.3.3 제어권 종료(반납) 조건
-1. **사용자 명시 종료**: "제어 종료" 버튼을 눌러 수동 반납
-2. **연결 해제**: 브라우저 종료, 네트워크 단절 등으로 연결이 끊긴 경우 (Heartbeat/Lease 만료 처리)
-3. **유휴 시간 초과 (Idle Timeout)**: 일정 시간(예: 5분) 동안 제어/설정 API 호출이 없는 경우 자동 종료
-   - ※ 단순 화면 이동은 조작으로 간주하지 않음 (실제 제어 API 호출 기준)
+#### 9.3.10 제어권 종료(반납) 조건
+1. **사용자 명시 종료**: "제어 종료" 버튼을 눌러 수동 반납 → Redis DEL
+2. **Heartbeat 만료**: 60초 내 Heartbeat 없음 → Redis TTL 자동 만료
+3. **연결 해제**: 브라우저 종료, 네트워크 단절 → Heartbeat 중단 → TTL 만료
+4. **강제 해제**: 상위 권한자(AS)가 강제 반납 → Redis DEL + 감사 로그
 
-#### 9.3.4 제어권과 기능 간 관계
-- **제어권 필수**: 스케줄러 조작(시작/정지/리셋/삭제), 장비 설정 변경, 명령 전송
+#### 9.3.11 제어권과 기능 간 관계
+- **제어권 필수**: 스케줄러 조작(시작/정지/리셋/삭제), 장비 설정 변경, 명령 전송, 원격제어 모드
 - **제어권 불필요**: 모니터링 조회, POP/MES 조회, Transfer(프로그램 입출력/백업)
 
 ---
@@ -1446,85 +2736,110 @@ interface AuditLog {
 | PMC 주소 정보 | 기종별 PMC 주소 문서 확보 | 중간 |
 | AS 담당자 역량 | 템플릿 생성/수정 가능한 인력 | 중간 |
 
-### 10.2 남은 검토 포인트
+### 10.2 구현 전 필수 검증 항목 (Pre-Implementation Checklist)
 
-#### 10.2.1 기술 검토 필요 항목
+**본 항목은 개발 착수 전 반드시 실장비 테스트를 통해 동작을 확정해야 하는 기술적 체크리스트임.**
 
-| 항목 | 질문 | 결정 필요 시점 |
-|------|------|----------------|
-| 인증 방식 | JWT vs Session? OAuth 연동 필요? | 개발 초기 |
-| 데이터베이스 | PostgreSQL vs MySQL? TimescaleDB 필요? | 개발 초기 |
-| 캐싱 전략 | Redis 사용 여부, 캐시 무효화 전략 | 개발 중기 |
-| 메시지 큐 | MQTT 외 추가 큐 필요? (대량 이력 저장) | 개발 중기 |
-| 파일 저장 | 로컬 vs NAS vs 클라우드 스토리지 | 개발 초기 |
+#### 10.2.1 FOCAS 기능적 한계 검증
 
-#### 10.2.2 UI/UX 검토 필요 항목
+| 검증 항목 | 질문 | 검증 방법 | 조치 계획 (Fail 시) |
+|-----------|------|-----------|------------------|
+| **가동 중 백업** | 가동(Cycle Run) 중에 `cnc_upload3`(프로그램 읽기)가 가능한가? | 가동 중 파일 업로드 시도 | "정지 상태에서만 백업 가능"으로 제한 설정 |
+| **All Backup** | SRAM 백업 (`cnc_rdsram`) 실행 시 장비 모드가 비상정지/MDI여야 하는가? | 다양한 모드에서 백업 시도 | UI에서 "비상정지 후 백업하세요" 안내 메시지 노출 |
+| **MACRO 쓰기** | 가동 중에 카운터 동기화용 `cnc_wrmacro` 쓰기가 즉시 반영되는가? | 사이클 중 매크로 값 변경 | 카운트 표시 갱신 주기 조정 (실시간성 타협) |
+| **One Cycle Stop** | PC에서 `One Cycle Stop` 제어가 가능한가? (PMC or Key) | FOCAS 키 입력 또는 PMC K비트 제어 | Single Block 예약 모드로 대체 구현 |
 
-| 항목 | 질문 | 결정 필요 시점 |
-|------|------|----------------|
-| 3D 뷰어 | 라이브러리 선정 (Three.js, Babylon.js 등) | 개발 중기 |
-| 차트 라이브러리 | Recharts vs Chart.js vs D3.js | 개발 초기 |
-| 반응형 지원 | 태블릿/모바일 지원 범위 | 개발 초기 |
-| 다국어 지원 | i18n 필요 여부 | 개발 후기 |
+> **검증 결과 기록**: 테스트 완료 후 결과를 `verification_report.md`에 기록하고 구현에 반영한다.
 
-#### 10.2.3 보안 검토 필요 항목
+### 10.3 Phase별 구현 계획 (Implementation Roadmap)
 
-| 항목 | 질문 | 결정 필요 시점 |
-|------|------|----------------|
-| 네트워크 분리 | OT/IT 네트워크 분리 전략 | 설계 시 |
-| 암호화 | 통신 암호화 범위 (MQTT TLS, HTTPS) | 개발 초기 |
-| 접근 제어 | IP 화이트리스트, VPN 필요 여부 | 배포 시 |
-| 취약점 점검 | 보안 감사 일정 | 배포 전 |
+#### Phase 1: 기반 구축 (Foundation)
+- **Tech Stack**: Node.js, TypeScript, PostgreSQL, TimescaleDB, Prisma, Redis, MQTT
+- **Core Features**:
+  - 사용자/장비 관리 및 인증 (JWT + Cookie)
+  - 기본 통신 레이어 (FOCAS Layer, MQTT Broker, WebSocket)
+  - DB 스키마 및 마이그레이션 환경 구축
+  - Docker Compose 기반 로컬 개발 환경 구성
 
-#### 10.2.4 운영 검토 필요 항목
+#### Phase 2: 핵심 모니터링 및 상태 관리
+- **Features**:
+  - 장비 실시간 상태(RUN/STOP/ALARM) 수집 및 저장
+  - 알람 이력 관리 (TimescaleDB)
+  - 대시보드 (2D 상태판)
+  - FOCAS 한계 검증 수행 (Checklist)
 
-| 항목 | 질문 | 결정 필요 시점 |
-|------|------|----------------|
-| 배포 환경 | On-premise vs 클라우드 vs 하이브리드 | 설계 시 |
-| 모니터링 | Prometheus + Grafana vs 상용 APM | 개발 후기 |
-| 백업 정책 | DB 백업 주기, 보관 기간 | 배포 시 |
-| 장애 복구 | RTO/RPO 목표, DR 전략 | 배포 시 |
+#### Phase 3: 제어 및 스케줄러 (Critical)
+- **Features**:
+  - 제어권 관리 시스템 (Redis Distributed Lock)
+  - 원격 제어 모듈 및 가상 조작반 (가상키-PMC 매핑)
+  - 스케줄러 UI 및 실행 로직 (One Cycle Stop, Counting)
+  - 안전 인터록 시스템 구현 (Authoritative Agent)
 
-### 10.3 Phase별 구현 계획 (제안)
+#### Phase 4: Transfer, POP, and Advanced
+- **Features**:
+  - NC 프로그램 입출력 (Transfer)
+  - 데이터 백업 및 관리
+  - 생산 실적 집계 (POP)
+  - 운영/감사 로그 대시보드
 
-#### Phase 1: 기반 구축
-- 프로젝트 구조 설정
-- 기본 통신 레이어 구현 (REST, WebSocket, MQTT)
-- 인증/인가 시스템
-- 기본 DB 스키마
-
-#### Phase 2: 핵심 기능
-- 실시간 모니터링 (대시보드 2D)
-- 장비 상태 표시
-- 기본 알람 관리
-- 템플릿 시스템 (1개 기종)
-
-#### Phase 3: 스케줄러
-- 스케줄러 UI
-- 인터록 시스템
-- 사이클 카운팅
-- 스케줄러 제어 로직
-
-#### Phase 4: Transfer & POP
-- 프로그램 전송 (INPUT/OUTPUT)
-- 백업 기능
-- POP 집계
-- 이력 조회
-
-#### Phase 5: 고급 기능
-- 대시보드 3D
-- MES 연계
-- 다중 템플릿
-- 성능 최적화
 
 ---
 
 ## 문서 정보
 
-- **문서 버전**: 1.5
+- **문서 버전**: 2.2
 - **작성일**: 2026-01-22
-- **최종 수정일**: 2026-01-23
-- **목적**: 설계 검증 및 아키텍처 리뷰용 (변경사항 확정본)
+- **최종 수정일**: 2026-01-25
+- **목적**: 설계 검증 및 아키텍처 리뷰용 (구현 기준 확정본)
+
+---
+
+## 버전 이력 (Changelog)
+
+### v2.3 (2026-01-25) - M30 → M20 통일
+**변경 사항**:
+- [프로그램 종료 신호] M30 → M20으로 전면 변경
+  - 설비에서 M30 미사용, 프로그램 종료/사이클 완료 이벤트는 M20으로 판단
+- [스케줄러] 사이클 완료 감지: M20 신호 기준
+- [One Cycle Stop] M20 도달 시 정지 완료
+- [카운트 이벤트] Scheduler 모드: M20 감지 시 pcCount++
+- [Template 스키마] `scheduler.countEvent`: 'M20'
+
+### v2.2 (2026-01-25) - 카운트 정책 분리
+**추가/변경된 정책**:
+- [카운트 정책] Normal/Scheduler 모드 분리
+  - Normal: SoT=CNC, CNC 내장 카운터 읽기 전용 (Write-back 없음)
+  - Scheduler: SoT=PC(Agent), M20 감지 시 pcCount++
+- [카운트 동기화] Agent가 pcCount 변경 시 cnc_wrmacro로 CNC 매크로 변수에 Write-back
+- [Template 스키마] scheduler 설정 추가
+  - `scheduler.countEvent`: 카운트 이벤트 ('M20')
+  - `scheduler.countDisplay.macroNo`: CNC 표시용 매크로 번호
+- [알람 회피] Scheduler 모드에서 CNC Parts Counter OFF → [Part count up] 알람 방지
+
+### v2.1 (2026-01-24) - 구현 기준 확정
+**추가된 정책**:
+- [오프라인 모드] Agent Fail-Closed 정책 상세화 (모니터링만 허용, 제어 차단)
+- [WebSocket 인증] HttpOnly 쿠키 핸드셰이크 인증 확정 (메시지 토큰 전달 금지)
+- [Control Lock Heartbeat] 30초 주기, sessionStorage UUID, Redis TTL 연장 상세
+- [Command 상태조회] GET /machines/{id}/commands/{correlationId} API 추가
+- [Scheduler 삭제 정책] Running 행 삭제/수정 불가 (409), auto-pull 적용
+- [MQTT/DB Idempotency] eventId/correlationId+machineId 기반 dedupe 정책
+- [One Cycle Stop] 구현 우선순위 (1:신호제어 → 2:SingleBlock+M20 → 3:ForceStop 금지)
+
+### v2.0 (2026-01-23) - 변경사항 확정본
+- JWT 인증 시스템 (Access + Refresh Token Rotation)
+- 인터록 평가 정책 (Agent Authoritative)
+- Agent-Server 명령 프로토콜 (MQTT 2-Phase)
+- 제어권 저장소 (Redis 기반)
+
+### v1.9 (2026-01-22)
+- 원격 제어 모드 및 가상 조작반 추가
+- 메뉴 접속도 상세화
+- 역할별 접근 권한 정리
+
+### v1.0 (2026-01-21) - 초기 버전
+- 4-Tier 아키텍처 정의
+- 기본 기능 명세
 - **대상 독자**: 개발팀, 프로젝트 관리자, 기술 검토자
 
 ### 변경 이력
@@ -1534,9 +2849,12 @@ interface AuditLog {
 | 1.0 | 2026-01-22 | 초안 작성 |
 | 1.1 | 2026-01-22 | 아키텍처 리뷰 반영 (인터록, 캐싱, 동시실행, API 표준 등) |
 | 1.2 | 2026-01-22 | 메뉴 접속도 및 권한표 추가 |
-| 1.3 | 2026-01-23 | 추가 확정 사항 반영 (호기 컨텍스트, 제어권 정책 등) |
-| 1.4 | 2026-01-23 | UI 레이아웃 및 안전 시퀀스 강화 |
-| 1.5 | 2026-01-23 | **바피더(Bar Feeder) 연동 제외 적용** <br> - 대상 장비 및 프로젝트 목적 수정 <br> - UI 인터록 바 및 템플릿 데이터 구조에서 바피더 관련 항목 제거 |
+| 1.5 | 2026-01-23 | 바피더(Bar Feeder) 연동 제외 적용 |
+| 1.6 | 2026-01-23 | **원격 제어 및 스케줄러 상세 정의 반영** <br> - 원격 제어 모듈 (NC 옵셋, 조작반 제어, 카메라) 세분화 <br> - 스케줄러 순차 실행 시퀀스(등록->스타트->감지->다음) 정의 <br> - 스케줄러 Memory/DNC 모드 지원 및 완료 알림 추가 |
+| 1.7 | 2026-01-23 | **원격제어 모드 상세 정의** <br> - 가상 조작반 UI 레이아웃 (2분할 화면) <br> - 가상 조작반 키 구성 및 PMC 매핑 인터페이스 <br> - 원격제어 전용 인터록 조건 정의 (현장 우선) <br> - 현장-원격 충돌 방지 정책 <br> - PMC 직접 제어(LADDER 연동) 인터페이스 |
+| 1.8 | 2026-01-23 | **제어권 저장소 확정 (Redis)** <br> - 락 키: `control_lock:{machineId}` <br> - TTL 60초 + Heartbeat 연장 방식 <br> - ownerId+sessionId 기반 권한 검증 <br> - 감사 로그 DB 저장 (이벤트만) <br> - Fail-Closed 정책 (Redis 장애 시 제어 차단) |
+| 1.9 | 2026-01-23 | **Agent↔Server 명령 프로토콜 확정** <br> - MQTT 비동기 요청/응답 + correlation_id <br> - 2단계 응답: RECEIVED(1초) + RESULT(5초) <br> - QoS 1 사용 (command/response) <br> - RESULT 타임아웃 후 재전송 금지 (상태 조회로 확인) |
+| 2.0 | 2026-01-23 | **인터록 평가 책임 확정 (Authoritative Agent)** <br> - Agent가 인터록 최종 평가 (Authoritative) <br> - Server는 정책/권한 사전 검증만 수행 <br> - Server 인터록 캐시는 UI 표시 전용 (실행 승인 근거 X) <br> - 인터록 거부: REJECTED + INTERLOCK_BLOCKED (subcode) |
 
 ---
 
