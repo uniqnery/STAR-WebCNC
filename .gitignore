@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+packages/*/node_modules/
+
+# Build outputs
+dist/
+build/
+*.exe
+*.pdb
+bin/
+obj/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Test
+coverage/
+
+# Temp
+tmp/
+temp/
+*.tmp
+
+# FOCAS Library (라이선스 정책에 따라 주석 해제)
+# libs/focas/*.dll
+# libs/focas/*.lib
