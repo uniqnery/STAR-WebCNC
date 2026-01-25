@@ -41,3 +41,6 @@ temp/
 # FOCAS Library (라이선스 정책에 따라 주석 해제)
 # libs/focas/*.dll
 # libs/focas/*.lib
+
+# Claude Code local settings
+.claude/

@@ -1,0 +1,315 @@
+// Star-WebCNC Database Schema
+// Prisma with PostgreSQL + TimescaleDB
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// User & Authentication
+// ============================================
+
+model User {
+  id            String    @id @default(uuid())
+  username      String    @unique
+  email         String    @unique
+  passwordHash  String    @map("password_hash")
+  role          UserRole  @default(USER)
+  isActive      Boolean   @default(true) @map("is_active")
+  isApproved    Boolean   @default(false) @map("is_approved")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  lastLoginAt   DateTime? @map("last_login_at")
+
+  // Relations
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+  controlLocks  ControlLockLog[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  USER    // 일반 사용자 (모니터링 전용)
+  ADMIN   // 관리자 (스케줄러, 설정 변경)
+  AS      // AS 담당자 (템플릿 관리, 전체 접근)
+}
+
+model RefreshToken {
+  id          String   @id @default(uuid())
+  jti         String   @unique // JWT ID for revocation
+  userId      String   @map("user_id")
+  expiresAt   DateTime @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  revokeReason String?  @map("revoke_reason")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([jti])
+  @@map("refresh_tokens")
+}
+
+// ============================================
+// Machine & Template
+// ============================================
+
+model Machine {
+  id           String        @id @default(uuid())
+  machineId    String        @unique @map("machine_id") // 장비 식별자 (예: MC-001)
+  name         String                                    // 표시명 (예: 1호기 자동선반)
+  templateId   String        @map("template_id")
+  ipAddress    String        @map("ip_address")
+  port         Int           @default(8193)
+  timeout      Int           @default(3000)              // ms
+  retryCount   Int           @default(3) @map("retry_count")
+  isActive     Boolean       @default(true) @map("is_active")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  // Scheduler settings
+  schedulerMode    SchedulerMode @default(MANUAL) @map("scheduler_mode")
+  maxQueueSize     Int           @default(15) @map("max_queue_size")
+
+  // Network folders
+  inputFolder      String?       @map("input_folder")
+  outputFolder     String?       @map("output_folder")
+  backupFolder     String?       @map("backup_folder")
+
+  // Relations
+  template         Template      @relation(fields: [templateId], references: [id])
+  alarms           Alarm[]
+  commandLogs      CommandLog[]
+  schedulerItems   SchedulerItem[]
+  productionLogs   ProductionLog[]
+
+  @@map("machines")
+}
+
+enum SchedulerMode {
+  MANUAL
+  AUTO
+}
+
+model Template {
+  id          String   @id @default(uuid())
+  templateId  String   @unique @map("template_id") // 예: FANUC_0iTF_v2
+  version     String                               // SemVer
+  name        String                               // 표시명
+  description String?
+  cncType     String   @map("cnc_type")            // FANUC, MITSUBISHI, etc.
+  seriesName  String   @map("series_name")         // 0i-TF, 30i-B, etc.
+
+  // PMC mapping stored as JSON
+  pmcMap      Json     @map("pmc_map")
+
+  // Interlock configuration
+  interlockConfig Json @map("interlock_config")
+
+  // Scheduler configuration
+  schedulerConfig Json @map("scheduler_config")
+
+  // Capabilities
+  capabilities Json
+
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdBy   String?  @map("created_by")
+
+  // Relations
+  machines    Machine[]
+
+  @@map("templates")
+}
+
+// ============================================
+// Scheduler
+// ============================================
+
+model SchedulerItem {
+  id          String          @id @default(uuid())
+  machineId   String          @map("machine_id")
+  order       Int                                   // 실행 순서
+  mainProgram String          @map("main_program")  // 메인 프로그램 번호
+  subProgram  String?         @map("sub_program")   // 서브 프로그램 번호
+  preset      Int                                   // 목표 수량
+  count       Int             @default(0)           // 현재 완료 수량
+  status      SchedulerStatus @default(READY)
+  startedAt   DateTime?       @map("started_at")
+  completedAt DateTime?       @map("completed_at")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@index([machineId, order])
+  @@map("scheduler_items")
+}
+
+enum SchedulerStatus {
+  READY
+  RUNNING
+  COMPLETED
+  ERROR
+  PAUSED
+}
+
+// ============================================
+// Logs & History
+// ============================================
+
+model Alarm {
+  id          String    @id @default(uuid())
+  eventId     String    @unique @map("event_id") // Agent 생성 UUID (dedupe)
+  machineId   String    @map("machine_id")
+  alarmNo     Int       @map("alarm_no")
+  alarmMsg    String    @map("alarm_msg")
+  category    String?                            // system, program, servo, pmc
+  occurredAt  DateTime  @map("occurred_at")
+  clearedAt   DateTime? @map("cleared_at")
+  duration    Int?                               // seconds
+
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@index([machineId, occurredAt])
+  @@map("alarms")
+}
+
+model CommandLog {
+  id            String        @id @default(uuid())
+  correlationId String        @unique @map("correlation_id")
+  machineId     String        @map("machine_id")
+  command       String                                        // CommandType
+  params        Json?
+  status        CommandStatus @default(PENDING)
+  errorCode     String?       @map("error_code")
+  errorMessage  String?       @map("error_message")
+  result        Json?
+  createdAt     DateTime      @default(now()) @map("created_at")
+  receivedAt    DateTime?     @map("received_at")
+  completedAt   DateTime?     @map("completed_at")
+
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@index([machineId, createdAt])
+  @@index([correlationId])
+  @@map("command_logs")
+}
+
+enum CommandStatus {
+  PENDING
+  RECEIVED
+  SUCCESS
+  FAILURE
+  TIMEOUT
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  userRole    String   @map("user_role")
+  action      String                          // 예: scheduler.start, control.request
+  targetType  String?  @map("target_type")    // machine, template, user
+  targetId    String?  @map("target_id")
+  params      Json?
+  result      String                          // success, failure
+  errorMsg    String?  @map("error_msg")
+  ipAddress   String   @map("ip_address")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}
+
+model ControlLockLog {
+  id          String   @id @default(uuid())
+  machineId   String   @map("machine_id")
+  event       String                          // ACQUIRED, RELEASED, FORCED_RELEASE, EXPIRED
+  ownerId     String   @map("owner_id")
+  sessionId   String   @map("session_id")
+  reason      String?
+  releasedBy  String?  @map("released_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [ownerId], references: [id])
+
+  @@index([machineId, createdAt])
+  @@map("control_lock_logs")
+}
+
+// ============================================
+// Production (POP)
+// ============================================
+
+model ProductionLog {
+  id          String   @id @default(uuid())
+  machineId   String   @map("machine_id")
+  programNo   String   @map("program_no")
+  startTime   DateTime @map("start_time")
+  endTime     DateTime @map("end_time")
+  cycleTime   Int      @map("cycle_time")      // seconds
+  partsCount  Int      @map("parts_count")
+  status      String                           // completed, interrupted, error
+  errorCode   String?  @map("error_code")
+
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@index([machineId, startTime])
+  @@map("production_logs")
+}
+
+// ============================================
+// Work Order (MES)
+// ============================================
+
+model WorkOrder {
+  id              String          @id @default(uuid())
+  orderNumber     String          @unique @map("order_number")
+  productCode     String          @map("product_code")
+  productName     String?         @map("product_name")
+  targetQuantity  Int             @map("target_quantity")
+  producedQty     Int             @default(0) @map("produced_qty")
+  assignedMachine String?         @map("assigned_machine")
+  programNumber   String?         @map("program_number")
+  priority        Int             @default(0)
+  status          WorkOrderStatus @default(PENDING)
+  scheduledStart  DateTime?       @map("scheduled_start")
+  scheduledEnd    DateTime?       @map("scheduled_end")
+  actualStart     DateTime?       @map("actual_start")
+  actualEnd       DateTime?       @map("actual_end")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  @@map("work_orders")
+}
+
+enum WorkOrderStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// ============================================
+// Global Settings
+// ============================================
+
+model GlobalSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by")
+
+  @@map("global_settings")
+}

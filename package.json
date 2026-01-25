@@ -1,0 +1,31 @@
+{
+  "name": "star-webcnc",
+  "version": "0.1.0",
+  "description": "CNC Smart Factory Web System for FANUC Automatic Lathes",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:web\"",
+    "dev:server": "npm -w @star-webcnc/server run dev",
+    "dev:web": "npm -w @star-webcnc/web run dev",
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "npm -w @star-webcnc/server run build",
+    "build:web": "npm -w @star-webcnc/web run build",
+    "docker:up": "docker-compose -f docker/docker-compose.yml up -d",
+    "docker:down": "docker-compose -f docker/docker-compose.yml down",
+    "docker:logs": "docker-compose -f docker/docker-compose.yml logs -f",
+    "db:migrate": "npm -w @star-webcnc/server run db:migrate",
+    "db:generate": "npm -w @star-webcnc/server run db:generate",
+    "lint": "eslint packages/*/src --ext .ts,.tsx",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
