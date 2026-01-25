@@ -2751,43 +2751,313 @@ Redis 연결 실패 시:
 
 > **검증 결과 기록**: 테스트 완료 후 결과를 `verification_report.md`에 기록하고 구현에 반영한다.
 
-### 10.3 Phase별 구현 계획 (Implementation Roadmap)
+### 10.3 개발 로드맵 및 진행 현황 (Development Roadmap)
 
-#### Phase 1: 기반 구축 (Foundation)
-- **Tech Stack**: Node.js, TypeScript, PostgreSQL, TimescaleDB, Prisma, Redis, MQTT
-- **Core Features**:
-  - 사용자/장비 관리 및 인증 (JWT + Cookie)
-  - 기본 통신 레이어 (FOCAS Layer, MQTT Broker, WebSocket)
-  - DB 스키마 및 마이그레이션 환경 구축
-  - Docker Compose 기반 로컬 개발 환경 구성
+#### 10.3.1 전체 개발 흐름도
 
-#### Phase 2: 핵심 모니터링 및 상태 관리
-- **Features**:
-  - 장비 실시간 상태(RUN/STOP/ALARM) 수집 및 저장
-  - 알람 이력 관리 (TimescaleDB)
-  - 대시보드 (2D 상태판)
-  - FOCAS 한계 검증 수행 (Checklist)
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        Star-WebCNC 개발 전체 흐름도                             │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐      │
+│  │   Phase 0   │───▶│   Phase 1   │───▶│   Phase 2   │───▶│   Phase 3   │──┐   │
+│  │  설계/검증  │    │  기반 구축  │    │  모니터링   │    │ 제어/스케줄러│  │   │
+│  └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘  │   │
+│        │                  │                  │                  │          │   │
+│        ▼                  ▼                  ▼                  ▼          │   │
+│  ┌───────────┐      ┌───────────┐      ┌───────────┐      ┌───────────┐   │   │
+│  │ 아키텍처  │      │ 인프라    │      │ 실시간    │      │ 원격제어  │   │   │
+│  │ 문서 작성 │      │ 환경 구성 │      │ 데이터    │      │ 스케줄러  │   │   │
+│  │ 정책 확정 │      │ 인증 시스템│      │ 수집/표시 │      │ 인터록    │   │   │
+│  └───────────┘      └───────────┘      └───────────┘      └───────────┘   │   │
+│                                                                            │   │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │   │
+│  │                           Phase 4: Transfer/POP/MES                 │◀─┘   │
+│  │                        (프로그램 전송, 생산실적, 작업지시)           │      │
+│  └─────────────────────────────────────────────────────────────────────┘      │
+│                                         │                                      │
+│                                         ▼                                      │
+│  ┌─────────────────────────────────────────────────────────────────────┐      │
+│  │                           Phase 5: 안정화/배포                       │      │
+│  │                     (테스트, 최적화, 운영 환경 배포)                 │      │
+│  └─────────────────────────────────────────────────────────────────────┘      │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
 
-#### Phase 3: 제어 및 스케줄러 (Critical)
-- **Features**:
-  - 제어권 관리 시스템 (Redis Distributed Lock)
-  - 원격 제어 모듈 및 가상 조작반 (가상키-PMC 매핑)
-  - 스케줄러 UI 및 실행 로직 (One Cycle Stop, Counting)
-  - 안전 인터록 시스템 구현 (Authoritative Agent)
+#### 10.3.2 현재 진행 현황 요약
 
-#### Phase 4: Transfer, POP, and Advanced
-- **Features**:
-  - NC 프로그램 입출력 (Transfer)
-  - 데이터 백업 및 관리
-  - 생산 실적 집계 (POP)
-  - 운영/감사 로그 대시보드
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              📊 전체 진행률: Phase 0 완료                        │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  Phase 0 [설계/검증]     ████████████████████████████████████████  100% ✅      │
+│  Phase 1 [기반 구축]     ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    0% ⏳      │
+│  Phase 2 [모니터링]      ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    0% 🔒      │
+│  Phase 3 [제어/스케줄러] ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    0% 🔒      │
+│  Phase 4 [Transfer/POP]  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    0% 🔒      │
+│  Phase 5 [안정화/배포]   ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    0% 🔒      │
+│                                                                                 │
+│  ✅ 완료  ⏳ 진행 예정  🔒 대기 중                                              │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+#### 10.3.3 Phase 0: 설계 및 검증 (✅ 완료)
+
+**목표**: 아키텍처 확정 및 구현 기준 문서화
+
+| 태스크 ID | 태스크명 | 상태 | 산출물 |
+|-----------|----------|:----:|--------|
+| P0-01 | 4-Tier 아키텍처 설계 | ✅ | architecture.md 섹션 2 |
+| P0-02 | 설정 계층 구조 정의 | ✅ | architecture.md 섹션 3 |
+| P0-03 | 템플릿 스키마 설계 | ✅ | architecture.md 섹션 4 |
+| P0-04 | 데이터 흐름 정의 | ✅ | architecture.md 섹션 5 |
+| P0-05 | 스케줄러 실행 흐름 설계 | ✅ | architecture.md 섹션 6 |
+| P0-06 | 인증 시스템 설계 (JWT) | ✅ | architecture.md 섹션 2.5 |
+| P0-07 | 제어권 관리 정책 확정 | ✅ | architecture.md 섹션 9.3 |
+| P0-08 | 인터록 평가 정책 확정 | ✅ | architecture.md 섹션 9.2 |
+| P0-09 | M20 기반 정책 통일 | ✅ | architecture.md v2.3 |
+| P0-10 | 카운트 정책 분리 (Normal/Scheduler) | ✅ | architecture.md 섹션 6.4.2 |
+
+---
+
+#### 10.3.4 Phase 1: 기반 구축 (⏳ 다음 단계)
+
+**목표**: 개발 환경 구성 및 핵심 인프라 구현
+
+**기술 스택**:
+- Backend: Node.js + Express + TypeScript
+- Database: PostgreSQL + TimescaleDB + Prisma
+- Cache/Lock: Redis
+- Message: MQTT (Mosquitto)
+- Frontend: React + TypeScript + Vite + Zustand + TailwindCSS
+
+| 태스크 ID | 태스크명 | 상태 | 예상 산출물 | 의존성 |
+|-----------|----------|:----:|-------------|--------|
+| **P1-ENV** | **개발 환경 구성** | | | |
+| P1-01 | 프로젝트 구조 초기화 (Monorepo) | ⬜ | /packages/server, /packages/agent, /packages/web | - |
+| P1-02 | Docker Compose 환경 구성 | ⬜ | docker-compose.yml | P1-01 |
+| P1-03 | PostgreSQL + TimescaleDB 설정 | ⬜ | DB 컨테이너, 초기 스키마 | P1-02 |
+| P1-04 | Redis 설정 | ⬜ | Redis 컨테이너 | P1-02 |
+| P1-05 | MQTT Broker (Mosquitto) 설정 | ⬜ | MQTT 컨테이너 | P1-02 |
+| **P1-DB** | **데이터베이스 스키마** | | | |
+| P1-06 | Prisma 스키마 정의 | ⬜ | schema.prisma | P1-03 |
+| P1-07 | 사용자/권한 테이블 | ⬜ | users, roles, permissions | P1-06 |
+| P1-08 | 장비/템플릿 테이블 | ⬜ | machines, templates | P1-06 |
+| P1-09 | 이력/로그 테이블 | ⬜ | alarms, command_logs, audit_logs | P1-06 |
+| P1-10 | 마이그레이션 실행 | ⬜ | DB 초기화 스크립트 | P1-07~09 |
+| **P1-AUTH** | **인증 시스템** | | | |
+| P1-11 | JWT 발급/검증 모듈 | ⬜ | /server/auth/jwt.ts | P1-07 |
+| P1-12 | Refresh Token Rotation | ⬜ | /server/auth/refresh.ts | P1-11 |
+| P1-13 | 로그인/로그아웃 API | ⬜ | POST /auth/login, /auth/logout | P1-11 |
+| P1-14 | 인증 미들웨어 | ⬜ | /server/middleware/auth.ts | P1-11 |
+| **P1-COMM** | **통신 레이어** | | | |
+| P1-15 | MQTT Client 모듈 (Server) | ⬜ | /server/mqtt/client.ts | P1-05 |
+| P1-16 | WebSocket 서버 구축 | ⬜ | /server/websocket/server.ts | P1-14 |
+| P1-17 | WebSocket 인증 (Cookie) | ⬜ | /server/websocket/auth.ts | P1-16 |
+
+**Phase 1 완료 기준**:
+- [ ] Docker Compose로 전체 인프라 실행 가능
+- [ ] 로그인/로그아웃 동작 확인
+- [ ] MQTT 메시지 송수신 확인
+- [ ] WebSocket 연결 및 인증 확인
+
+---
+
+#### 10.3.5 Phase 2: 핵심 모니터링
+
+**목표**: 실시간 장비 상태 수집 및 대시보드 표시
+
+| 태스크 ID | 태스크명 | 상태 | 예상 산출물 | 의존성 |
+|-----------|----------|:----:|-------------|--------|
+| **P2-AGENT** | **Field Agent 기본** | | | |
+| P2-01 | Agent 프로젝트 구조 (.NET 8) | ⬜ | /packages/agent/ | P1-05 |
+| P2-02 | FOCAS2 P/Invoke 래퍼 | ⬜ | /agent/Focas/FocasWrapper.cs | P2-01 |
+| P2-03 | MQTT Client 모듈 (Agent) | ⬜ | /agent/Mqtt/MqttService.cs | P2-01 |
+| P2-04 | 템플릿 로더 (캐싱) | ⬜ | /agent/Template/TemplateLoader.cs | P2-03 |
+| **P2-DATA** | **실시간 데이터 수집** | | | |
+| P2-05 | 좌표/상태 수집 루프 | ⬜ | /agent/Collectors/StatusCollector.cs | P2-02 |
+| P2-06 | 알람 수집 및 발행 | ⬜ | /agent/Collectors/AlarmCollector.cs | P2-02 |
+| P2-07 | 인터록 상태 수집 | ⬜ | /agent/Collectors/InterlockCollector.cs | P2-02 |
+| P2-08 | MQTT 상태 메시지 발행 | ⬜ | machines/{id}/status 토픽 | P2-05~07 |
+| **P2-SERVER** | **Server 데이터 처리** | | | |
+| P2-09 | MQTT 상태 메시지 구독 | ⬜ | /server/mqtt/subscribers/ | P1-15 |
+| P2-10 | 상태 캐싱 (Redis) | ⬜ | /server/cache/machineState.ts | P2-09 |
+| P2-11 | 알람 이력 저장 (TimescaleDB) | ⬜ | /server/services/alarmService.ts | P2-09 |
+| P2-12 | WebSocket 상태 Push | ⬜ | /server/websocket/handlers/ | P2-10 |
+| **P2-UI** | **프론트엔드 대시보드** | | | |
+| P2-13 | 프론트엔드 프로젝트 구조 | ⬜ | /packages/web/ (Vite + React) | - |
+| P2-14 | 상태 관리 (Zustand) | ⬜ | /web/stores/machineStore.ts | P2-13 |
+| P2-15 | WebSocket 클라이언트 | ⬜ | /web/services/websocket.ts | P2-14 |
+| P2-16 | 대시보드 레이아웃 | ⬜ | /web/pages/Dashboard.tsx | P2-15 |
+| P2-17 | 장비 상태 카드 컴포넌트 | ⬜ | /web/components/MachineCard.tsx | P2-16 |
+| P2-18 | 2D 공장 레이아웃 | ⬜ | /web/components/FactoryLayout.tsx | P2-16 |
+| **P2-VERIFY** | **FOCAS 검증** | | | |
+| P2-19 | 가동 중 백업 가능 여부 검증 | ⬜ | verification_report.md | P2-02 |
+| P2-20 | MACRO 쓰기 실시간성 검증 | ⬜ | verification_report.md | P2-02 |
+| P2-21 | One Cycle Stop 제어 가능 검증 | ⬜ | verification_report.md | P2-02 |
+
+**Phase 2 완료 기준**:
+- [ ] Agent가 CNC 연결 후 실시간 데이터 수집
+- [ ] 대시보드에서 장비 상태 실시간 표시
+- [ ] 알람 발생/해제 이력 저장 및 조회
+- [ ] FOCAS 검증 항목 테스트 완료
+
+---
+
+#### 10.3.6 Phase 3: 제어 및 스케줄러 (핵심)
+
+**목표**: 원격 제어, 스케줄러, 인터록 시스템 구현
+
+| 태스크 ID | 태스크명 | 상태 | 예상 산출물 | 의존성 |
+|-----------|----------|:----:|-------------|--------|
+| **P3-LOCK** | **제어권 관리** | | | |
+| P3-01 | Redis 제어권 락 구현 | ⬜ | /server/services/controlLock.ts | P1-04 |
+| P3-02 | Heartbeat API | ⬜ | POST /control-lock/{id}/heartbeat | P3-01 |
+| P3-03 | 제어권 획득/해제 API | ⬜ | POST/DELETE /control-lock/{id} | P3-01 |
+| P3-04 | 제어권 UI 컴포넌트 | ⬜ | /web/components/ControlLockButton.tsx | P3-03 |
+| **P3-CMD** | **명령 프로토콜** | | | |
+| P3-05 | 명령 발행 서비스 (Server) | ⬜ | /server/services/commandService.ts | P1-15 |
+| P3-06 | 명령 수신/실행 (Agent) | ⬜ | /agent/Commands/CommandHandler.cs | P2-03 |
+| P3-07 | 2-Phase 응답 처리 | ⬜ | RECEIVED + RESULT 흐름 | P3-05~06 |
+| P3-08 | 명령 상태 조회 API | ⬜ | GET /machines/{id}/commands/{corrId} | P3-07 |
+| **P3-INTERLOCK** | **인터록 시스템** | | | |
+| P3-09 | Agent 인터록 평가 로직 | ⬜ | /agent/Safety/InterlockEvaluator.cs | P2-07 |
+| P3-10 | 인터록 거부 응답 처리 | ⬜ | REJECTED + INTERLOCK_BLOCKED | P3-09 |
+| P3-11 | 인터록 상태 UI 바 | ⬜ | /web/components/InterlockBar.tsx | P2-15 |
+| **P3-REMOTE** | **원격 제어 모드** | | | |
+| P3-12 | 가상 조작반 UI | ⬜ | /web/pages/RemoteControl.tsx | P3-04 |
+| P3-13 | 모드 선택 키 (PMC 매핑) | ⬜ | /agent/Panel/ModeSelector.cs | P3-06 |
+| P3-14 | 제어 키 (Cycle Start 등) | ⬜ | /agent/Panel/ControlKeys.cs | P3-06 |
+| P3-15 | 오버라이드 제어 | ⬜ | /agent/Panel/OverrideControl.cs | P3-06 |
+| P3-16 | 원격제어 인터록 (현장우선) | ⬜ | /agent/Safety/RemoteInterlock.cs | P3-09 |
+| **P3-SCHED** | **스케줄러** | | | |
+| P3-17 | 스케줄러 테이블 UI | ⬜ | /web/pages/Scheduler.tsx | P3-04 |
+| P3-18 | 스케줄러 CRUD API | ⬜ | /server/routes/scheduler.ts | P1-06 |
+| P3-19 | 스케줄러 실행 루프 (Agent) | ⬜ | /agent/Scheduler/SchedulerLoop.cs | P3-06 |
+| P3-20 | M20 감지 및 전환 로직 | ⬜ | /agent/Scheduler/CycleDetector.cs | P3-19 |
+| P3-21 | One Cycle Stop 구현 | ⬜ | /agent/Scheduler/OneCycleStop.cs | P3-20 |
+| P3-22 | PC-side 카운팅 (pcCount++) | ⬜ | /agent/Scheduler/CountManager.cs | P3-20 |
+| P3-23 | CNC 매크로 동기화 (wrmacro) | ⬜ | /agent/Scheduler/MacroSync.cs | P3-22 |
+| P3-24 | Running 행 보호 (409) | ⬜ | /server/routes/scheduler.ts | P3-18 |
+
+**Phase 3 완료 기준**:
+- [ ] 제어권 획득/반납 및 Heartbeat 동작
+- [ ] 원격 제어 모드에서 가상 조작반 조작 가능
+- [ ] 스케줄러 시작/정지/리셋 동작
+- [ ] M20 감지 시 다음 항목 자동 전환
+- [ ] 인터록 위반 시 즉시 제어 차단
+
+---
+
+#### 10.3.7 Phase 4: Transfer, POP, MES
+
+**목표**: 프로그램 전송, 생산실적, 작업지시 관리
+
+| 태스크 ID | 태스크명 | 상태 | 예상 산출물 | 의존성 |
+|-----------|----------|:----:|-------------|--------|
+| **P4-TRANSFER** | **Transfer 기능** | | | |
+| P4-01 | 프로그램 INPUT (Server→CNC) | ⬜ | /agent/Transfer/ProgramUpload.cs | P2-02 |
+| P4-02 | 프로그램 OUTPUT (CNC→Server) | ⬜ | /agent/Transfer/ProgramDownload.cs | P2-02 |
+| P4-03 | 전체 백업 (SRAM/파라미터) | ⬜ | /agent/Transfer/FullBackup.cs | P2-02 |
+| P4-04 | Transfer UI | ⬜ | /web/pages/Transfer.tsx | P4-01~03 |
+| P4-05 | 백업 이력 조회 | ⬜ | /server/routes/backup.ts | P4-03 |
+| **P4-POP** | **생산실적 (POP)** | | | |
+| P4-06 | 생산 데이터 집계 서비스 | ⬜ | /server/services/productionService.ts | P2-11 |
+| P4-07 | 일/주/월 집계 쿼리 | ⬜ | /server/queries/production.ts | P4-06 |
+| P4-08 | POP 대시보드 UI | ⬜ | /web/pages/POP.tsx | P4-07 |
+| P4-09 | KPI 카드 (가동률, OEE) | ⬜ | /web/components/KPICard.tsx | P4-08 |
+| P4-10 | 생산량 그래프 | ⬜ | /web/components/ProductionChart.tsx | P4-08 |
+| **P4-MES** | **작업지시 (MES)** | | | |
+| P4-11 | 작업지시 CRUD API | ⬜ | /server/routes/workOrder.ts | P1-06 |
+| P4-12 | 작업지시 UI | ⬜ | /web/pages/MES.tsx | P4-11 |
+| P4-13 | 스케줄러-작업지시 연동 | ⬜ | /server/services/workOrderSync.ts | P3-18 |
+| **P4-AUDIT** | **감사 로그** | | | |
+| P4-14 | 감사 로그 저장 서비스 | ⬜ | /server/services/auditService.ts | P1-06 |
+| P4-15 | 감사 로그 조회 UI | ⬜ | /web/pages/AuditLog.tsx | P4-14 |
+
+**Phase 4 완료 기준**:
+- [ ] 프로그램 INPUT/OUTPUT 동작
+- [ ] 전체 백업 및 이력 조회
+- [ ] POP 대시보드 표시
+- [ ] 작업지시 생성/조회
+
+---
+
+#### 10.3.8 Phase 5: 안정화 및 배포
+
+**목표**: 테스트, 최적화, 운영 환경 배포
+
+| 태스크 ID | 태스크명 | 상태 | 예상 산출물 | 의존성 |
+|-----------|----------|:----:|-------------|--------|
+| P5-01 | 통합 테스트 시나리오 작성 | ⬜ | /tests/integration/ | Phase 4 |
+| P5-02 | 부하 테스트 (10대 동시 접속) | ⬜ | 성능 리포트 | P5-01 |
+| P5-03 | 보안 점검 (OWASP) | ⬜ | 보안 리포트 | P5-01 |
+| P5-04 | 운영 환경 구성 (Docker Swarm/K8s) | ⬜ | 배포 스크립트 | P5-01 |
+| P5-05 | 모니터링 구성 (Grafana) | ⬜ | 대시보드 | P5-04 |
+| P5-06 | 운영 매뉴얼 작성 | ⬜ | 운영 가이드 문서 | P5-04 |
+| P5-07 | 사용자 교육 자료 | ⬜ | 교육 자료 | P5-06 |
+
+---
+
+#### 10.3.9 Phase별 의존성 다이어그램
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                            Phase 의존성 맵                                      │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  Phase 0 (설계)                                                                 │
+│      │                                                                          │
+│      │ 아키텍처 문서                                                            │
+│      ▼                                                                          │
+│  Phase 1 (기반) ─────────────────────────────────────────────┐                  │
+│      │                                                        │                  │
+│      │ 인증, DB, MQTT, WebSocket                              │                  │
+│      ▼                                                        ▼                  │
+│  Phase 2 (모니터링)                                   Phase 3 (제어)            │
+│      │                                                        │                  │
+│      │ 실시간 데이터, 대시보드                                │ 제어권, 스케줄러 │
+│      │                                                        │                  │
+│      └───────────────────┬────────────────────────────────────┘                  │
+│                          │                                                       │
+│                          ▼                                                       │
+│                    Phase 4 (Transfer/POP/MES)                                   │
+│                          │                                                       │
+│                          │ 전송, 집계, 작업지시                                  │
+│                          ▼                                                       │
+│                    Phase 5 (안정화/배포)                                        │
+│                                                                                 │
+│  ※ Phase 2와 Phase 3은 병렬 진행 가능 (단, Phase 1 완료 필수)                   │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+#### 10.3.10 마일스톤 일정 (예상)
+
+| Phase | 마일스톤 | 주요 산출물 | 예상 기간 |
+|-------|----------|-------------|-----------|
+| **Phase 0** | 설계 완료 ✅ | architecture.md v2.3 | 완료 |
+| **Phase 1** | 기반 구축 완료 | 인증, DB, 통신 레이어 | - |
+| **Phase 2** | 모니터링 MVP | 대시보드, 실시간 상태 | - |
+| **Phase 3** | 제어 MVP | 스케줄러, 원격제어 | - |
+| **Phase 4** | 전체 기능 완료 | Transfer, POP, MES | - |
+| **Phase 5** | 운영 배포 | 안정화, 배포 | - |
+
+> ※ 기간은 개발 리소스 및 검증 결과에 따라 조정
 
 
 ---
 
 ## 문서 정보
 
-- **문서 버전**: 2.2
+- **문서 버전**: 2.4
 - **작성일**: 2026-01-22
 - **최종 수정일**: 2026-01-25
 - **목적**: 설계 검증 및 아키텍처 리뷰용 (구현 기준 확정본)
@@ -2795,6 +3065,14 @@ Redis 연결 실패 시:
 ---
 
 ## 버전 이력 (Changelog)
+
+### v2.4 (2026-01-25) - 개발 로드맵 추가
+**추가된 내용**:
+- [개발 로드맵] Phase 0~5 단계별 상세 태스크 정의
+- [전체 흐름도] 개발 단계 간 의존성 다이어그램
+- [진행 현황] Phase별 진행률 시각화
+- [태스크 목록] 각 Phase별 세부 태스크 ID 및 산출물 정의
+- [마일스톤] 예상 일정 및 완료 기준
 
 ### v2.3 (2026-01-25) - M30 → M20 통일
 **변경 사항**:
