@@ -10,6 +10,11 @@ import machineRoutes from './routes/machines';
 import commandRoutes from './routes/commands';
 import schedulerRoutes, { handleM20Event } from './routes/scheduler';
 import alarmRoutes, { storeAlarm } from './routes/alarms';
+import transferRoutes from './routes/transfer';
+import backupRoutes from './routes/backup';
+import productionRoutes from './routes/production';
+import workOrderRoutes from './routes/workOrder';
+import auditRoutes from './routes/audit';
 import { errorHandler } from './middleware/error';
 
 // Services
@@ -66,6 +71,21 @@ app.use('/api/scheduler', schedulerRoutes);
 
 // Alarm Routes
 app.use('/api/alarms', alarmRoutes);
+
+// Transfer Routes
+app.use('/api/transfer', transferRoutes);
+
+// Backup Routes
+app.use('/api/backup', backupRoutes);
+
+// Production Routes (POP)
+app.use('/api/production', productionRoutes);
+
+// Work Order Routes (MES)
+app.use('/api/work-orders', workOrderRoutes);
+
+// Audit Routes
+app.use('/api/audit', auditRoutes);
 
 // Error Handler (must be last middleware)
 app.use(errorHandler);

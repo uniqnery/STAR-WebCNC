@@ -6,6 +6,10 @@ import { Dashboard } from './components/Dashboard';
 import { RemoteControl } from './pages/RemoteControl';
 import { Scheduler } from './pages/Scheduler';
 import { Alarms } from './pages/Alarms';
+import { Transfer } from './pages/Transfer';
+import { POP } from './pages/POP';
+import { WorkOrder } from './pages/WorkOrder';
+import { AuditLog } from './pages/AuditLog';
 
 // Protected Route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -83,7 +87,7 @@ function App() {
         path="/transfer"
         element={
           <ProtectedRoute>
-            <PlaceholderPage title="Transfer" />
+            <Transfer />
           </ProtectedRoute>
         }
       />
@@ -97,25 +101,36 @@ function App() {
         }
       />
 
+      <Route
+        path="/pop"
+        element={
+          <ProtectedRoute>
+            <POP />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/work-orders"
+        element={
+          <ProtectedRoute>
+            <WorkOrder />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/audit"
+        element={
+          <ProtectedRoute>
+            <AuditLog />
+          </ProtectedRoute>
+        }
+      />
+
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
-  );
-}
-
-// Placeholder for unimplemented pages
-function PlaceholderPage({ title }: { title: string }) {
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-        {title}
-      </h1>
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-8 text-center">
-        <p className="text-gray-500">
-          이 페이지는 Phase 3에서 구현됩니다.
-        </p>
-      </div>
-    </div>
   );
 }
 
