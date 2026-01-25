@@ -1,58 +1,108 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { useAuthStore } from './stores/authStore';
+import { Login } from './components/Login';
+import { Layout } from './components/Layout';
+import { Dashboard } from './components/Dashboard';
+
+// Protected Route wrapper
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <Layout>{children}</Layout>;
+}
+
+// Public Route wrapper (redirect if authenticated)
+function PublicRoute({ children }: { children: React.ReactNode }) {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+
+  if (isAuthenticated) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
+}
 
 function App() {
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* Header */}
-      <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <h1 className="text-2xl font-bold text-gray-900">
-            Star-WebCNC
-          </h1>
-        </div>
-      </header>
+    <Routes>
+      {/* Public Routes */}
+      <Route
+        path="/login"
+        element={
+          <PublicRoute>
+            <Login />
+          </PublicRoute>
+        }
+      />
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-        </Routes>
-      </main>
-    </div>
+      {/* Protected Routes */}
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/machines"
+        element={
+          <ProtectedRoute>
+            <PlaceholderPage title="Machines" />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/scheduler"
+        element={
+          <ProtectedRoute>
+            <PlaceholderPage title="Scheduler" />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/transfer"
+        element={
+          <ProtectedRoute>
+            <PlaceholderPage title="Transfer" />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/alarms"
+        element={
+          <ProtectedRoute>
+            <PlaceholderPage title="Alarms" />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Fallback */}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
 
-// Temporary Dashboard Component
-function Dashboard() {
+// Placeholder for unimplemented pages
+function PlaceholderPage({ title }: { title: string }) {
   return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <h2 className="text-xl font-semibold mb-4">Dashboard</h2>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Status Cards */}
-        <StatusCard title="서버 상태" status="online" />
-        <StatusCard title="연결된 장비" status="0" />
-        <StatusCard title="알람" status="0" />
-      </div>
-      <div className="mt-6 p-4 bg-gray-50 rounded">
-        <p className="text-gray-600">
-          Phase 1 개발 중...
-        </p>
-        <p className="text-sm text-gray-500 mt-2">
-          다음 단계: Docker Compose 환경 구성
+    <div className="p-6">
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
+        {title}
+      </h1>
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-8 text-center">
+        <p className="text-gray-500">
+          이 페이지는 Phase 3에서 구현됩니다.
         </p>
       </div>
-    </div>
-  );
-}
-
-function StatusCard({ title, status }: { title: string; status: string }) {
-  const isOnline = status === 'online';
-  return (
-    <div className="bg-gray-50 rounded-lg p-4">
-      <h3 className="text-sm font-medium text-gray-500">{title}</h3>
-      <p className={`text-2xl font-bold mt-1 ${isOnline ? 'text-green-600' : 'text-gray-900'}`}>
-        {isOnline ? '정상' : status}
-      </p>
     </div>
   );
 }

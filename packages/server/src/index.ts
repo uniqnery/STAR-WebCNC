@@ -6,6 +6,8 @@ import { createServer } from 'http';
 // Config & Routes
 import { config } from './config';
 import authRoutes from './routes/auth';
+import machineRoutes from './routes/machines';
+import commandRoutes from './routes/commands';
 import { errorHandler } from './middleware/error';
 
 // Services
@@ -50,6 +52,12 @@ app.get('/api', (req, res) => {
 
 // Auth Routes
 app.use('/api/auth', authRoutes);
+
+// Machine Routes
+app.use('/api/machines', machineRoutes);
+
+// Command Routes
+app.use('/api/commands', commandRoutes);
 
 // Error Handler (must be last middleware)
 app.use(errorHandler);

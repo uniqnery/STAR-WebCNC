@@ -5,12 +5,27 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>dotnet-StarWebCNC.Agent-fd5ebadf-2a0b-4bd5-bd99-7756b6a22875</UserSecretsId>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
     <PackageReference Include="MQTTnet" Version="4.3.3.952" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
+
+  <!-- FOCAS2 Library -->
+  <ItemGroup>
+    <Compile Include="..\..\..\libs\focas\fwlib64.cs" Link="Focas\Focas1.cs" />
+  </ItemGroup>
+
+  <!-- Copy FOCAS DLLs to output -->
+  <ItemGroup>
+    <None Include="..\..\..\libs\focas\Fwlib64.dll" CopyToOutputDirectory="PreserveNewest" Link="Fwlib64.dll" />
+    <None Include="..\..\..\libs\focas\fwlib30i64.dll" CopyToOutputDirectory="PreserveNewest" Link="fwlib30i64.dll" />
+  </ItemGroup>
+
 </Project>
