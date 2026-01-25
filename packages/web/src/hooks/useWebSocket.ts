@@ -12,11 +12,28 @@ interface WsMessage {
   payload: unknown;
 }
 
+export interface M20Event {
+  machineId: string;
+  programNo: string;
+  count: number;
+  timestamp: string;
+}
+
+export interface AlarmEvent {
+  machineId: string;
+  alarmNo: number;
+  alarmMsg: string;
+  type: 'occurred' | 'cleared';
+  timestamp: string;
+}
+
 export function useWebSocket() {
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastM20Event, setLastM20Event] = useState<M20Event | null>(null);
+  const [lastAlarm, setLastAlarm] = useState<AlarmEvent | null>(null);
 
   const { isAuthenticated, accessToken } = useAuthStore();
   const { updateTelemetry, addAlarm, clearAlarm } = useMachineStore();
@@ -88,6 +105,12 @@ export function useWebSocket() {
           type: 'occurred' | 'cleared';
         };
 
+        // Update lastAlarm for Alarms page
+        setLastAlarm({
+          ...payload,
+          timestamp: message.timestamp,
+        });
+
         if (payload.type === 'occurred') {
           addAlarm(payload.machineId, {
             id: `${payload.machineId}-${payload.alarmNo}-${Date.now()}`,
@@ -109,6 +132,16 @@ export function useWebSocket() {
           count?: number;
         };
         console.log('[WebSocket] Event:', payload.eventType, payload);
+
+        // Update lastM20Event for Scheduler page
+        if (payload.eventType === 'M20_COMPLETE') {
+          setLastM20Event({
+            machineId: payload.machineId,
+            programNo: payload.programNo || '',
+            count: payload.count || 0,
+            timestamp: message.timestamp,
+          });
+        }
         break;
       }
 
@@ -174,5 +207,7 @@ export function useWebSocket() {
     subscribe,
     unsubscribe,
     disconnect,
+    lastM20Event,
+    lastAlarm,
   };
 }

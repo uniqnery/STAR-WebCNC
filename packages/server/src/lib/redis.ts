@@ -17,6 +17,9 @@ export const REDIS_KEYS = {
   // Control lock
   CONTROL_LOCK: (machineId: string) => `control:lock:${machineId}`,
 
+  // Scheduler
+  SCHEDULER_JOB: (machineId: string) => `scheduler:job:${machineId}`,
+
   // Pub/Sub channels
   CHANNEL_TELEMETRY: 'channel:telemetry',
   CHANNEL_ALARM: 'channel:alarm',
@@ -118,6 +121,13 @@ class RedisService {
   async del(key: string): Promise<void> {
     if (!this.client) return;
     await this.client.del(key);
+  }
+
+  /**
+   * Delete key from cache (alias for del)
+   */
+  async delete(key: string): Promise<void> {
+    return this.del(key);
   }
 
   /**

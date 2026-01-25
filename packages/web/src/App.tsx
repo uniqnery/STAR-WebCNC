@@ -3,6 +3,9 @@ import { useAuthStore } from './stores/authStore';
 import { Login } from './components/Login';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
+import { RemoteControl } from './pages/RemoteControl';
+import { Scheduler } from './pages/Scheduler';
+import { Alarms } from './pages/Alarms';
 
 // Protected Route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -59,10 +62,19 @@ function App() {
       />
 
       <Route
+        path="/remote/:machineId"
+        element={
+          <ProtectedRoute>
+            <RemoteControl />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
         path="/scheduler"
         element={
           <ProtectedRoute>
-            <PlaceholderPage title="Scheduler" />
+            <Scheduler />
           </ProtectedRoute>
         }
       />
@@ -80,7 +92,7 @@ function App() {
         path="/alarms"
         element={
           <ProtectedRoute>
-            <PlaceholderPage title="Alarms" />
+            <Alarms />
           </ProtectedRoute>
         }
       />

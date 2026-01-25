@@ -16,6 +16,7 @@ export const TOPICS = {
   // Server → Agent
   COMMAND: 'star-webcnc/server/command',                // 브로드캐스트 명령
   COMMAND_TO: (machineId: string) => `star-webcnc/server/command/${machineId}`, // 특정 장비 명령
+  SERVER_SCHEDULER: (machineId: string) => `star-webcnc/server/scheduler/${machineId}`, // 스케줄러 명령
 } as const;
 
 // Message types

@@ -8,6 +8,8 @@ import { config } from './config';
 import authRoutes from './routes/auth';
 import machineRoutes from './routes/machines';
 import commandRoutes from './routes/commands';
+import schedulerRoutes, { handleM20Event } from './routes/scheduler';
+import alarmRoutes, { storeAlarm } from './routes/alarms';
 import { errorHandler } from './middleware/error';
 
 // Services
@@ -58,6 +60,12 @@ app.use('/api/machines', machineRoutes);
 
 // Command Routes
 app.use('/api/commands', commandRoutes);
+
+// Scheduler Routes
+app.use('/api/scheduler', schedulerRoutes);
+
+// Alarm Routes
+app.use('/api/alarms', alarmRoutes);
 
 // Error Handler (must be last middleware)
 app.use(errorHandler);
@@ -115,6 +123,14 @@ function setupMqttHandlers(): void {
     // Forward to WebSocket clients
     wsService.sendAlarm(machineId, { alarmNo, alarmMsg, type });
 
+    // Store alarm in database
+    await storeAlarm({
+      machineId,
+      alarmNo,
+      alarmMsg,
+      type: type === 'occurred' ? 'occur' : 'clear',
+    });
+
     // Publish to Redis for other server instances
     await redisService.publish(REDIS_KEYS.CHANNEL_ALARM, message);
   });
@@ -129,6 +145,9 @@ function setupMqttHandlers(): void {
         programNo: programNo || '',
         count: (data?.count as number) || 0,
       });
+
+      // Handle scheduler job count update
+      await handleM20Event(machineId, programNo || '');
 
       // Publish to Redis for scheduler processing
       await redisService.publish(REDIS_KEYS.CHANNEL_EVENT, message);

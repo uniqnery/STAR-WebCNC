@@ -178,3 +178,55 @@ export const commandApi = {
   getHistory: (machineId: string, page = 1, limit = 20) =>
     api.get(`/api/commands/${machineId}?page=${page}&limit=${limit}`),
 };
+
+// Scheduler API
+export const schedulerApi = {
+  getJobs: (page = 1, limit = 50) =>
+    api.get(`/api/scheduler/jobs?page=${page}&limit=${limit}`),
+
+  getJob: (jobId: string) =>
+    api.get(`/api/scheduler/jobs/${jobId}`),
+
+  createJob: (data: {
+    machineId: string;
+    programNo: string;
+    targetCount: number;
+    oneCycleStop: boolean;
+  }) =>
+    api.post('/api/scheduler/jobs', data),
+
+  startJob: (jobId: string) =>
+    api.post(`/api/scheduler/jobs/${jobId}/start`),
+
+  pauseJob: (jobId: string) =>
+    api.post(`/api/scheduler/jobs/${jobId}/pause`),
+
+  cancelJob: (jobId: string) =>
+    api.post(`/api/scheduler/jobs/${jobId}/cancel`),
+
+  setOneCycleStop: (jobId: string, enabled: boolean) =>
+    api.post(`/api/scheduler/jobs/${jobId}/one-cycle-stop`, { enabled }),
+};
+
+// Alarm API
+export const alarmApi = {
+  getAlarms: (options?: {
+    machineId?: string;
+    active?: boolean;
+    page?: number;
+    limit?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (options?.machineId) params.append('machineId', options.machineId);
+    if (options?.active !== undefined) params.append('active', String(options.active));
+    params.append('page', String(options?.page || 1));
+    params.append('limit', String(options?.limit || 100));
+    return api.get(`/api/alarms?${params.toString()}`);
+  },
+
+  acknowledge: (alarmId: string) =>
+    api.post(`/api/alarms/${alarmId}/acknowledge`),
+
+  getStats: () =>
+    api.get('/api/alarms/stats'),
+};

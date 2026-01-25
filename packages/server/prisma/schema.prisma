@@ -27,9 +27,11 @@ model User {
   lastLoginAt   DateTime? @map("last_login_at")
 
   // Relations
-  refreshTokens RefreshToken[]
-  auditLogs     AuditLog[]
-  controlLocks  ControlLockLog[]
+  refreshTokens      RefreshToken[]
+  auditLogs          AuditLog[]
+  controlLocks       ControlLockLog[]
+  schedulerJobs      SchedulerJob[]
+  acknowledgedAlarms Alarm[]   @relation("AcknowledgedAlarms")
 
   @@map("users")
 }
@@ -87,6 +89,7 @@ model Machine {
   alarms           Alarm[]
   commandLogs      CommandLog[]
   schedulerItems   SchedulerItem[]
+  schedulerJobs    SchedulerJob[]
   productionLogs   ProductionLog[]
 
   @@map("machines")
@@ -153,6 +156,35 @@ model SchedulerItem {
   @@map("scheduler_items")
 }
 
+model SchedulerJob {
+  id             String            @id @default(uuid())
+  machineDbId    String            @map("machine_id")
+  programNo      String            @map("program_no")
+  targetCount    Int               @map("target_count")
+  completedCount Int               @default(0) @map("completed_count")
+  status         SchedulerJobStatus @default(PENDING)
+  oneCycleStop   Boolean           @default(false) @map("one_cycle_stop")
+  createdById    String            @map("created_by_id")
+  startedAt      DateTime?         @map("started_at")
+  completedAt    DateTime?         @map("completed_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  machine         Machine @relation(fields: [machineDbId], references: [id], onDelete: Cascade)
+  createdByUser   User    @relation(fields: [createdById], references: [id])
+
+  @@index([machineDbId, status])
+  @@map("scheduler_jobs")
+}
+
+enum SchedulerJobStatus {
+  PENDING
+  RUNNING
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
 enum SchedulerStatus {
   READY
   RUNNING
@@ -166,20 +198,30 @@ enum SchedulerStatus {
 // ============================================
 
 model Alarm {
-  id          String    @id @default(uuid())
-  eventId     String    @unique @map("event_id") // Agent 생성 UUID (dedupe)
-  machineId   String    @map("machine_id")
-  alarmNo     Int       @map("alarm_no")
-  alarmMsg    String    @map("alarm_msg")
-  category    String?                            // system, program, servo, pmc
-  occurredAt  DateTime  @map("occurred_at")
-  clearedAt   DateTime? @map("cleared_at")
-  duration    Int?                               // seconds
+  id               String     @id @default(uuid())
+  eventId          String?    @unique @map("event_id") // Agent 생성 UUID (dedupe)
+  machineDbId      String     @map("machine_id")
+  alarmNo          Int        @map("alarm_no")
+  alarmMsg         String     @map("alarm_msg")
+  alarmType        AlarmType  @default(ALARM) @map("alarm_type")
+  category         String?                            // system, program, servo, pmc
+  occurredAt       DateTime   @default(now()) @map("occurred_at")
+  clearedAt        DateTime?  @map("cleared_at")
+  duration         Int?                               // seconds
+  acknowledgedById String?    @map("acknowledged_by_id")
+  acknowledgedAt   DateTime?  @map("acknowledged_at")
 
-  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  machine            Machine @relation(fields: [machineDbId], references: [id], onDelete: Cascade)
+  acknowledgedByUser User?   @relation("AcknowledgedAlarms", fields: [acknowledgedById], references: [id])
 
-  @@index([machineId, occurredAt])
+  @@index([machineDbId, occurredAt])
   @@map("alarms")
+}
+
+enum AlarmType {
+  WARNING
+  ALARM
+  CRITICAL
 }
 
 model CommandLog {
