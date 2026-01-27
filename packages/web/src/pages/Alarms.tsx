@@ -1,7 +1,7 @@
 // Alarms Page - Alarm History and Real-time Monitoring
 
 import { useState, useEffect, useCallback } from 'react';
-import { useMachineStore, useMachineAlarms } from '../stores/machineStore';
+import { useMachineStore } from '../stores/machineStore';
 import { alarmApi } from '../lib/api';
 import { useWebSocket } from '../hooks/useWebSocket';
 
@@ -57,12 +57,12 @@ export function Alarms() {
         machineId: lastAlarm.machineId,
         alarmNo: lastAlarm.alarmNo,
         alarmMsg: lastAlarm.alarmMsg,
-        alarmType: lastAlarm.type === 'clear' ? 'WARNING' : 'ALARM',
+        alarmType: lastAlarm.type === 'cleared' ? 'WARNING' : 'ALARM',
         occurredAt: new Date().toISOString(),
-        clearedAt: lastAlarm.type === 'clear' ? new Date().toISOString() : undefined,
+        clearedAt: lastAlarm.type === 'cleared' ? new Date().toISOString() : undefined,
       };
 
-      if (lastAlarm.type === 'clear') {
+      if (lastAlarm.type === 'cleared') {
         // Mark alarm as cleared
         setAlarms((prev) =>
           prev.map((a) =>
@@ -115,7 +115,6 @@ export function Alarms() {
           <ActiveAlarmCard
             key={machine.id}
             machineName={machine.name}
-            machineId={machine.machineId}
             count={activeAlarmCounts[machine.machineId] || 0}
             onClick={() => setMachineFilter(machine.machineId)}
             isSelected={machineFilter === machine.machineId}
@@ -224,13 +223,11 @@ export function Alarms() {
 // Active Alarm Card
 function ActiveAlarmCard({
   machineName,
-  machineId,
   count,
   onClick,
   isSelected,
 }: {
   machineName: string;
-  machineId: string;
   count: number;
   onClick: () => void;
   isSelected: boolean;

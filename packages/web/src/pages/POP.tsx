@@ -42,8 +42,9 @@ export function POP() {
     try {
       const response = await productionApi.getStats(timeRange, selectedMachine || undefined);
       if (response.success && response.data) {
-        setStats(response.data.stats as ProductionStats[]);
-        setChartData(response.data.chart as ProductionChart[]);
+        const data = response.data as { stats: ProductionStats[]; chart: ProductionChart[] };
+        setStats(data.stats);
+        setChartData(data.chart);
       }
     } catch (err) {
       console.error('Failed to load production stats:', err);

@@ -1,6 +1,6 @@
-// Layout Component with Sidebar
+// Layout Component with Sidebar - Mobile Responsive
 
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useMachineStore } from '../stores/machineStore';
@@ -11,6 +11,7 @@ interface LayoutProps {
 }
 
 export function Layout({ children }: LayoutProps) {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
@@ -20,6 +21,11 @@ export function Layout({ children }: LayoutProps) {
     await authApi.logout();
     logout();
     navigate('/login');
+  };
+
+  const handleNavClick = () => {
+    // 모바일에서 메뉴 클릭 시 사이드바 닫기
+    setSidebarOpen(false);
   };
 
   const menuItems = [
@@ -35,12 +41,36 @@ export function Layout({ children }: LayoutProps) {
 
   return (
     <div className="flex h-screen bg-gray-100 dark:bg-gray-900">
+      {/* Mobile Overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="w-64 bg-gray-800 text-white flex flex-col">
+      <aside
+        className={`
+          fixed lg:static inset-y-0 left-0 z-50
+          w-64 bg-gray-800 text-white flex flex-col
+          transform transition-transform duration-300 ease-in-out
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+        `}
+      >
         {/* Logo */}
-        <div className="p-4 border-b border-gray-700">
-          <h1 className="text-xl font-bold">Star-WebCNC</h1>
-          <p className="text-xs text-gray-400 mt-1">CNC 스마트팩토리</p>
+        <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold">Star-WebCNC</h1>
+            <p className="text-xs text-gray-400 mt-1">CNC 스마트팩토리</p>
+          </div>
+          {/* 모바일 닫기 버튼 */}
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="lg:hidden p-2 text-gray-400 hover:text-white"
+          >
+            <CloseIcon className="w-5 h-5" />
+          </button>
         </div>
 
         {/* Machine Selector */}
@@ -62,7 +92,7 @@ export function Layout({ children }: LayoutProps) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-4">
+        <nav className="flex-1 p-4 overflow-y-auto">
           <ul className="space-y-1">
             {menuItems.map((item) => {
               const isActive = location.pathname === item.path;
@@ -70,6 +100,7 @@ export function Layout({ children }: LayoutProps) {
                 <li key={item.path}>
                   <Link
                     to={item.path}
+                    onClick={handleNavClick}
                     className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
                       isActive
                         ? 'bg-blue-600 text-white'
@@ -107,14 +138,44 @@ export function Layout({ children }: LayoutProps) {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        {children}
-      </main>
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Mobile Header */}
+        <header className="lg:hidden bg-gray-800 text-white p-4 flex items-center gap-4">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="p-2 hover:bg-gray-700 rounded"
+          >
+            <HamburgerIcon className="w-6 h-6" />
+          </button>
+          <h1 className="text-lg font-bold">Star-WebCNC</h1>
+        </header>
+
+        {/* Page Content */}
+        <main className="flex-1 overflow-auto">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
 
 // Icons
+function HamburgerIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  );
+}
+
+function CloseIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  );
+}
+
 function DashboardIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">

@@ -3,6 +3,13 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+const MOCK_USER = {
+  id: 'dev-user-001',
+  username: 'admin',
+  email: 'admin@star-webcnc.local',
+  role: 'ADMIN' as const,
+};
+
 export interface User {
   id: string;
   username: string;
@@ -19,6 +26,7 @@ interface AuthState {
   setAuth: (user: User, accessToken: string) => void;
   setAccessToken: (token: string) => void;
   logout: () => void;
+  devLogin: () => void;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -38,12 +46,21 @@ export const useAuthStore = create<AuthState>()(
       setAccessToken: (accessToken) =>
         set({ accessToken }),
 
-      logout: () =>
+      logout: () => {
         set({
           user: null,
           accessToken: null,
           isAuthenticated: false,
-        }),
+        });
+      },
+
+      devLogin: () => {
+        set({
+          user: MOCK_USER,
+          accessToken: 'dev-token',
+          isAuthenticated: true,
+        });
+      },
     }),
     {
       name: 'auth-storage',

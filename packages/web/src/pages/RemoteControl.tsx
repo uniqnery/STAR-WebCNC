@@ -7,6 +7,7 @@ import { useAuthStore } from '../stores/authStore';
 import { ControlLockButton } from '../components/ControlLockButton';
 import { InterlockBar } from '../components/InterlockBar';
 import { commandApi, machineApi } from '../lib/api';
+import { getRunStateText } from '../lib/machineUtils';
 
 type CncMode = 'EDIT' | 'MEM' | 'MDI' | 'JOG' | 'REF' | 'HANDLE';
 
@@ -391,16 +392,6 @@ function ControlButton({
   );
 }
 
-function getRunStateText(runState?: number): string {
-  switch (runState) {
-    case 0: return 'STOP';
-    case 1: return 'HOLD';
-    case 2: return 'START';
-    case 3: return 'MSTR';
-    case 4: return 'RESTART';
-    default: return '-';
-  }
-}
 
 function formatPosition(value?: number): string {
   if (value === undefined || value === null) return '-';

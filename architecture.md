@@ -2891,11 +2891,11 @@ Redis 연결 실패 시:
 | P2-12 | WebSocket 상태 Push | ✅ | src/lib/websocket.ts (sendTelemetry) | P2-10 |
 | **P2-UI** | **프론트엔드 대시보드** | | | |
 | P2-13 | 프론트엔드 프로젝트 구조 | ✅ | /packages/web/ (Vite + React) | - |
-| P2-14 | 상태 관리 (Zustand) | ✅ | stores/authStore.ts, machineStore.ts | P2-13 |
+| P2-14 | 상태 관리 (Zustand) | ✅ | stores/authStore.ts, machineStore.ts, layoutStore.ts | P2-13 |
 | P2-15 | WebSocket 클라이언트 | ✅ | hooks/useWebSocket.ts | P2-14 |
 | P2-16 | 대시보드 레이아웃 | ✅ | components/Dashboard.tsx, Layout.tsx | P2-15 |
-| P2-17 | 장비 상태 카드 컴포넌트 | ✅ | components/MachineCard.tsx, MachineDetail.tsx | P2-16 |
-| P2-18 | 2D 공장 레이아웃 | ⏸️ | Phase 4로 이관 (선택 기능) | P2-16 |
+| P2-17 | 장비 상태 카드 컴포넌트 | ✅ | components/CardView.tsx, MachineCard.tsx, MachineDetail.tsx | P2-16 |
+| P2-18 | 2D 공장 레이아웃 | ✅ | components/FactoryView.tsx (카드뷰/공장뷰 전환, 레이아웃 편집기) | P2-16 |
 | **P2-VERIFY** | **FOCAS 검증** | | | |
 | P2-19~21 | FOCAS 실장비 검증 | ⏸️ | 실장비 테스트 필요 | P2-02 |
 
@@ -3064,6 +3064,53 @@ Redis 연결 실패 시:
 
 ## 버전 이력 (Changelog)
 
+### v3.0 (2026-01-27) - 대시보드 UI 상세 정의
+**대시보드 카드뷰 표시 항목**:
+- [CardView] 장비별 카드 컨텐츠 정의
+  - 호기명 / 장비명 (예: "1호기 자동선반")
+  - 가동상태: 색상으로 표시 (emerald-500/slate-400/rose-500/gray-600)
+  - PRESET / COUNT: 목표 수량 및 현재 카운트
+  - 일일 가동률: 00시 기준 ~ 현재시간까지 가동시간 비율 (POP 데이터 연동)
+  - 사이클타임: 현재 사이클 소요시간
+  - 프로그램 정보:
+    - 메인 프로그램명 (예: O1001)
+    - 서브 프로그램명 (예: O9001)
+    - 제품명: NC프로그램 코멘트에서 추출 (괄호 안 표시)
+
+**대시보드 공장뷰 기능**:
+- [FactoryView] 팝업 기능
+  - 설비 클릭 시 해당 장비의 카드뷰 내용을 모달/팝업으로 표시
+- [FactoryView] 레이아웃 설정
+  - 공장 레이아웃 비율 조절 (가로:세로 비율 설정)
+  - 통로/출입구 편집 가능 (위치, 크기, 라벨 수정)
+
+**코드 정리 완료**:
+- lib/constants.ts: 공통 상수 (STATUS_COLORS, RUN_STATE, ZOOM 등)
+- lib/types.ts: 공통 타입 정의
+- lib/machineUtils.ts: 상태 관련 유틸리티 함수 통합
+- 중복 함수 제거 (getStatusColor, getStatusText, getRunStateText)
+- console.log 개발용 코드 정리
+
+### v2.9 (2026-01-27) - UI 개선 및 레이아웃 편집기
+**구현 완료 내용**:
+- [UI-AUTH] 인증 화면 개선
+  - Register.tsx: 회원가입 화면 추가
+  - Login.tsx: 회원가입 링크, 개발자 로그인 버튼 추가
+  - authStore: devLogin() 액션 추가
+- [UI-DASHBOARD] 대시보드 뷰 모드
+  - 카드뷰/공장뷰 토글 전환 (우측 상단)
+  - CardView.tsx: 장비별 상세 카드 (프로그램, 카운트, 사이클타임, 생산량)
+  - FactoryView.tsx: 공장 평면도 레이아웃
+  - 호기순 자동 정렬 (1호기 → 2호기 → ...)
+- [UI-LAYOUT] 레이아웃 편집기 (관리자 전용)
+  - layoutStore.ts: Zustand + persist (localStorage 저장)
+  - 드래그 이동, 크기 조절, 회전, 색상 변경
+  - 주변장치 추가: 컨베이어, 로봇, 작업대, 기둥, 벽, 사용자 정의
+  - 장비 상태 색상: emerald-500(가동), slate-400(대기), rose-500(알람), gray-600(오프라인)
+- [DEV] Mock 데이터 개선
+  - machineStore: 백엔드 없이 UI 테스트 가능
+  - VITE_DEV_MODE 환경변수 분리
+
 ### v2.8 (2026-01-26) - Phase 4 완료
 **구현 완료 내용**:
 - [P4-TRANSFER] Transfer 기능
@@ -3126,9 +3173,11 @@ Redis 연결 실패 시:
   - Command API: /api/commands (명령 전송, 상태 조회)
   - 제어권 관리: acquire, release, extend, force-release
 - [P2-UI] Frontend 대시보드
-  - Zustand 상태 관리 (authStore, machineStore)
+  - Zustand 상태 관리 (authStore, machineStore, layoutStore)
   - WebSocket 훅 (useWebSocket)
-  - Dashboard, MachineCard, MachineDetail, Login, Layout 컴포넌트
+  - Dashboard, MachineCard, MachineDetail, Login, Register, Layout 컴포넌트
+  - 뷰 모드: 카드뷰 (상세 현황) / 공장뷰 (평면도 레이아웃)
+  - 레이아웃 편집기: 관리자 전용, 장비/주변장치 배치 편집
 - [진행률] Phase 0: 100%, Phase 1: 100%, Phase 2: 100%
 
 ### v2.5 (2026-01-25) - Phase 1 완료

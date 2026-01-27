@@ -122,6 +122,12 @@ export const authApi = {
       };
     }>('/api/auth/login', { username, password }),
 
+  register: (username: string, email: string, password: string) =>
+    api.post<{ id: string; username: string; email: string }>(
+      '/api/auth/register',
+      { username, email, password }
+    ),
+
   logout: () => api.post('/api/auth/logout'),
 
   refresh: () =>

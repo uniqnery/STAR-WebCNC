@@ -1,38 +1,55 @@
-// Login Component
+// Register Component
 
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { useAuthStore } from '../stores/authStore';
 import { authApi } from '../lib/api';
 
-export function Login() {
+export function Register() {
   const navigate = useNavigate();
-  const setAuth = useAuthStore((state) => state.setAuth);
-  const devLogin = useAuthStore((state) => state.devLogin);
 
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [formData, setFormData] = useState({
+    username: '',
+    email: '',
+    password: '',
+    passwordConfirm: '',
+  });
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleDevLogin = () => {
-    devLogin();
-    navigate('/');
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    // Validation
+    if (formData.password !== formData.passwordConfirm) {
+      setError('비밀번호가 일치하지 않습니다.');
+      return;
+    }
+
+    if (formData.password.length < 6) {
+      setError('비밀번호는 6자 이상이어야 합니다.');
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      const response = await authApi.login(username, password);
+      const response = await authApi.register(
+        formData.username,
+        formData.email,
+        formData.password
+      );
 
-      if (response.success && response.data) {
-        setAuth(response.data.user, response.data.accessToken);
-        navigate('/');
+      if (response.success) {
+        alert('회원가입이 완료되었습니다. 로그인해주세요.');
+        navigate('/login');
       } else {
-        setError(response.error?.message || '로그인에 실패했습니다.');
+        setError(response.error?.message || '회원가입에 실패했습니다.');
       }
     } catch (err) {
       setError('서버 연결에 실패했습니다.');
@@ -52,10 +69,10 @@ export function Login() {
           <p className="text-gray-500 mt-2">CNC 스마트팩토리 시스템</p>
         </div>
 
-        {/* Login Form */}
+        {/* Register Form */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">
-            로그인
+            회원가입
           </h2>
 
           {error && (
@@ -74,15 +91,38 @@ export function Login() {
               </label>
               <input
                 id="username"
+                name="username"
                 type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                value={formData.username}
+                onChange={handleChange}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
                          bg-white dark:bg-gray-700 text-gray-900 dark:text-white
                          focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="사용자명 입력"
                 required
                 autoComplete="username"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+              >
+                이메일
+              </label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                value={formData.email}
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                         bg-white dark:bg-gray-700 text-gray-900 dark:text-white
+                         focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="이메일 입력"
+                required
+                autoComplete="email"
               />
             </div>
 
@@ -95,15 +135,38 @@ export function Login() {
               </label>
               <input
                 id="password"
+                name="password"
                 type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                value={formData.password}
+                onChange={handleChange}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
                          bg-white dark:bg-gray-700 text-gray-900 dark:text-white
                          focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="비밀번호 입력"
+                placeholder="비밀번호 입력 (6자 이상)"
                 required
-                autoComplete="current-password"
+                autoComplete="new-password"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="passwordConfirm"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+              >
+                비밀번호 확인
+              </label>
+              <input
+                id="passwordConfirm"
+                name="passwordConfirm"
+                type="password"
+                value={formData.passwordConfirm}
+                onChange={handleChange}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                         bg-white dark:bg-gray-700 text-gray-900 dark:text-white
+                         focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="비밀번호 다시 입력"
+                required
+                autoComplete="new-password"
               />
             </div>
 
@@ -135,39 +198,25 @@ export function Login() {
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                     />
                   </svg>
-                  로그인 중...
+                  가입 중...
                 </span>
               ) : (
-                '로그인'
+                '회원가입'
               )}
             </button>
           </form>
 
-          {/* Register Link */}
+          {/* Login Link */}
           <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700 text-center">
             <p className="text-sm text-gray-500">
-              계정이 없으신가요?{' '}
+              이미 계정이 있으신가요?{' '}
               <Link
-                to="/register"
+                to="/login"
                 className="text-blue-600 hover:text-blue-700 font-medium"
               >
-                회원가입
+                로그인
               </Link>
             </p>
-          </div>
-
-          {/* Dev Login */}
-          <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <p className="text-sm text-gray-500 text-center mb-3">백엔드 없이 UI 테스트</p>
-            <button
-              type="button"
-              onClick={handleDevLogin}
-              className="w-full py-2 px-4 bg-gray-600 hover:bg-gray-700
-                       text-white font-medium rounded-lg transition-colors
-                       focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
-            >
-              개발자 로그인 (Mock 데이터)
-            </button>
           </div>
         </div>
 

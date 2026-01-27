@@ -1,6 +1,12 @@
 // Machine Card Component
 
 import { Machine, useMachineTelemetry } from '../stores/machineStore';
+import {
+  getStatusFromTelemetry,
+  getStatusColor,
+  getStatusText,
+  getStatusTextColor,
+} from '../lib/machineUtils';
 
 interface MachineCardProps {
   machine: Machine;
@@ -10,27 +16,11 @@ interface MachineCardProps {
 
 export function MachineCard({ machine, isSelected, onSelect }: MachineCardProps) {
   const telemetry = useMachineTelemetry(machine.machineId);
-  const status = machine.realtime?.status || (telemetry ? 'online' : 'offline');
-
-  const getStatusColor = () => {
-    if (status === 'offline') return 'bg-gray-500';
-    if (telemetry?.alarmActive) return 'bg-red-500';
-    if (telemetry?.runState === 2) return 'bg-green-500'; // Running
-    if (telemetry?.runState === 1) return 'bg-yellow-500'; // Hold
-    return 'bg-blue-500'; // Idle
-  };
-
-  const getStatusText = () => {
-    if (status === 'offline') return 'OFFLINE';
-    if (telemetry?.alarmActive) return 'ALARM';
-    if (telemetry?.runState === 2) return 'RUNNING';
-    if (telemetry?.runState === 1) return 'HOLD';
-    return 'IDLE';
-  };
-
-  const getModeText = () => {
-    return telemetry?.mode || '-';
-  };
+  const isOnline = machine.realtime?.status === 'online' || !!telemetry;
+  const status = getStatusFromTelemetry(telemetry, isOnline);
+  const statusColorClass = getStatusColor(status);
+  const statusTextStr = getStatusText(status);
+  const statusTextColorClass = getStatusTextColor(status);
 
   return (
     <div
@@ -47,7 +37,7 @@ export function MachineCard({ machine, isSelected, onSelect }: MachineCardProps)
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <span className={`w-3 h-3 rounded-full ${getStatusColor()}`} />
+          <span className={`w-3 h-3 rounded-full ${statusColorClass}`} />
           <h3 className="font-semibold text-gray-900 dark:text-white">
             {machine.name}
           </h3>
@@ -61,19 +51,14 @@ export function MachineCard({ machine, isSelected, onSelect }: MachineCardProps)
       <div className="grid grid-cols-2 gap-2 mb-3">
         <div className="text-center p-2 bg-gray-100 dark:bg-gray-700 rounded">
           <div className="text-xs text-gray-500 dark:text-gray-400">상태</div>
-          <div className={`text-sm font-bold ${
-            status === 'offline' ? 'text-gray-500' :
-            telemetry?.alarmActive ? 'text-red-600' :
-            telemetry?.runState === 2 ? 'text-green-600' :
-            'text-blue-600'
-          }`}>
-            {getStatusText()}
+          <div className={`text-sm font-bold ${statusTextColorClass}`}>
+            {statusTextStr}
           </div>
         </div>
         <div className="text-center p-2 bg-gray-100 dark:bg-gray-700 rounded">
           <div className="text-xs text-gray-500 dark:text-gray-400">모드</div>
           <div className="text-sm font-bold text-gray-900 dark:text-white">
-            {getModeText()}
+            {telemetry?.mode || '-'}
           </div>
         </div>
       </div>

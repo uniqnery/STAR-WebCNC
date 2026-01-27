@@ -1,6 +1,8 @@
 // Machine Detail Component
 
 import { useMachineStore, useMachineTelemetry, useMachineAlarms } from '../stores/machineStore';
+import { getRunStateText } from '../lib/machineUtils';
+import { RUN_STATE } from '../lib/constants';
 
 interface MachineDetailProps {
   machineId: string;
@@ -42,7 +44,7 @@ export function MachineDetail({ machineId }: MachineDetailProps) {
               <InfoItem
                 label="상태"
                 value={getRunStateText(telemetry.runState)}
-                valueClass={telemetry.runState === 2 ? 'text-green-600' : ''}
+                valueClass={telemetry.runState === RUN_STATE.START ? 'text-green-600' : ''}
               />
               <InfoItem label="프로그램" value={telemetry.programNo || '-'} />
               <InfoItem
@@ -173,25 +175,7 @@ function InfoItem({
   );
 }
 
-function getRunStateText(runState: number): string {
-  switch (runState) {
-    case 0:
-      return 'STOP';
-    case 1:
-      return 'HOLD';
-    case 2:
-      return 'START';
-    case 3:
-      return 'MSTR';
-    case 4:
-      return 'RESTART';
-    default:
-      return 'UNKNOWN';
-  }
-}
-
 function formatPosition(value?: number): string {
   if (value === undefined || value === null) return '-';
-  // FOCAS returns position in 1/1000 mm
   return (value / 1000).toFixed(3);
 }

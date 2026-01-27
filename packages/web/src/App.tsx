@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
 import { Login } from './components/Login';
+import { Register } from './components/Register';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { RemoteControl } from './pages/RemoteControl';
@@ -10,6 +11,7 @@ import { Transfer } from './pages/Transfer';
 import { POP } from './pages/POP';
 import { WorkOrder } from './pages/WorkOrder';
 import { AuditLog } from './pages/AuditLog';
+import { Machines } from './pages/Machines';
 
 // Protected Route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -45,6 +47,14 @@ function App() {
           </PublicRoute>
         }
       />
+      <Route
+        path="/register"
+        element={
+          <PublicRoute>
+            <Register />
+          </PublicRoute>
+        }
+      />
 
       {/* Protected Routes */}
       <Route
@@ -60,7 +70,7 @@ function App() {
         path="/machines"
         element={
           <ProtectedRoute>
-            <PlaceholderPage title="Machines" />
+            <Machines />
           </ProtectedRoute>
         }
       />

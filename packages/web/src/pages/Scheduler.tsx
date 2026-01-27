@@ -1,9 +1,9 @@
 // Scheduler Page - Job Scheduling and M20 Cycle Management
 
 import { useState, useEffect, useCallback } from 'react';
-import { useMachineStore, useMachineTelemetry } from '../stores/machineStore';
+import { useMachineStore } from '../stores/machineStore';
 import { useAuthStore } from '../stores/authStore';
-import { machineApi, schedulerApi } from '../lib/api';
+import { schedulerApi } from '../lib/api';
 import { useWebSocket } from '../hooks/useWebSocket';
 
 interface SchedulerJob {

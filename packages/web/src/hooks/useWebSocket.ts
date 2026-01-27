@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useAuthStore } from '../stores/authStore';
-import { useMachineStore, TelemetryData, Alarm } from '../stores/machineStore';
+import { useMachineStore, TelemetryData } from '../stores/machineStore';
+import { WS_RECONNECT_DELAY } from '../lib/constants';
 
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3000/ws';
 
@@ -41,7 +42,6 @@ export function useWebSocket() {
   const connect = useCallback(() => {
     if (!isAuthenticated) return;
 
-    // Use token in query param for WebSocket auth
     const wsUrl = accessToken
       ? `${WS_URL}?token=${accessToken}`
       : WS_URL;
@@ -49,26 +49,22 @@ export function useWebSocket() {
     ws.current = new WebSocket(wsUrl);
 
     ws.current.onopen = () => {
-      console.log('[WebSocket] Connected');
       setIsConnected(true);
       setError(null);
     };
 
     ws.current.onclose = (event) => {
-      console.log('[WebSocket] Disconnected', event.code, event.reason);
       setIsConnected(false);
 
-      // Reconnect after 5 seconds if authenticated
+      // Reconnect after delay if authenticated
       if (isAuthenticated && event.code !== 1000) {
         reconnectTimeout.current = setTimeout(() => {
-          console.log('[WebSocket] Reconnecting...');
           connect();
-        }, 5000);
+        }, WS_RECONNECT_DELAY);
       }
     };
 
-    ws.current.onerror = (event) => {
-      console.error('[WebSocket] Error', event);
+    ws.current.onerror = () => {
       setError('WebSocket 연결 오류');
     };
 
@@ -76,8 +72,8 @@ export function useWebSocket() {
       try {
         const message: WsMessage = JSON.parse(event.data);
         handleMessage(message);
-      } catch (err) {
-        console.error('[WebSocket] Failed to parse message', err);
+      } catch {
+        // Failed to parse message
       }
     };
   }, [isAuthenticated, accessToken]);
@@ -85,7 +81,7 @@ export function useWebSocket() {
   const handleMessage = useCallback((message: WsMessage) => {
     switch (message.type) {
       case 'connected':
-        console.log('[WebSocket] Welcome message received');
+        // Welcome message received
         break;
 
       case 'telemetry': {
@@ -105,7 +101,6 @@ export function useWebSocket() {
           type: 'occurred' | 'cleared';
         };
 
-        // Update lastAlarm for Alarms page
         setLastAlarm({
           ...payload,
           timestamp: message.timestamp,
@@ -131,9 +126,7 @@ export function useWebSocket() {
           programNo?: string;
           count?: number;
         };
-        console.log('[WebSocket] Event:', payload.eventType, payload);
 
-        // Update lastM20Event for Scheduler page
         if (payload.eventType === 'M20_COMPLETE') {
           setLastM20Event({
             machineId: payload.machineId,
@@ -145,18 +138,14 @@ export function useWebSocket() {
         break;
       }
 
-      case 'scheduler': {
-        // Handle scheduler updates
-        console.log('[WebSocket] Scheduler update:', message.payload);
-        break;
-      }
-
+      case 'scheduler':
       case 'pong':
-        // Heartbeat response
+        // No action needed
         break;
 
       default:
-        console.log('[WebSocket] Unknown message type:', message.type);
+        // Unknown message type
+        break;
     }
   }, [updateTelemetry, addAlarm, clearAlarm]);
 

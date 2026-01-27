@@ -6,9 +6,14 @@ export interface TelemetryData {
   runState: number;
   mode: string;
   programNo: string;
+  subProgramNo?: string;       // 서브 프로그램 번호
+  productName?: string;        // 제품명 (NC 코멘트에서 추출)
   feedrate: number;
   spindleSpeed: number;
   partsCount: number;
+  presetCount?: number;        // 목표 수량 (PRESET)
+  cycleTime?: number;          // 사이클타임 (초)
+  dailyRunRate?: number;       // 일일 가동률 (%)
   alarmActive: boolean;
   absolutePosition?: number[];
   machinePosition?: number[];
@@ -65,11 +70,56 @@ interface MachineState {
   setError: (error: string | null) => void;
 }
 
-export const useMachineStore = create<MachineState>((set, get) => ({
-  machines: [],
+// Mock data for UI testing (used when backend is not available)
+const MOCK_MACHINES: Machine[] = [
+  {
+    id: '1', machineId: 'MC-001', name: '1호기 자동선반', ipAddress: '192.168.1.101', port: 8193, isActive: true,
+    template: { templateId: 'FANUC_0iTF_v1', name: 'FANUC 0i-TF', cncType: 'FANUC', seriesName: '0i-TF' },
+    realtime: { status: 'online', telemetry: {
+      runState: 2, mode: 'AUTO', programNo: 'O1001', subProgramNo: 'O9001', productName: 'SHAFT-A',
+      feedrate: 120, spindleSpeed: 2500, partsCount: 87, presetCount: 100, cycleTime: 45, dailyRunRate: 78.5, alarmActive: false
+    }},
+  },
+  {
+    id: '2', machineId: 'MC-002', name: '2호기 자동선반', ipAddress: '192.168.1.102', port: 8193, isActive: true,
+    template: { templateId: 'FANUC_0iTF_v1', name: 'FANUC 0i-TF', cncType: 'FANUC', seriesName: '0i-TF' },
+    realtime: { status: 'online', telemetry: {
+      runState: 0, mode: 'MDI', programNo: 'O1002', subProgramNo: 'O9002', productName: 'BOSS-B',
+      feedrate: 0, spindleSpeed: 0, partsCount: 45, presetCount: 80, cycleTime: 0, dailyRunRate: 45.2, alarmActive: true
+    }},
+  },
+  {
+    id: '3', machineId: 'MC-003', name: '3호기 자동선반', ipAddress: '192.168.1.103', port: 8193, isActive: true,
+    template: { templateId: 'FANUC_0iTF_v1', name: 'FANUC 0i-TF', cncType: 'FANUC', seriesName: '0i-TF' },
+    realtime: { status: 'online', telemetry: {
+      runState: 2, mode: 'AUTO', programNo: 'O1003', subProgramNo: 'O9003', productName: 'COLLAR-C',
+      feedrate: 100, spindleSpeed: 3000, partsCount: 156, presetCount: 200, cycleTime: 38, dailyRunRate: 92.1, alarmActive: false
+    }},
+  },
+  {
+    id: '4', machineId: 'MC-004', name: '4호기 자동선반', ipAddress: '192.168.1.104', port: 8193, isActive: true,
+    template: { templateId: 'FANUC_0iTF_v1', name: 'FANUC 0i-TF', cncType: 'FANUC', seriesName: '0i-TF' },
+    realtime: { status: 'offline', telemetry: undefined },
+  },
+];
+
+const MOCK_TELEMETRY: Record<string, TelemetryData> = {
+  'MC-001': { runState: 2, mode: 'AUTO', programNo: 'O1001', subProgramNo: 'O9001', productName: 'SHAFT-A', feedrate: 120, spindleSpeed: 2500, partsCount: 87, presetCount: 100, cycleTime: 45, dailyRunRate: 78.5, alarmActive: false },
+  'MC-002': { runState: 0, mode: 'MDI', programNo: 'O1002', subProgramNo: 'O9002', productName: 'BOSS-B', feedrate: 0, spindleSpeed: 0, partsCount: 45, presetCount: 80, cycleTime: 0, dailyRunRate: 45.2, alarmActive: true },
+  'MC-003': { runState: 2, mode: 'AUTO', programNo: 'O1003', subProgramNo: 'O9003', productName: 'COLLAR-C', feedrate: 100, spindleSpeed: 3000, partsCount: 156, presetCount: 200, cycleTime: 38, dailyRunRate: 92.1, alarmActive: false },
+};
+
+const MOCK_ALARMS: Record<string, Alarm[]> = {
+  'MC-002': [
+    { id: 'alarm-1', alarmNo: 1001, alarmMsg: 'SERVO ALARM: OVERLOAD', category: 'servo', occurredAt: new Date().toISOString() },
+  ],
+};
+
+export const useMachineStore = create<MachineState>((set) => ({
+  machines: MOCK_MACHINES,
   selectedMachineId: null,
-  telemetryMap: {},
-  activeAlarms: {},
+  telemetryMap: MOCK_TELEMETRY,
+  activeAlarms: MOCK_ALARMS,
   isLoading: false,
   error: null,
 

@@ -1,13 +1,19 @@
 // Dashboard Component
 
-import { useEffect } from 'react';
-import { useMachineStore } from '../stores/machineStore';
+import { useEffect, useState } from 'react';
+import { useMachineStore, Machine } from '../stores/machineStore';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { machineApi } from '../lib/api';
-import { MachineCard } from './MachineCard';
-import { MachineDetail } from './MachineDetail';
+import { CardView } from './CardView';
+import { FactoryView } from './FactoryView';
+import { calculateMachineStats } from '../lib/machineUtils';
+import { STATUS_COLORS } from '../lib/constants';
+
+type ViewMode = 'card' | 'factory';
 
 export function Dashboard() {
+  const [viewMode, setViewMode] = useState<ViewMode>('card');
+
   const {
     machines,
     selectedMachineId,
@@ -21,18 +27,23 @@ export function Dashboard() {
 
   const { isConnected, subscribe } = useWebSocket();
 
-  // Load machines on mount
+  // Load machines on mount (skip if mock data already exists)
   useEffect(() => {
+    if (machines.length > 0) {
+      return;
+    }
+
     const loadMachines = async () => {
       setLoading(true);
       try {
         const response = await machineApi.getAll();
         if (response.success && response.data) {
-          setMachines(response.data.items as any[]);
+          const data = response.data as { items: Machine[] };
+          setMachines(data.items);
         } else {
           setError(response.error?.message || '장비 목록을 불러올 수 없습니다.');
         }
-      } catch (err) {
+      } catch {
         setError('서버 연결에 실패했습니다.');
       } finally {
         setLoading(false);
@@ -50,18 +61,8 @@ export function Dashboard() {
     }
   }, [isConnected, machines, subscribe]);
 
-  // Calculate summary stats
-  const stats = {
-    total: machines.length,
-    running: machines.filter((m) => m.realtime?.telemetry?.runState === 2).length,
-    idle: machines.filter((m) =>
-      m.realtime?.status === 'online' &&
-      !m.realtime?.telemetry?.alarmActive &&
-      m.realtime?.telemetry?.runState !== 2
-    ).length,
-    alarm: machines.filter((m) => m.realtime?.telemetry?.alarmActive).length,
-    offline: machines.filter((m) => m.realtime?.status === 'offline').length,
-  };
+  // Calculate summary stats using utility function
+  const stats = calculateMachineStats(machines);
 
   if (isLoading) {
     return (
@@ -94,80 +95,65 @@ export function Dashboard() {
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
           대시보드
         </h1>
-        <div className="flex items-center gap-2">
-          <span
-            className={`w-2 h-2 rounded-full ${
-              isConnected ? 'bg-green-500' : 'bg-red-500'
-            }`}
-          />
-          <span className="text-sm text-gray-500">
-            {isConnected ? '실시간 연결됨' : '연결 끊김'}
-          </span>
+
+        <div className="flex items-center gap-4">
+          {/* View Toggle */}
+          <div className="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('card')}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                viewMode === 'card'
+                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow'
+                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              카드뷰
+            </button>
+            <button
+              onClick={() => setViewMode('factory')}
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                viewMode === 'factory'
+                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow'
+                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              공장뷰
+            </button>
+          </div>
+
+          {/* Connection Status */}
+          <div className="flex items-center gap-2">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isConnected ? 'bg-green-500' : 'bg-red-500'
+              }`}
+            />
+            <span className="text-sm text-gray-500">
+              {isConnected ? '실시간 연결됨' : '연결 끊김'}
+            </span>
+          </div>
         </div>
       </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-        <SummaryCard
-          label="전체"
-          value={stats.total}
-          color="bg-gray-500"
-        />
-        <SummaryCard
-          label="가동중"
-          value={stats.running}
-          color="bg-green-500"
-        />
-        <SummaryCard
-          label="대기"
-          value={stats.idle}
-          color="bg-blue-500"
-        />
-        <SummaryCard
-          label="알람"
-          value={stats.alarm}
-          color="bg-red-500"
-        />
-        <SummaryCard
-          label="오프라인"
-          value={stats.offline}
-          color="bg-gray-400"
-        />
+        <SummaryCard label="전체" value={stats.total} color="bg-slate-500" />
+        <SummaryCard label="가동중" value={stats.running} color={STATUS_COLORS.running} />
+        <SummaryCard label="대기" value={stats.idle} color={STATUS_COLORS.idle} />
+        <SummaryCard label="알람" value={stats.alarm} color={STATUS_COLORS.alarm} />
+        <SummaryCard label="오프라인" value={stats.offline} color={STATUS_COLORS.offline} />
       </div>
 
-      {/* Main Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Machine List */}
-        <div className="lg:col-span-2">
-          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
-            장비 현황
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {machines.map((machine) => (
-              <MachineCard
-                key={machine.id}
-                machine={machine}
-                isSelected={machine.machineId === selectedMachineId}
-                onSelect={selectMachine}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Machine Detail */}
-        <div className="lg:col-span-1">
-          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
-            상세 정보
-          </h2>
-          {selectedMachineId ? (
-            <MachineDetail machineId={selectedMachineId} />
-          ) : (
-            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-8 text-center text-gray-500">
-              장비를 선택하세요
-            </div>
-          )}
-        </div>
-      </div>
+      {/* Main Content - View Based */}
+      {viewMode === 'card' ? (
+        <CardView machines={machines} onSelectMachine={selectMachine} />
+      ) : (
+        <FactoryView
+          machines={machines}
+          onSelectMachine={selectMachine}
+          selectedMachineId={selectedMachineId}
+        />
+      )}
     </div>
   );
 }
