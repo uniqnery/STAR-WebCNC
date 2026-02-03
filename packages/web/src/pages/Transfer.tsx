@@ -26,11 +26,11 @@ interface BackupRecord {
 
 export function Transfer() {
   const user = useAuthStore((state) => state.user);
-  const machines = useMachineStore((state) => state.machines);
-  const selectedMachineId = useMachineStore((state) => state.selectedMachineId);
+  const { machines, selectedMachineId, selectMachine } = useMachineStore();
 
   const [activeTab, setActiveTab] = useState<TransferTab>('upload');
-  const [machineId, setMachineId] = useState(selectedMachineId || '');
+  // 로컬 상태 대신 스토어의 selectedMachineId 사용
+  const machineId = selectedMachineId || '';
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -189,26 +189,18 @@ export function Transfer() {
 
   return (
     <div className="p-6">
-      {/* Header */}
-      <div className="mb-6">
+      {/* Header with Machine Selector */}
+      <div className="mb-6 flex items-center gap-4">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
           프로그램 전송
         </h1>
-        <p className="text-gray-500">NC 프로그램 업로드/다운로드 및 백업</p>
-      </div>
-
-      {/* Machine Selection */}
-      <div className="mb-6">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          장비 선택
-        </label>
         <select
           value={machineId}
-          onChange={(e) => setMachineId(e.target.value)}
-          className="w-full max-w-xs px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
-                   bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          onChange={(e) => selectMachine(e.target.value || null)}
+          className="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm
+                   focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
-          <option value="">장비를 선택하세요</option>
+          <option value="">장비 선택</option>
           {machines.map((machine) => (
             <option key={machine.id} value={machine.machineId}>
               {machine.name}

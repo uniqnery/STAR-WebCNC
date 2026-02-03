@@ -11,7 +11,7 @@ import { Transfer } from './pages/Transfer';
 import { POP } from './pages/POP';
 import { WorkOrder } from './pages/WorkOrder';
 import { AuditLog } from './pages/AuditLog';
-import { Machines } from './pages/Machines';
+import { Settings } from './pages/Settings';
 
 // Protected Route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -67,16 +67,7 @@ function App() {
       />
 
       <Route
-        path="/machines"
-        element={
-          <ProtectedRoute>
-            <Machines />
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="/remote/:machineId"
+        path="/remote"
         element={
           <ProtectedRoute>
             <RemoteControl />
@@ -134,6 +125,15 @@ function App() {
         element={
           <ProtectedRoute>
             <AuditLog />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/settings"
+        element={
+          <ProtectedRoute>
+            <Settings />
           </ProtectedRoute>
         }
       />

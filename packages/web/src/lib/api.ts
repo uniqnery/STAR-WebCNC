@@ -359,3 +359,39 @@ export const auditApi = {
     return api.get(`/api/audit?${params.toString()}`);
   },
 };
+
+// Camera API
+export const cameraApi = {
+  getAll: () =>
+    api.get('/api/cameras'),
+
+  create: (config: Record<string, unknown>) =>
+    api.post('/api/cameras', config),
+
+  update: (id: string, config: Record<string, unknown>) =>
+    api.put(`/api/cameras/${id}`, config),
+
+  delete: (id: string) =>
+    api.delete(`/api/cameras/${id}`),
+
+  getWebRTCOffer: (id: string) =>
+    api.post(`/api/cameras/${id}/webrtc/offer`),
+
+  getStatus: (id: string) =>
+    api.get(`/api/cameras/${id}/status`),
+};
+
+// DNC Config API
+export const dncApi = {
+  // 서버 파일시스템 폴더 목록 조회
+  listFolders: (basePath: string) =>
+    api.get(`/api/filesystem/list?path=${encodeURIComponent(basePath)}`),
+
+  // 장비 DNC 경로 설정 조회
+  getConfig: (machineId: string) =>
+    api.get(`/api/machines/${machineId}/dnc-config`),
+
+  // 장비 DNC 경로 설정 저장 (관리자 전용)
+  saveConfig: (machineId: string, config: { path1: string; path2: string; path3?: string }) =>
+    api.put(`/api/machines/${machineId}/dnc-config`, config),
+};

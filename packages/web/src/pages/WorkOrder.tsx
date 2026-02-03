@@ -26,6 +26,52 @@ interface WorkOrder {
   createdAt: string;
 }
 
+// --- Mock Data ---
+const MOCK_WORK_ORDERS: WorkOrder[] = [
+  {
+    id: 'wo-001', orderNumber: 'WO-2026-0201', productCode: 'SFT-A100', productName: '정밀 샤프트 A100',
+    targetQuantity: 500, producedQty: 487, assignedMachine: 'SR-38B-01', assignedMachineName: 'SR-38B #1',
+    programNumber: 'O1001', priority: 3, status: 'IN_PROGRESS',
+    scheduledStart: '2026-02-01T08:00:00Z', scheduledEnd: '2026-02-03T18:00:00Z',
+    actualStart: '2026-02-01T08:15:00Z', createdAt: '2026-01-30T10:00:00Z',
+  },
+  {
+    id: 'wo-002', orderNumber: 'WO-2026-0202', productCode: 'PIN-B200', productName: '커넥터 핀 B200',
+    targetQuantity: 2000, producedQty: 0, assignedMachine: 'SR-20J-01', assignedMachineName: 'SR-20J #1',
+    programNumber: 'O2010', priority: 2, status: 'PENDING',
+    scheduledStart: '2026-02-04T08:00:00Z', scheduledEnd: '2026-02-06T18:00:00Z',
+    createdAt: '2026-01-31T14:00:00Z',
+  },
+  {
+    id: 'wo-003', orderNumber: 'WO-2026-0203', productCode: 'BUSH-C50', productName: '부싱 C50',
+    targetQuantity: 300, producedQty: 300, assignedMachine: 'SR-20J-02', assignedMachineName: 'SR-20J #2',
+    programNumber: 'O3005', priority: 1, status: 'COMPLETED',
+    scheduledStart: '2026-01-28T08:00:00Z', scheduledEnd: '2026-01-30T18:00:00Z',
+    actualStart: '2026-01-28T08:05:00Z', actualEnd: '2026-01-30T15:30:00Z',
+    createdAt: '2026-01-27T09:00:00Z',
+  },
+  {
+    id: 'wo-004', orderNumber: 'WO-2026-0204', productCode: 'NUT-D10', productName: '정밀 너트 D10',
+    targetQuantity: 1000, producedQty: 350, assignedMachine: 'SR-38B-02', assignedMachineName: 'SR-38B #2',
+    programNumber: 'O4020', priority: 3, status: 'IN_PROGRESS',
+    scheduledStart: '2026-02-02T08:00:00Z', scheduledEnd: '2026-02-05T18:00:00Z',
+    actualStart: '2026-02-02T08:20:00Z', createdAt: '2026-02-01T11:00:00Z',
+  },
+  {
+    id: 'wo-005', orderNumber: 'WO-2026-0205', productCode: 'RING-E30', productName: '씰링 E30',
+    targetQuantity: 800, producedQty: 120, assignedMachine: 'SR-20J-01', assignedMachineName: 'SR-20J #1',
+    programNumber: 'O5015', priority: 2, status: 'CANCELLED',
+    scheduledStart: '2026-01-29T08:00:00Z', scheduledEnd: '2026-01-31T18:00:00Z',
+    actualStart: '2026-01-29T08:10:00Z', createdAt: '2026-01-28T16:00:00Z',
+  },
+  {
+    id: 'wo-006', orderNumber: 'WO-2026-0206', productCode: 'BOLT-F15', productName: '특수 볼트 F15',
+    targetQuantity: 1500, producedQty: 0, priority: 1, status: 'PENDING',
+    scheduledStart: '2026-02-07T08:00:00Z', scheduledEnd: '2026-02-10T18:00:00Z',
+    createdAt: '2026-02-02T09:30:00Z',
+  },
+];
+
 export function WorkOrder() {
   const user = useAuthStore((state) => state.user);
   const machines = useMachineStore((state) => state.machines);
@@ -47,9 +93,19 @@ export function WorkOrder() {
       );
       if (response.success && response.data) {
         setOrders(response.data as WorkOrder[]);
+      } else {
+        // Fallback to mock data
+        const filtered = statusFilter === 'ALL'
+          ? MOCK_WORK_ORDERS
+          : MOCK_WORK_ORDERS.filter((o) => o.status === statusFilter);
+        setOrders(filtered);
       }
     } catch (err) {
       console.error('Failed to load work orders:', err);
+      const filtered = statusFilter === 'ALL'
+        ? MOCK_WORK_ORDERS
+        : MOCK_WORK_ORDERS.filter((o) => o.status === statusFilter);
+      setOrders(filtered);
     } finally {
       setIsLoading(false);
     }

@@ -26,6 +26,24 @@ interface ProductionChart {
   target: number;
 }
 
+// --- Mock Data ---
+const MOCK_PRODUCTION_STATS: ProductionStats[] = [
+  { machineId: 'SR-20J-01', machineName: 'SR-20J #1', totalParts: 1247, targetParts: 1500, runTime: 420, idleTime: 45, downTime: 15, availability: 87.5, performance: 83.1, quality: 99.2, oee: 72.1 },
+  { machineId: 'SR-20J-02', machineName: 'SR-20J #2', totalParts: 980, targetParts: 1200, runTime: 390, idleTime: 60, downTime: 30, availability: 81.3, performance: 81.7, quality: 98.8, oee: 65.5 },
+  { machineId: 'SR-38B-01', machineName: 'SR-38B #1', totalParts: 2100, targetParts: 2000, runTime: 450, idleTime: 20, downTime: 10, availability: 93.8, performance: 95.2, quality: 99.5, oee: 88.9 },
+  { machineId: 'SR-38B-02', machineName: 'SR-38B #2', totalParts: 560, targetParts: 800, runTime: 280, idleTime: 100, downTime: 100, availability: 58.3, performance: 70.0, quality: 97.1, oee: 39.7 },
+];
+
+const MOCK_CHART_DATA: ProductionChart[] = [
+  { date: '01/27', production: 4200, target: 5000 },
+  { date: '01/28', production: 4800, target: 5000 },
+  { date: '01/29', production: 3900, target: 5000 },
+  { date: '01/30', production: 5100, target: 5000 },
+  { date: '01/31', production: 4600, target: 5000 },
+  { date: '02/01', production: 4887, target: 5500 },
+  { date: '02/02', production: 3200, target: 5500 },
+];
+
 export function POP() {
   const machines = useMachineStore((state) => state.machines);
   const selectedMachineId = useMachineStore((state) => state.selectedMachineId);
@@ -45,9 +63,22 @@ export function POP() {
         const data = response.data as { stats: ProductionStats[]; chart: ProductionChart[] };
         setStats(data.stats);
         setChartData(data.chart);
+      } else {
+        // Fallback to mock data
+        const filtered = selectedMachine
+          ? MOCK_PRODUCTION_STATS.filter((s) => s.machineId === selectedMachine)
+          : MOCK_PRODUCTION_STATS;
+        setStats(filtered);
+        setChartData(MOCK_CHART_DATA);
       }
     } catch (err) {
       console.error('Failed to load production stats:', err);
+      // Fallback to mock data
+      const filtered = selectedMachine
+        ? MOCK_PRODUCTION_STATS.filter((s) => s.machineId === selectedMachine)
+        : MOCK_PRODUCTION_STATS;
+      setStats(filtered);
+      setChartData(MOCK_CHART_DATA);
     } finally {
       setIsLoading(false);
     }

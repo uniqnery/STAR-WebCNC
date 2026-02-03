@@ -22,6 +22,68 @@ interface AuditLogEntry {
 
 type ActionFilter = 'all' | 'control' | 'scheduler' | 'transfer' | 'auth' | 'admin';
 
+// --- Mock Data ---
+const MOCK_AUDIT_LOGS: AuditLogEntry[] = [
+  {
+    id: 'log-001', userId: 'u1', username: 'admin', userRole: 'ADMIN',
+    action: 'control.acquire', targetType: 'machine', targetId: 'SR-38B-01', targetName: 'SR-38B #1',
+    result: 'success', ipAddress: '192.168.1.10', createdAt: '2026-02-03T09:00:00Z',
+  },
+  {
+    id: 'log-002', userId: 'u1', username: 'admin', userRole: 'ADMIN',
+    action: 'scheduler.start', targetType: 'machine', targetId: 'SR-38B-01', targetName: 'SR-38B #1',
+    params: { rows: 3, totalQty: 1500 }, result: 'success', ipAddress: '192.168.1.10', createdAt: '2026-02-03T09:02:00Z',
+  },
+  {
+    id: 'log-003', userId: 'u2', username: 'operator1', userRole: 'OPERATOR',
+    action: 'control.command', targetType: 'machine', targetId: 'SR-20J-01', targetName: 'SR-20J #1',
+    params: { command: 'CYCLE_START' }, result: 'success', ipAddress: '192.168.1.20', createdAt: '2026-02-03T08:45:00Z',
+  },
+  {
+    id: 'log-004', userId: 'u3', username: 'engineer', userRole: 'AS',
+    action: 'transfer.upload', targetType: 'machine', targetId: 'SR-20J-02', targetName: 'SR-20J #2',
+    params: { program: 'O4500', size: '12.5KB' }, result: 'success', ipAddress: '192.168.1.30', createdAt: '2026-02-03T08:30:00Z',
+  },
+  {
+    id: 'log-005', userId: 'u2', username: 'operator1', userRole: 'OPERATOR',
+    action: 'auth.login', result: 'success', ipAddress: '192.168.1.20', createdAt: '2026-02-03T08:00:00Z',
+  },
+  {
+    id: 'log-006', userId: 'u1', username: 'admin', userRole: 'ADMIN',
+    action: 'scheduler.cancel', targetType: 'machine', targetId: 'SR-38B-02', targetName: 'SR-38B #2',
+    params: { reason: 'material shortage' }, result: 'success', ipAddress: '192.168.1.10', createdAt: '2026-02-02T17:30:00Z',
+  },
+  {
+    id: 'log-007', userId: 'u3', username: 'engineer', userRole: 'AS',
+    action: 'transfer.download', targetType: 'machine', targetId: 'SR-38B-01', targetName: 'SR-38B #1',
+    params: { program: 'O1001' }, result: 'success', ipAddress: '192.168.1.30', createdAt: '2026-02-02T16:00:00Z',
+  },
+  {
+    id: 'log-008', userId: 'u1', username: 'admin', userRole: 'ADMIN',
+    action: 'admin.machine.update', targetType: 'machine', targetId: 'SR-20J-01', targetName: 'SR-20J #1',
+    params: { field: 'ipAddress', value: '192.168.0.101' }, result: 'success', ipAddress: '192.168.1.10', createdAt: '2026-02-02T14:00:00Z',
+  },
+  {
+    id: 'log-009', userId: 'u4', username: 'viewer', userRole: 'VIEWER',
+    action: 'auth.login', result: 'failure', errorMsg: '비밀번호 불일치', ipAddress: '192.168.1.50', createdAt: '2026-02-02T13:00:00Z',
+  },
+  {
+    id: 'log-010', userId: 'u1', username: 'admin', userRole: 'ADMIN',
+    action: 'control.release', targetType: 'machine', targetId: 'SR-20J-02', targetName: 'SR-20J #2',
+    result: 'success', ipAddress: '192.168.1.10', createdAt: '2026-02-02T12:00:00Z',
+  },
+  {
+    id: 'log-011', userId: 'u3', username: 'engineer', userRole: 'AS',
+    action: 'transfer.backup', targetType: 'machine', targetId: 'SR-38B-01', targetName: 'SR-38B #1',
+    params: { programs: 15 }, result: 'success', ipAddress: '192.168.1.30', createdAt: '2026-02-02T10:00:00Z',
+  },
+  {
+    id: 'log-012', userId: 'u1', username: 'admin', userRole: 'ADMIN',
+    action: 'admin.user.create', targetType: 'user', targetId: 'u5', targetName: 'newoperator',
+    result: 'success', ipAddress: '192.168.1.10', createdAt: '2026-02-01T09:00:00Z',
+  },
+];
+
 export function AuditLog() {
   const machines = useMachineStore((state) => state.machines);
 
@@ -54,9 +116,21 @@ export function AuditLog() {
         const data = response.data as { items: AuditLogEntry[]; totalPages: number };
         setLogs(data.items);
         setTotalPages(data.totalPages);
+      } else {
+        // Fallback to mock data
+        let filtered = [...MOCK_AUDIT_LOGS];
+        if (actionFilter !== 'all') filtered = filtered.filter((l) => l.action.startsWith(actionFilter + '.'));
+        if (machineFilter) filtered = filtered.filter((l) => l.targetId === machineFilter);
+        setLogs(filtered);
+        setTotalPages(1);
       }
     } catch (err) {
       console.error('Failed to load audit logs:', err);
+      let filtered = [...MOCK_AUDIT_LOGS];
+      if (actionFilter !== 'all') filtered = filtered.filter((l) => l.action.startsWith(actionFilter + '.'));
+      if (machineFilter) filtered = filtered.filter((l) => l.targetId === machineFilter);
+      setLogs(filtered);
+      setTotalPages(1);
     } finally {
       setIsLoading(false);
     }

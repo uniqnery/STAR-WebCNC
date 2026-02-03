@@ -3,7 +3,6 @@
 import { ReactNode, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
-import { useMachineStore } from '../stores/machineStore';
 import { authApi } from '../lib/api';
 
 interface LayoutProps {
@@ -15,7 +14,6 @@ export function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
-  const { machines, selectedMachineId, selectMachine } = useMachineStore();
 
   const handleLogout = async () => {
     await authApi.logout();
@@ -28,15 +26,28 @@ export function Layout({ children }: LayoutProps) {
     setSidebarOpen(false);
   };
 
+  // 하위 메뉴 펼침 상태 (기본 접힘)
+  const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({ machines: false });
+
+  const toggleMenu = (key: string) => {
+    setExpandedMenus((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // 일반 메뉴 아이템
   const menuItems = [
     { path: '/', label: 'Dashboard', icon: DashboardIcon },
-    { path: '/machines', label: 'Machines', icon: MachineIcon },
-    { path: '/scheduler', label: 'Scheduler', icon: SchedulerIcon },
-    { path: '/transfer', label: 'Transfer', icon: TransferIcon },
     { path: '/pop', label: 'POP', icon: POPIcon },
     { path: '/work-orders', label: 'Work Orders', icon: WorkOrderIcon },
     { path: '/alarms', label: 'Alarms', icon: AlarmIcon },
     { path: '/audit', label: 'Audit Log', icon: AuditIcon },
+    { path: '/settings', label: 'Settings', icon: SettingsIcon },
+  ];
+
+  // Machines 하위 메뉴
+  const machineSubMenus = [
+    { path: '/remote', label: 'Remote Panel', icon: RemotePanelIcon },
+    { path: '/scheduler', label: 'Scheduler', icon: SchedulerIcon },
+    { path: '/transfer', label: 'File Transfer', icon: TransferIcon },
   ];
 
   return (
@@ -73,28 +84,66 @@ export function Layout({ children }: LayoutProps) {
           </button>
         </div>
 
-        {/* Machine Selector */}
-        <div className="p-4 border-b border-gray-700">
-          <label className="text-xs text-gray-400 block mb-1">선택 장비</label>
-          <select
-            value={selectedMachineId || ''}
-            onChange={(e) => selectMachine(e.target.value || null)}
-            className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm
-                     focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">전체 보기</option>
-            {machines.map((machine) => (
-              <option key={machine.id} value={machine.machineId}>
-                {machine.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
         {/* Navigation */}
         <nav className="flex-1 p-4 overflow-y-auto">
           <ul className="space-y-1">
-            {menuItems.map((item) => {
+            {/* Dashboard */}
+            <li>
+              <Link
+                to="/"
+                onClick={handleNavClick}
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                  location.pathname === '/'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                <DashboardIcon className="w-5 h-5" />
+                <span>Dashboard</span>
+              </Link>
+            </li>
+
+            {/* Machines - 펼침 메뉴 */}
+            <li>
+              <button
+                onClick={() => toggleMenu('machines')}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-gray-300 hover:bg-gray-700 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <MachineIcon className="w-5 h-5" />
+                  <span>Machines</span>
+                </div>
+                <ChevronIcon className={`w-4 h-4 transition-transform ${expandedMenus.machines ? 'rotate-90' : ''}`} />
+              </button>
+
+              {/* 하위 메뉴 */}
+              {expandedMenus.machines && (
+                <ul className="mt-1 ml-4 space-y-1 border-l border-gray-700 pl-3">
+                  {machineSubMenus.map((item) => {
+                    const isActive = location.pathname === item.path;
+                    return (
+                      <li key={item.path}>
+                        <Link
+                          to={item.path}
+                          onClick={handleNavClick}
+                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                            isActive
+                              ? 'bg-blue-600 text-white'
+                              : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                          }`}
+                        >
+                          <item.icon className="w-4 h-4" />
+                          <span>{item.label}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </li>
+
+            {/* 나머지 메뉴 */}
+            {menuItems.slice(1).map((item) => {
               const isActive = location.pathname === item.path;
               return (
                 <li key={item.path}>
@@ -244,6 +293,31 @@ function AuditIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+    </svg>
+  );
+}
+
+function SettingsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+    </svg>
+  );
+}
+
+function RemotePanelIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
     </svg>
   );
 }

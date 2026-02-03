@@ -17,6 +17,45 @@ interface AlarmRecord {
   acknowledgedAt?: string;
 }
 
+// --- Mock Data ---
+const MOCK_ALARMS: AlarmRecord[] = [
+  {
+    id: 'alm-001', machineId: 'SR-20J-01', alarmNo: 1001, alarmMsg: 'SERVO ALARM: X AXIS EXCESS ERROR',
+    alarmType: 'ALARM', occurredAt: '2026-02-03T09:15:00Z',
+  },
+  {
+    id: 'alm-002', machineId: 'SR-38B-02', alarmNo: 2010, alarmMsg: 'OVERTRAVEL: +Z AXIS',
+    alarmType: 'CRITICAL', occurredAt: '2026-02-03T08:42:00Z',
+  },
+  {
+    id: 'alm-003', machineId: 'SR-20J-02', alarmNo: 85, alarmMsg: 'APC ALARM: PROGRAM NOT FOUND (O4500)',
+    alarmType: 'WARNING', occurredAt: '2026-02-03T07:30:00Z', clearedAt: '2026-02-03T07:35:00Z',
+    acknowledgedBy: 'admin', acknowledgedAt: '2026-02-03T07:36:00Z',
+  },
+  {
+    id: 'alm-004', machineId: 'SR-38B-01', alarmNo: 300, alarmMsg: 'OVERHEAT WARNING: SPINDLE MOTOR',
+    alarmType: 'WARNING', occurredAt: '2026-02-02T16:20:00Z', clearedAt: '2026-02-02T16:45:00Z',
+  },
+  {
+    id: 'alm-005', machineId: 'SR-20J-01', alarmNo: 510, alarmMsg: 'TOOL LIFE: T0305 EXCEEDED',
+    alarmType: 'WARNING', occurredAt: '2026-02-02T14:10:00Z',
+  },
+  {
+    id: 'alm-006', machineId: 'SR-38B-02', alarmNo: 750, alarmMsg: 'CHUCK PRESSURE LOW',
+    alarmType: 'ALARM', occurredAt: '2026-02-02T11:55:00Z', clearedAt: '2026-02-02T12:20:00Z',
+    acknowledgedBy: 'operator1', acknowledgedAt: '2026-02-02T12:00:00Z',
+  },
+  {
+    id: 'alm-007', machineId: 'SR-20J-02', alarmNo: 1020, alarmMsg: 'SERVO ALARM: Z AXIS FEEDBACK ERROR',
+    alarmType: 'ALARM', occurredAt: '2026-02-01T22:30:00Z', clearedAt: '2026-02-01T23:10:00Z',
+    acknowledgedBy: 'admin', acknowledgedAt: '2026-02-01T22:35:00Z',
+  },
+  {
+    id: 'alm-008', machineId: 'SR-38B-01', alarmNo: 60, alarmMsg: 'BAR FEEDER: MATERIAL END',
+    alarmType: 'WARNING', occurredAt: '2026-02-01T18:00:00Z', clearedAt: '2026-02-01T18:20:00Z',
+  },
+];
+
 export function Alarms() {
   const machines = useMachineStore((state) => state.machines);
   const selectedMachineId = useMachineStore((state) => state.selectedMachineId);
@@ -37,9 +76,23 @@ export function Alarms() {
       });
       if (response.success && response.data) {
         setAlarms(response.data as AlarmRecord[]);
+      } else {
+        // Fallback to mock data
+        let filtered = machineFilter
+          ? MOCK_ALARMS.filter((a) => a.machineId === machineFilter)
+          : MOCK_ALARMS;
+        if (filter === 'active') filtered = filtered.filter((a) => !a.clearedAt);
+        if (filter === 'history') filtered = filtered.filter((a) => !!a.clearedAt);
+        setAlarms(filtered);
       }
     } catch (err) {
       console.error('Failed to load alarms:', err);
+      let filtered = machineFilter
+        ? MOCK_ALARMS.filter((a) => a.machineId === machineFilter)
+        : MOCK_ALARMS;
+      if (filter === 'active') filtered = filtered.filter((a) => !a.clearedAt);
+      if (filter === 'history') filtered = filtered.filter((a) => !!a.clearedAt);
+      setAlarms(filtered);
     } finally {
       setIsLoading(false);
     }
