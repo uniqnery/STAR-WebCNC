@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../lib/prisma';
 import { mqttService, TOPICS } from '../lib/mqtt';
 import { redisService } from '../lib/redis';
+import { commandWaiter } from '../lib/commandWaiter';
 import { authenticate, authorize } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error';
 import { ApiResponse } from '../types';
@@ -21,13 +22,16 @@ router.use(authenticate);
  * Send command to machine
  */
 router.post('/:machineId',
-  authorize(UserRole.ADMIN, UserRole.AS),
+  authorize(UserRole.ADMIN, UserRole.HQ_ENGINEER),
   asyncHandler(async (
     req: Request,
     res: Response<ApiResponse>
   ) => {
     const { machineId } = req.params;
     const { command, params } = req.body;
+    // ?wait=true : Agent 결과를 최대 timeoutMs 동안 대기 후 반환
+    const waitForResult = req.query['wait'] === 'true';
+    const timeoutMs     = parseInt(req.query['timeout'] as string) || 30_000;
 
     if (!command) {
       return res.status(400).json({
@@ -110,6 +114,33 @@ router.post('/:machineId',
       },
     });
 
+    // ── wait=true: Agent 응답을 동기적으로 대기 ──────────────────
+    if (waitForResult) {
+      try {
+        const cmdResult = await commandWaiter.wait(correlationId, timeoutMs);
+        return res.json({
+          success: cmdResult.status === 'success',
+          data: {
+            correlationId,
+            status: cmdResult.status === 'success' ? CommandStatus.SUCCESS : CommandStatus.FAILURE,
+            result: cmdResult.result ?? null,
+            errorCode: cmdResult.errorCode,
+            errorMessage: cmdResult.errorMessage,
+          },
+        });
+      } catch {
+        // timeout
+        return res.status(504).json({
+          success: false,
+          error: {
+            code: 'COMMAND_TIMEOUT',
+            message: `명령 응답 대기 시간 초과 (${timeoutMs}ms)`,
+          },
+        });
+      }
+    }
+
+    // ── 기본: PENDING 즉시 반환 ──────────────────────────────────
     return res.json({
       success: true,
       data: {

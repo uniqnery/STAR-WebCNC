@@ -79,7 +79,7 @@ export function ControlLockButton({
   }, [machineId, onLockChange]);
 
   // Check if user has permission to control
-  const canControl = user?.role === 'ADMIN' || user?.role === 'AS';
+  const canControl = user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER';
 
   if (!canControl) {
     return (

@@ -11,8 +11,17 @@ import { STATUS_COLORS } from '../lib/constants';
 
 type ViewMode = 'card' | 'factory';
 
+const VIEW_MODE_KEY = 'star-webcnc-dashboard-view-mode';
+
 export function Dashboard() {
-  const [viewMode, setViewMode] = useState<ViewMode>('card');
+  const [viewMode, setViewModeState] = useState<ViewMode>(() => {
+    return (localStorage.getItem(VIEW_MODE_KEY) as ViewMode) || 'card';
+  });
+
+  const setViewMode = (mode: ViewMode) => {
+    setViewModeState(mode);
+    localStorage.setItem(VIEW_MODE_KEY, mode);
+  };
 
   const {
     machines,

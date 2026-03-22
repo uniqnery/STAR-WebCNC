@@ -28,7 +28,7 @@ export function getMachineStatus(machine: Machine): MachineStatus {
     return 'alarm';
   }
 
-  if (telemetry.runState === RUN_STATE.START) {
+  if (telemetry.runState === RUN_STATE.START || telemetry.runState === RUN_STATE.MSTR) {
     return 'running';
   }
 
@@ -50,7 +50,7 @@ export function getStatusFromTelemetry(
     return 'alarm';
   }
 
-  if (telemetry.runState === RUN_STATE.START) {
+  if (telemetry.runState === RUN_STATE.START || telemetry.runState === RUN_STATE.MSTR) {
     return 'running';
   }
 

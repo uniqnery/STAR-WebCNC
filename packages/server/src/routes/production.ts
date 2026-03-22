@@ -6,27 +6,6 @@ import { authenticate } from '../middleware/auth';
 
 const router = Router();
 
-interface ProductionStats {
-  totalParts: number;
-  totalRunTime: number; // minutes
-  totalDownTime: number; // minutes
-  availability: number; // percentage
-  performance: number; // percentage
-  quality: number; // percentage
-  oee: number; // percentage
-  machineStats: MachineProductionStats[];
-}
-
-interface MachineProductionStats {
-  machineId: string;
-  machineName: string;
-  partsProduced: number;
-  runTime: number;
-  downTime: number;
-  cycleTime: number;
-  oee: number;
-}
-
 // Get production statistics
 router.get('/stats', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -50,111 +29,125 @@ router.get('/stats', authenticate, async (req: Request, res: Response, next: Nex
     }
 
     // Build where clause
-    const whereClause: Record<string, unknown> = {
+    const logWhere: Record<string, unknown> = {
       startTime: { gte: startDate },
     };
 
+    let filteredMachineId: string | undefined;
     if (machineId && typeof machineId === 'string') {
-      const machine = await prisma.machine.findUnique({
-        where: { machineId },
-      });
+      const machine = await prisma.machine.findUnique({ where: { machineId } });
       if (machine) {
-        whereClause.machineId = machine.id;
+        logWhere.machineId = machine.id;
+        filteredMachineId = machine.id;
       }
     }
 
-    // Get production logs
-    const logs = await prisma.productionLog.findMany({
-      where: whereClause,
-      include: {
-        machine: true,
-      },
-      orderBy: { startTime: 'desc' },
-    });
-
-    // Get all machines for complete stats
+    // All active machines
     const machines = await prisma.machine.findMany({
-      where: { isActive: true },
+      where: filteredMachineId ? { id: filteredMachineId } : { isActive: true },
     });
 
-    // Calculate overall stats
-    let totalParts = 0;
-    let totalRunTime = 0;
-    let totalCycleTime = 0;
-    const machineStatsMap = new Map<string, MachineProductionStats>();
+    // Production logs in range
+    const logs = await prisma.productionLog.findMany({
+      where: logWhere,
+      include: { machine: true },
+      orderBy: { startTime: 'asc' },
+    });
 
-    // Initialize machine stats
-    for (const machine of machines) {
-      machineStatsMap.set(machine.id, {
-        machineId: machine.machineId,
-        machineName: machine.name,
-        partsProduced: 0,
-        runTime: 0,
-        downTime: 0,
-        cycleTime: 0,
-        oee: 0,
-      });
+    // Today's WorkOrders for target qty per machine
+    // machineId 필터 시 해당 machine의 machineId 문자열로 조회
+    let assignedMachineFilter: string | undefined;
+    if (filteredMachineId) {
+      const fm = machines.find((m) => m.id === filteredMachineId);
+      assignedMachineFilter = fm?.machineId;
+    }
+    const workOrders = await prisma.workOrder.findMany({
+      where: {
+        status: { in: ['PENDING', 'IN_PROGRESS'] },
+        ...(assignedMachineFilter ? { assignedMachine: assignedMachineFilter } : {}),
+      },
+    });
+
+    // assignedMachine은 machineId 문자열 (machine.machineId)
+    const targetByMachineId = new Map<string, number>();
+    for (const wo of workOrders) {
+      if (!wo.assignedMachine) continue;
+      const prev = targetByMachineId.get(wo.assignedMachine) ?? 0;
+      targetByMachineId.set(wo.assignedMachine, prev + wo.targetQuantity);
     }
 
-    // Aggregate production logs
-    for (const log of logs) {
-      totalParts += log.partsCount;
-      totalRunTime += log.cycleTime;
-      totalCycleTime += log.cycleTime;
+    // ── per-machine stats ──────────────────────────────────────
+    const plannedMinutes = (now.getTime() - startDate.getTime()) / 60000;
 
-      const stats = machineStatsMap.get(log.machineId);
-      if (stats) {
-        stats.partsProduced += log.partsCount;
-        stats.runTime += log.cycleTime;
-        stats.cycleTime = log.cycleTime; // Latest cycle time
+    const stats = machines.map((m) => {
+      const machineLogs = logs.filter((l) => l.machineId === m.id);
+      const totalParts = machineLogs.reduce((s, l) => s + l.partsCount, 0);
+      const runTimeMin  = machineLogs.reduce((s, l) => s + l.cycleTime, 0) / 60; // cycleTime은 seconds
+      const targetParts = targetByMachineId.get(m.machineId) ?? 0;
+
+      const availability  = plannedMinutes > 0 ? Math.min((runTimeMin / plannedMinutes) * 100, 100) : 0;
+      const idealCycleMin = 0.5; // 30초/개 가정
+      const performance   = runTimeMin > 0 ? Math.min((idealCycleMin * totalParts) / runTimeMin * 100, 100) : 0;
+      const quality       = 98; // 기본 98%
+      const oee           = (availability * performance * quality) / 10000;
+      const downTimeMin   = Math.max(0, plannedMinutes - runTimeMin);
+      const idleTimeMin   = 0;
+
+      return {
+        machineId:    m.machineId,
+        machineName:  m.name,
+        totalParts,
+        targetParts,
+        runTime:      Math.round(runTimeMin),
+        idleTime:     Math.round(idleTimeMin),
+        downTime:     Math.round(downTimeMin),
+        availability: Math.round(availability * 10) / 10,
+        performance:  Math.round(performance * 10) / 10,
+        quality,
+        oee:          Math.round(oee * 10) / 10,
+      };
+    });
+
+    // ── chart data: 날짜/시간별 집계 ──────────────────────────
+    const chart: { date: string; production: number; target: number }[] = [];
+    const totalTargetParts = stats.reduce((s, st) => s + st.targetParts, 0);
+
+    if (timeRange === 'today') {
+      // 시간별 (0~현재시)
+      const currentHour = now.getHours();
+      for (let h = 0; h <= currentHour; h++) {
+        const from = new Date(startDate.getTime() + h * 3600000);
+        const to   = new Date(from.getTime() + 3600000);
+        const prod = logs
+          .filter((l) => l.startTime >= from && l.startTime < to)
+          .reduce((s, l) => s + l.partsCount, 0);
+        chart.push({
+          date:       `${String(h).padStart(2, '0')}시`,
+          production: prod,
+          target:     Math.round(totalTargetParts / 24),
+        });
+      }
+    } else {
+      // 날짜별
+      const days = timeRange === 'week' ? 7 : 30;
+      for (let d = days - 1; d >= 0; d--) {
+        const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - d);
+        const dayEnd   = new Date(dayStart.getTime() + 86400000);
+        const prod = logs
+          .filter((l) => l.startTime >= dayStart && l.startTime < dayEnd)
+          .reduce((s, l) => s + l.partsCount, 0);
+        const label = `${String(dayStart.getMonth() + 1).padStart(2, '0')}/${String(dayStart.getDate()).padStart(2, '0')}`;
+        chart.push({
+          date:       label,
+          production: prod,
+          target:     Math.round(totalTargetParts / days),
+        });
       }
     }
-
-    // Calculate OEE components
-    // Availability = Run Time / Planned Production Time
-    // Performance = (Ideal Cycle Time × Total Count) / Run Time
-    // Quality = Good Count / Total Count
-    // OEE = Availability × Performance × Quality
-
-    const plannedTime = (now.getTime() - startDate.getTime()) / 60000; // minutes
-    const availability = plannedTime > 0 ? Math.min((totalRunTime / 60) / plannedTime * 100, 100) : 0;
-
-    // Assume ideal cycle time of 30 seconds per part for demo
-    const idealCycleTime = 0.5; // minutes
-    const performance = totalRunTime > 0 ? Math.min((idealCycleTime * totalParts) / (totalRunTime / 60) * 100, 100) : 0;
-
-    // Assume 98% quality for demo
-    const quality = 98;
-
-    const oee = (availability * performance * quality) / 10000;
-
-    // Calculate downtime
-    const totalDownTime = Math.max(0, plannedTime - (totalRunTime / 60));
-
-    // Calculate per-machine OEE
-    const machineStats: MachineProductionStats[] = [];
-    for (const [, stats] of machineStatsMap) {
-      const machineAvailability = plannedTime > 0 ? Math.min((stats.runTime / 60) / plannedTime * 100, 100) : 0;
-      const machinePerformance = stats.runTime > 0 ? Math.min((idealCycleTime * stats.partsProduced) / (stats.runTime / 60) * 100, 100) : 0;
-      stats.oee = (machineAvailability * machinePerformance * quality) / 10000;
-      stats.downTime = Math.max(0, plannedTime - (stats.runTime / 60));
-      machineStats.push(stats);
-    }
-
-    const result: ProductionStats = {
-      totalParts,
-      totalRunTime: Math.round(totalRunTime / 60),
-      totalDownTime: Math.round(totalDownTime),
-      availability: Math.round(availability * 10) / 10,
-      performance: Math.round(performance * 10) / 10,
-      quality,
-      oee: Math.round(oee * 10) / 10,
-      machineStats,
-    };
 
     res.json({
       success: true,
-      data: result,
+      data: { stats, chart },
     });
   } catch (error) {
     next(error);
@@ -165,14 +158,10 @@ router.get('/stats', authenticate, async (req: Request, res: Response, next: Nex
 router.get('/:machineId/logs', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { machineId } = req.params;
-    const page = parseInt(req.query.page as string) || 1;
+    const page  = parseInt(req.query.page  as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
 
-    // Find machine
-    const machine = await prisma.machine.findUnique({
-      where: { machineId },
-    });
-
+    const machine = await prisma.machine.findUnique({ where: { machineId } });
     if (!machine) {
       return res.status(404).json({
         success: false,
@@ -187,27 +176,19 @@ router.get('/:machineId/logs', authenticate, async (req: Request, res: Response,
         skip: (page - 1) * limit,
         take: limit,
       }),
-      prisma.productionLog.count({
-        where: { machineId: machine.id },
-      }),
+      prisma.productionLog.count({ where: { machineId: machine.id } }),
     ]);
 
     res.json({
       success: true,
-      data: {
-        items: logs,
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
+      data: { items: logs, total, page, limit, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
     next(error);
   }
 });
 
-// Record production (called by scheduler or agent)
+// Record production (called by scheduler or agent via M20 event)
 export async function recordProduction(data: {
   machineId: string;
   programNo: string;
@@ -218,10 +199,7 @@ export async function recordProduction(data: {
   errorCode?: string;
 }): Promise<void> {
   try {
-    const machine = await prisma.machine.findUnique({
-      where: { machineId: data.machineId },
-    });
-
+    const machine = await prisma.machine.findUnique({ where: { machineId: data.machineId } });
     if (!machine) {
       console.error(`[Production] Machine not found: ${data.machineId}`);
       return;
@@ -231,14 +209,14 @@ export async function recordProduction(data: {
 
     await prisma.productionLog.create({
       data: {
-        machineId: machine.id,
-        programNo: data.programNo,
-        startTime: data.startTime,
-        endTime: data.endTime,
+        machineId:  machine.id,
+        programNo:  data.programNo,
+        startTime:  data.startTime,
+        endTime:    data.endTime,
         cycleTime,
         partsCount: data.partsCount,
-        status: data.status,
-        errorCode: data.errorCode,
+        status:     data.status,
+        errorCode:  data.errorCode,
       },
     });
   } catch (error) {

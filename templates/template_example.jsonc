@@ -1,0 +1,457 @@
+{
+  // ═══════════════════════════════════════════════════════════════════
+  //  Star-WebCNC 장비 템플릿 예제
+  //  ─────────────────────────────────────────────────────────────────
+  //  이 파일을 복사하여 장비 모델별로 하나씩 작성해 주세요.
+  //  파일명 규칙: {CNC제조사}_{컨트롤러}_{모델명}.jsonc
+  //  예: FANUC_0iTF_SR20JTypeC.jsonc
+  //
+  //  ※ "_example" 필드는 참고용이며 실제 사용하지 않습니다.
+  //  ※ "_description" 필드는 설명용이며 실제 사용하지 않습니다.
+  //  ※ PMC 주소가 확인되지 않은 항목은 null로 남겨두세요.
+  // ═══════════════════════════════════════════════════════════════════
+
+  // ─── 1. 메타데이터 ─────────────────────────────────────────────────
+  "templateId": "FANUC_0i-TF Plus_SB-20R2_V1",
+  "_templateId_example": "FANUC_0iTF_SR20J_v1",
+  "_templateId_description": "고유 식별자 (제조사_컨트롤러_모델_버전)",
+
+  "version": "1.0.0",
+  "_version_example": "1.0.0",
+  "_version_description": "SemVer 형식 (major.minor.patch)",
+
+  "name": "Star SB-20R2 (FANUC 0i-TF Plus)",
+  "_name_example": "Star SR-20J Type C (FANUC 0i-TF)",
+  "_name_description": "장비 표시명 (관리 화면에서 보이는 이름)",
+
+  "description": "Star SB-20R2 2계통 자동선반, FANUC 0i-TF Plus 컨트롤러",
+  "_description_example": "Star SR-20J Type C 2계통 자동선반, FANUC 0i-TF 컨트롤러",
+  "_description_description": "템플릿 설명 (선택)",
+
+  // ─── 2. CNC 시스템 정보 ────────────────────────────────────────────
+  "systemInfo": {
+    "cncType": "FANUC",
+    "_cncType_example": "FANUC",
+    "_cncType_description": "CNC 제조사 (FANUC / MITSUBISHI / SIEMENS)",
+
+    "seriesName": "0i-TF Plus",
+    "_seriesName_example": "0i-TF",
+    "_seriesName_description": "컨트롤러 시리즈명 (0i-TF, 30i-B, 31i-B5 등)",
+
+    "modelName": "SB-20R2",
+    "_modelName_example": "SR-20J Type C",
+    "_modelName_description": "장비 모델명 (Star 기계 모델)",
+
+    "maxPaths": 2,
+    "_maxPaths_example": 2,
+    "_maxPaths_description": "최대 계통(Path) 수 (1=단일계통, 2=2계통, 3=3계통)",
+
+    "supportedOptions": [],
+    "_supportedOptions_example": ["PMC-SA1", "Dual Check Safety", "FANUC PICTURE"],
+    "_supportedOptions_description": "장착된 옵션 목록 (확인 가능한 범위에서)"
+  },
+
+  // ─── 3. 축(Axis) 구성 ─────────────────────────────────────────────
+  //  각 계통(Path)별로 사용하는 축 이름과 순서를 정의합니다.
+  //  FOCAS에서 읽어오는 좌표값(absolute[])의 인덱스와 1:1 대응됩니다.
+  //  예) axes: ["X","Z","C"] → absolute[0]=X, absolute[1]=Z, absolute[2]=C
+  "axisConfig": {
+    "path1": {
+      "axes": ["X", "Z", "C", "Y", "A", "CRG"],
+      "_axes_example": ["X", "Z", "C", "Y"],
+      "_axes_description": "Path1(주축) 축 이름 목록 - FOCAS 좌표 인덱스 순서대로",
+
+      "spindleName": "S1",
+      "_spindleName_example": "주축 (Main)",
+      "_spindleName_description": "이 계통의 스핀들 이름 (화면 표시용)",
+
+      "toolPrefix": "T0100 ~ T3523",
+      "_toolPrefix_example": "T01xx ~ T12xx",
+      "_toolPrefix_description": "이 계통에서 사용하는 공구 번호 범위"
+    },
+    "path2": {
+      "axes": ["X", "Z", "C", "A"],
+      "_axes_example": ["X", "Z", "C"],
+      "_axes_description": "Path2(부축) 축 이름 목록 - FOCAS 좌표 인덱스 순서대로",
+
+      "spindleName": "S2",
+      "_spindleName_example": "부축 (Sub)",
+      "_spindleName_description": "이 계통의 스핀들 이름 (화면 표시용)",
+
+      "toolPrefix": "T2000 ~ T2900",
+      "_toolPrefix_example": "T31xx ~ T36xx",
+      "_toolPrefix_description": "이 계통에서 사용하는 공구 번호 범위"
+    },
+    "path3": {
+      "_path3_description": "3계통 장비만 작성. 2계통 장비는 이 섹션 전체를 null로 두세요.",
+      "axes": null,
+      "_axes_example": ["X", "Z"],
+
+      "spindleName": null,
+      "_spindleName_example": "배면축",
+
+      "toolPrefix": null,
+      "_toolPrefix_example": "T21xx ~ T24xx"
+    }
+  },
+
+  // ─── 4. PMC 주소 매핑 ──────────────────────────────────────────────
+  //  PMC 주소 형식:
+  //  {
+  //    "type": "R",        ← PMC 영역 (R, D, E, G, Y, X, F, K, A, C, T)
+  //    "address": 4800,    ← 바이트 주소
+  //    "bit": 0,           ← 비트 위치 (0~7), 비트 신호일 때만 사용
+  //    "dataType": "bit"   ← 데이터 타입 (bit / byte / word / dword)
+  //  }
+  //
+  //  ※ 확인되지 않은 주소는 null로 남겨두세요.
+  //  ※ PMC LADDER 도면 또는 파라미터 시트 참조
+  "pmcMap": {
+
+    // ── 4-1. 인터록(안전) 신호 ─────────────────────────────────
+    "interlock": {
+      "doorClosed": { "type": "R", "address": 6001, "bit": 3, "dataType": "bit" },
+      "_doorClosed_example": { "type": "X", "address": 12, "bit": 5, "dataType": "bit" },
+      "_doorClosed_description": "안전 도어 닫힘 신호 (1=닫힘, 0=열림)",
+
+      "chuckClamped": { "type": "R", "address": 6000, "bit": 2, "dataType": "bit" },
+      "_chuckClamped_example": { "type": "X", "address": 10, "bit": 0, "dataType": "bit" },
+      "_chuckClamped_description": "척 클램프 완료 신호 (1=클램프, 0=언클램프)",
+
+      "spindleStopped": null,
+      "_spindleStopped_example": { "type": "G", "address": 30, "bit": 2, "dataType": "bit" },
+      "_spindleStopped_description": "스핀들 정지 상태 신호 (1=정지, 0=회전 중)",
+
+      "coolantLevel": { "type": "R", "address": 6001, "bit": 6, "dataType": "bit" },
+      "_coolantLevel_example": { "type": "X", "address": 15, "bit": 3, "dataType": "bit" },
+      "_coolantLevel_description": "쿨런트 잔량 정상 신호 (1=정상, 0=부족)"
+    },
+
+    // ── 4-2. 상태 신호 (CNC → 웹) ─────────────────────────────
+    "status": {
+      "operationMode": null,
+      "_operationMode_example": { "type": "G", "address": 8, "bit": 0, "dataType": "byte" },
+      "_operationMode_description": "운전 모드 읽기 (MEM=0, MDI=1, JOG=2 등 - 값 매핑은 장비별 확인)",
+
+      "cycleRunning": { "type": "R", "address": 6003, "bit": 0, "dataType": "bit" },
+      "_cycleRunning_example": { "type": "G", "address": 7, "bit": 1, "dataType": "bit" },
+      "_cycleRunning_description": "사이클 실행 중 (1=실행중, 0=정지)",
+
+      "alarmActive": null,
+      "_alarmActive_example": { "type": "G", "address": 8, "bit": 4, "dataType": "bit" },
+      "_alarmActive_description": "알람 발생 상태 (1=알람, 0=정상)",
+
+      "emergencyStop": { "type": "R", "address": 6001, "bit": 2, "dataType": "bit" },
+      "_emergencyStop_example": { "type": "X", "address": 8, "bit": 4, "dataType": "bit" },
+      "_emergencyStop_description": "비상정지 상태 (1=비상정지, 0=정상)",
+
+      "programEnd": { "type": "R", "address": 6002, "bit": 4, "dataType": "bit" },
+      "_programEnd_example": { "type": "G", "address": 4, "bit": 1, "dataType": "bit" },
+      "_programEnd_description": "프로그램 종료 신호 (M02/M30 완료, M20 등)"
+    },
+
+    // ── 4-3. 제어 신호 (웹 → CNC) ─────────────────────────────
+    "control": {
+      "cycleStart": { "type": "R", "address": 6105, "bit": 4, "dataType": "bit" },
+      "_cycleStart_example": { "type": "R", "address": 4800, "bit": 0, "dataType": "bit" },
+      "_cycleStart_description": "사이클 스타트 출력 (Agent → CNC) ← SB-20R2: R6105.4",
+
+      "feedHold": { "type": "R", "address": 6105, "bit": 3, "dataType": "bit" },
+      "_feedHold_example": { "type": "R", "address": 4800, "bit": 1, "dataType": "bit" },
+      "_feedHold_description": "피드 홀드 출력 ← SB-20R2: R6105.3",
+
+      "singleBlock": { "type": "R", "address": 6106, "bit": 1, "dataType": "bit" },
+      "_singleBlock_example": { "type": "R", "address": 4800, "bit": 2, "dataType": "bit" },
+      "_singleBlock_description": "싱글 블록 ON/OFF 출력 ← SB-20R2: R6106.1",
+
+      "reset": { "type": "R", "address": 6103, "bit": 0, "dataType": "bit" },
+      "_reset_example": { "type": "R", "address": 4800, "bit": 3, "dataType": "bit" },
+      "_reset_description": "CNC 리셋 출력 ← SB-20R2: R6103.0"
+    },
+
+    // ── 4-4. 카운터/데이터 ─────────────────────────────────────
+    "counters": {
+      "partCount": null,
+      "_partCount_example": { "type": "D", "address": 100, "bit": 0, "dataType": "dword" },
+      "_partCount_description": "생산 카운터 (누적 가공 수량)",
+
+      "targetCount": null,
+      "_targetCount_example": { "type": "D", "address": 104, "bit": 0, "dataType": "dword" },
+      "_targetCount_description": "목표 수량 (작업지시 수량)",
+
+      "cycleTime": null,
+      "_cycleTime_example": { "type": "D", "address": 108, "bit": 0, "dataType": "dword" },
+      "_cycleTime_description": "사이클 타임 (ms 단위 또는 0.1초 단위 - 장비별 확인)"
+    },
+
+    // ── 4-5. 스케줄러 전용 신호 ─────────────────────────────────
+    "scheduler": {
+      "loadable": null,
+      "_loadable_example": { "type": "R", "address": 4810, "bit": 0, "dataType": "bit" },
+      "_loadable_description": "스케줄러 로딩 가능 신호 (CNC가 다음 프로그램 수신 가능)",
+
+      "dataReady": null,
+      "_dataReady_example": { "type": "R", "address": 4810, "bit": 1, "dataType": "bit" },
+      "_dataReady_description": "데이터 준비 완료 신호 (Agent가 프로그램 전송 완료)",
+
+      "m20Complete": { "type": "R", "address": 6002, "bit": 4, "dataType": "bit" },
+      "_m20Complete_example": { "type": "G", "address": 4, "bit": 5, "dataType": "bit" },
+      "_m20Complete_description": "M20 완료 신호 (1사이클 완료 = 카운트 증가 트리거)"
+    }
+  },
+
+  // ─── 5. 인터록 설정 ────────────────────────────────────────────────
+  //  원격제어 및 스케줄러 실행 전 확인할 안전 조건 목록
+  //  pmcKey는 위 pmcMap의 키를 참조합니다 (예: "interlock.doorClosed")
+  "interlockConfig": {
+    "enabled": true,
+    "_enabled_description": "인터록 활성화 여부 (false면 모든 인터록 무시 - 테스트용)",
+
+    "controlAllowed": {
+      "_description": "원격 제어 허용 조건 (모두 충족해야 제어 가능)",
+      "conditions": [
+        {
+          "id": "doorClosed",
+          "name": "안전 도어 닫힘",
+          "pmcKey": "interlock.doorClosed",
+          "expected": true,
+          "required": true,
+          "description": "안전 도어가 닫혀 있어야 원격 제어 가능"
+        }
+      ],
+      "_conditions_example_note": "위 항목을 복사해서 필요한 조건만큼 추가하세요 (chuckClamped, spindleStopped 등)"
+    },
+
+    "scheduleAllowed": {
+      "_description": "스케줄러 실행 허용 조건",
+      "conditions": [
+        {
+          "id": "doorClosed",
+          "name": "안전 도어 닫힘",
+          "pmcKey": "interlock.doorClosed",
+          "expected": true,
+          "required": true,
+          "description": "안전 도어가 닫혀 있어야 스케줄러 실행 가능"
+        }
+      ]
+    }
+  },
+
+  // ─── 6. 원격제어 인터록 (가상 조작반용) ────────────────────────────
+  //  ※ 원격 제어 기능 구현 시점에 상세하게 채워도 됩니다.
+  //  ※ 초기 테스트에는 비워두어도 무방합니다.
+  "remoteControlInterlock": {
+    "remoteEnabled": null,
+    "_remoteEnabled_example": { "type": "X", "address": 20, "bit": 0, "dataType": "bit" },
+    "_remoteEnabled_description": "현장 조작반의 '원격허용' 키 스위치 신호 (1=허용)",
+
+    "localOperationOff": null,
+    "_localOperationOff_example": { "type": "X", "address": 20, "bit": 1, "dataType": "bit" },
+    "_localOperationOff_description": "현장 조작반 미조작 상태 (1=아무도 터치하지 않음)",
+
+    "emergencyStopOff": { "type": "R", "address": 6001, "bit": 2, "dataType": "bit" },
+    "_emergencyStopOff_example": { "type": "X", "address": 8, "bit": 4, "dataType": "bit" },
+    "_emergencyStopOff_description": "비상정지 해제 상태 ← SB-20R2: R6001.2 (주의: 1=비상정지, 0=정상 → 반전 해석 필요)"
+  },
+
+  // ─── 7. 가상 조작반(Virtual Panel) 키 매핑 ────────────────────────
+  //  ※ 원격 제어 기능 구현 시점에 상세하게 채워도 됩니다.
+  //  ※ 초기 테스트에는 비워두어도 무방합니다.
+  //
+  //  키 형식:
+  //  {
+  //    "keyId": "memory",
+  //    "displayName": "MEMORY",
+  //    "keyType": "selector",      ← momentary(순간) / toggle(토글) / selector(선택)
+  //    "pmcOutput": { PMC주소 },   ← 웹 → CNC 출력 주소
+  //    "pmcFeedback": { PMC주소 }, ← CNC → 웹 피드백 주소 (상태 확인용)
+  //    "requiresInterlock": true,
+  //    "safetyLevel": "normal"     ← normal / caution / critical
+  //  }
+  "virtualPanel": {
+
+    "modeKeys": {
+      "_description": "모드 선택 키 (EDIT, MEM, MDI, JOG, REF, HANDLE)",
+      "edit": {
+        "keyId": "edit", "displayName": "EDIT", "keyType": "selector",
+        "pmcOutput": { "type": "R", "address": 6104, "bit": 4, "dataType": "bit" },
+        "pmcFeedback": { "type": "R", "address": 6004, "bit": 4, "dataType": "bit" },
+        "requiresInterlock": true, "safetyLevel": "normal"
+      },
+      "memory": {
+        "keyId": "memory", "displayName": "MEMORY", "keyType": "selector",
+        "pmcOutput": { "type": "R", "address": 6104, "bit": 5, "dataType": "bit" },
+        "pmcFeedback": { "type": "R", "address": 6004, "bit": 5, "dataType": "bit" },
+        "requiresInterlock": true, "safetyLevel": "normal"
+      },
+      "mdi": {
+        "keyId": "mdi", "displayName": "MDI", "keyType": "selector",
+        "pmcOutput": { "type": "R", "address": 6104, "bit": 6, "dataType": "bit" },
+        "pmcFeedback": { "type": "R", "address": 6004, "bit": 6, "dataType": "bit" },
+        "requiresInterlock": true, "safetyLevel": "normal"
+      },
+      "jog": {
+        "keyId": "jog", "displayName": "JOG", "keyType": "selector",
+        "pmcOutput": { "type": "R", "address": 6105, "bit": 0, "dataType": "bit" },
+        "pmcFeedback": { "type": "R", "address": 6005, "bit": 0, "dataType": "bit" },
+        "requiresInterlock": true, "safetyLevel": "normal"
+      },
+      "ref": {
+        "keyId": "ref", "displayName": "ZERO RETURN", "keyType": "selector",
+        "pmcOutput": { "type": "R", "address": 6105, "bit": 2, "dataType": "bit" },
+        "pmcFeedback": { "type": "R", "address": 6005, "bit": 2, "dataType": "bit" },
+        "requiresInterlock": true, "safetyLevel": "normal"
+      },
+      "handle": {
+        "keyId": "handle", "displayName": "HANDLE", "keyType": "selector",
+        "pmcOutput": { "type": "R", "address": 6104, "bit": 7, "dataType": "bit" },
+        "pmcFeedback": { "type": "R", "address": 6004, "bit": 7, "dataType": "bit" },
+        "requiresInterlock": true, "safetyLevel": "normal"
+      },
+      "_example": {
+        "keyId": "memory",
+        "displayName": "MEMORY",
+        "keyType": "selector",
+        "pmcOutput": { "type": "R", "address": 4820, "bit": 1, "dataType": "bit" },
+        "pmcFeedback": { "type": "G", "address": 12, "bit": 1, "dataType": "bit" },
+        "requiresInterlock": true,
+        "safetyLevel": "normal"
+      }
+    },
+
+    "controlKeys": {
+      "_description": "실행 제어 키 (사이클스타트, 피드홀드, 리셋, 알람클리어)",
+      "cycleStart": {
+        "keyId": "cycleStart", "displayName": "CYCLE START", "keyType": "momentary",
+        "pmcOutput": { "type": "R", "address": 6105, "bit": 4, "dataType": "bit" },
+        "pmcFeedback": { "type": "R", "address": 6005, "bit": 4, "dataType": "bit" },
+        "requiresInterlock": true, "safetyLevel": "critical"
+      },
+      "feedHold": {
+        "keyId": "feedHold", "displayName": "FEED HOLD", "keyType": "momentary",
+        "pmcOutput": { "type": "R", "address": 6105, "bit": 3, "dataType": "bit" },
+        "pmcFeedback": { "type": "R", "address": 6005, "bit": 3, "dataType": "bit" },
+        "requiresInterlock": true, "safetyLevel": "caution"
+      },
+      "reset": {
+        "keyId": "reset", "displayName": "RESET", "keyType": "momentary",
+        "pmcOutput": { "type": "R", "address": 6103, "bit": 0, "dataType": "bit" },
+        "pmcFeedback": null,
+        "requiresInterlock": true, "safetyLevel": "caution"
+      },
+      "alarmClear": null,
+      "_example": {
+        "keyId": "cycleStart",
+        "displayName": "CYCLE START",
+        "keyType": "momentary",
+        "pmcOutput": { "type": "R", "address": 4830, "bit": 0, "dataType": "bit" },
+        "pmcFeedback": { "type": "G", "address": 7, "bit": 1, "dataType": "bit" },
+        "requiresInterlock": true,
+        "safetyLevel": "critical"
+      }
+    },
+
+    "toggleKeys": {
+      "_description": "토글 키 (싱글블록, 드라이런, 옵셔널스톱, 블록스킵)",
+      "singleBlock": {
+        "keyId": "singleBlock", "displayName": "SINGLE BLOCK", "keyType": "toggle",
+        "pmcOutput": { "type": "R", "address": 6106, "bit": 1, "dataType": "bit" },
+        "pmcFeedback": { "type": "R", "address": 6006, "bit": 1, "dataType": "bit" },
+        "requiresInterlock": true, "safetyLevel": "caution"
+      },
+      "dryRun": null,
+      "optionalStop": {
+        "keyId": "optionalStop", "displayName": "OPTIONAL STOP", "keyType": "toggle",
+        "pmcOutput": { "type": "R", "address": 6105, "bit": 7, "dataType": "bit" },
+        "pmcFeedback": { "type": "R", "address": 6005, "bit": 7, "dataType": "bit" },
+        "requiresInterlock": true, "safetyLevel": "normal"
+      },
+      "blockSkip": null,
+      "_example": {
+        "keyId": "singleBlock",
+        "displayName": "SINGLE BLOCK",
+        "keyType": "toggle",
+        "pmcOutput": { "type": "R", "address": 4840, "bit": 0, "dataType": "bit" },
+        "pmcFeedback": { "type": "G", "address": 14, "bit": 0, "dataType": "bit" },
+        "requiresInterlock": true,
+        "safetyLevel": "caution"
+      }
+    },
+
+    "overrides": {
+      "_description": "오버라이드 (이송/스핀들 속도 제어)",
+      "feedRate": null,
+      "_feedRate_example": {
+        "pmcAddress": { "type": "D", "address": 200, "bit": 0, "dataType": "word" },
+        "min": 0,
+        "max": 200,
+        "step": 10,
+        "unit": "%"
+      },
+      "spindleRate": null,
+      "_spindleRate_example": {
+        "pmcAddress": { "type": "D", "address": 202, "bit": 0, "dataType": "word" },
+        "min": 50,
+        "max": 120,
+        "step": 10,
+        "unit": "%"
+      }
+    }
+  },
+
+  // ─── 8. 스케줄러 설정 ──────────────────────────────────────────────
+  "schedulerConfig": {
+    "maxQueueSize": 15,
+    "_maxQueueSize_description": "스케줄러 큐 최대 크기 (기본 15)",
+
+    "countSignal": "scheduler.m20Complete",
+    "_countSignal_example": "scheduler.m20Complete",
+    "_countSignal_description": "카운트 증가 트리거 신호 (pmcMap 키 경로)",
+
+    "countMode": "M20_EDGE",
+    "_countMode_example": "M20_EDGE",
+    "_countMode_description": "카운트 모드 (M20_EDGE = M20 신호 상승엣지에서 카운트)",
+
+    "oneCycleStopSupported": true,
+    "_oneCycleStopSupported_description": "One Cycle Stop 기능 지원 여부 (true면 전용 PMC 사용, false면 Single Block + M20 대체)",
+
+    "oneCycleStopPmcAddress": { "type": "R", "address": 6106, "bit": 0, "dataType": "bit" },
+    "_oneCycleStopPmcAddress_example": { "type": "R", "address": 4850, "bit": 0, "dataType": "bit" },
+    "_oneCycleStopPmcAddress_description": "One Cycle Stop 출력 PMC 주소 (지원 시에만 작성)",
+
+    "countDisplay": {
+      "macroNo": 500,
+      "_macroNo_description": "CNC 매크로 변수 번호 (Agent가 카운트를 CNC 화면에 표시하기 위해 쓰는 변수, 예: #500)"
+    }
+  },
+
+  // ─── 9. 기능 지원 플래그 ───────────────────────────────────────────
+  "capabilities": {
+    "monitoring": true,
+    "_monitoring_description": "실시간 모니터링 지원",
+
+    "scheduler": true,
+    "_scheduler_description": "스케줄러(DNC/Memory 순차실행) 지원",
+
+    "fileTransfer": true,
+    "_fileTransfer_description": "NC 프로그램 전송 지원",
+
+    "alarmHistory": true,
+    "_alarmHistory_description": "알람 이력 관리 지원",
+
+    "remoteControl": true,
+    "_remoteControl_description": "원격 조작반 제어 지원 (가상 조작반 구현 시 true로 변경)",
+
+    "hasSubSpindle": true,
+    "_hasSubSpindle_example": true,
+    "_hasSubSpindle_description": "부축(서브 스핀들) 장착 여부",
+
+    "hasCAxis": true,
+    "_hasCAxis_example": true,
+    "_hasCAxis_description": "C축 인덱싱 지원 여부",
+
+    "hasYAxis": true,
+    "_hasYAxis_example": true,
+    "_hasYAxis_description": "Y축 장착 여부"
+  }
+}

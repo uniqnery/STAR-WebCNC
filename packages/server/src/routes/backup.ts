@@ -1,10 +1,21 @@
 // Backup Routes - CNC Data Backup
 
+import path from 'path';
+import fs from 'fs/promises';
+import { createWriteStream } from 'fs';
 import { Router, Request, Response, NextFunction } from 'express';
+import multer from 'multer';
 import { prisma } from '../lib/prisma';
 import { mqttService, TOPICS } from '../lib/mqtt';
 import { authenticate, requireRole } from '../middleware/auth';
 import { createAuditLog } from './audit';
+
+const BACKUP_DIR = process.env.DATA_DIR
+  ? path.join(process.env.DATA_DIR, 'backup')
+  : path.join(process.cwd(), 'data', 'backup');
+
+// multer: Agent 업로드 수신 (메모리 저장 → 파일로 저장)
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
 
 const router = Router();
 
@@ -70,7 +81,7 @@ router.get('/:machineId', authenticate, async (req: Request, res: Response, next
 });
 
 // Create new backup
-router.post('/:machineId', authenticate, requireRole(['ADMIN', 'AS']), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:machineId', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { machineId } = req.params;
     const { type } = req.body as { type: BackupType };
@@ -111,7 +122,8 @@ router.post('/:machineId', authenticate, requireRole(['ADMIN', 'AS']), async (re
     backupRecords.set(backupId, backupRecord);
 
     // Send backup command to Agent via MQTT
-    mqttService.publish(TOPICS.SERVER_COMMAND(machineId), {
+    mqttService.publish(TOPICS.COMMAND_TO(machineId), {
+      timestamp: new Date().toISOString(),
       command: 'CREATE_BACKUP',
       correlationId: backupId,
       params: {
@@ -188,21 +200,48 @@ router.get('/download/:backupId', authenticate, async (req: Request, res: Respon
       });
     }
 
-    if (backup.status !== 'COMPLETED') {
+    if (backup.status !== 'COMPLETED' || !backup.filePath) {
       return res.status(400).json({
         success: false,
         error: { code: 'BACKUP_NOT_READY', message: '백업이 아직 완료되지 않았습니다' },
       });
     }
 
-    // In production, read file from backup.filePath and stream it
-    // For now, return mock data
-    const mockData = Buffer.from(`Mock backup data for ${backup.fileName}`);
-
+    const fileBuffer = await fs.readFile(backup.filePath);
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${backup.fileName}"`);
-    res.setHeader('Content-Length', mockData.length);
-    res.send(mockData);
+    res.setHeader('Content-Length', fileBuffer.length);
+    res.send(fileBuffer);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Agent → Server: 백업 파일 업로드 완료 (인증 없음 — 내부 네트워크 전용)
+router.post('/:backupId/upload', upload.single('file'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { backupId } = req.params;
+    const backup = backupRecords.get(backupId);
+    if (!backup) {
+      return res.status(404).json({ success: false, error: { code: 'BACKUP_NOT_FOUND' } });
+    }
+
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ success: false, error: { code: 'NO_FILE' } });
+    }
+
+    // backup/ 디렉토리에 저장
+    await fs.mkdir(BACKUP_DIR, { recursive: true });
+    const filePath = path.join(BACKUP_DIR, backup.fileName);
+    await fs.writeFile(filePath, file.buffer);
+
+    backup.status   = 'COMPLETED';
+    backup.fileSize = file.buffer.length;
+    backup.filePath = filePath;
+    backup.completedAt = new Date();
+
+    res.json({ success: true, data: { backupId, fileSize: file.buffer.length } });
   } catch (error) {
     next(error);
   }

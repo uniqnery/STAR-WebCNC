@@ -1,0 +1,971 @@
+{
+  "templateId": "FANUC_0i-TF Plus_SB-20R2_V1",
+  "version": "1.0.0",
+  "name": "Star SB-20R2 (FANUC 0i-TF Plus)",
+  "description": "Star SB-20R2 2계통 자동선반, FANUC 0i-TF Plus 컨트롤러",
+  "cncType": "FANUC",
+  "seriesName": "0i-TF Plus",
+  "systemInfo": {
+    "cncType": "FANUC",
+    "maxAxes": 5,
+    "maxPaths": 2,
+    "modelName": "SB-20R2",
+    "seriesName": "0i-TF Plus",
+    "supportedOptions": [],
+    "coordinateDecimalPlaces": 4
+  },
+  "axisConfig": {
+    "path1": {
+      "axes": [
+        "X",
+        "Z",
+        "C",
+        "Y",
+        "A",
+        "CRG"
+      ],
+      "toolPrefix": "T0100 ~ T3523",
+      "spindleName": "S1"
+    },
+    "path2": {
+      "axes": [
+        "X",
+        "Z",
+        "C",
+        "A"
+      ],
+      "toolPrefix": "T2000 ~ T2900",
+      "spindleName": "S2"
+    },
+    "path3": {
+      "axes": null,
+      "toolPrefix": null,
+      "spindleName": null
+    }
+  },
+  "pmcMap": {
+    "status": {
+      "programEnd": {
+        "bit": 4,
+        "type": "R",
+        "address": 6002,
+        "dataType": "bit"
+      },
+      "alarmActive": null,
+      "cycleRunning": {
+        "bit": 0,
+        "type": "R",
+        "address": 6003,
+        "dataType": "bit"
+      },
+      "emergencyStop": {
+        "bit": 2,
+        "type": "R",
+        "address": 6001,
+        "dataType": "bit"
+      },
+      "operationMode": null
+    },
+    "control": {
+      "reset": {
+        "bit": 0,
+        "type": "R",
+        "address": 6103,
+        "dataType": "bit"
+      },
+      "feedHold": {
+        "bit": 3,
+        "type": "R",
+        "address": 6105,
+        "dataType": "bit"
+      },
+      "cycleStart": {
+        "bit": 4,
+        "type": "R",
+        "address": 6105,
+        "dataType": "bit"
+      },
+      "singleBlock": {
+        "bit": 1,
+        "type": "R",
+        "address": 6106,
+        "dataType": "bit"
+      }
+    },
+    "counters": {
+      "cycleTime": null,
+      "partCount": null,
+      "targetCount": null
+    },
+    "interlock": {
+      "doorClosed": {
+        "bit": 3,
+        "type": "R",
+        "address": 6001,
+        "dataType": "bit"
+      },
+      "chuckClamped": {
+        "bit": 2,
+        "type": "R",
+        "address": 6000,
+        "dataType": "bit"
+      },
+      "coolantLevel": {
+        "bit": 6,
+        "type": "R",
+        "address": 6001,
+        "dataType": "bit"
+      },
+      "spindleStopped": null
+    },
+    "scheduler": {
+      "loadable": null,
+      "dataReady": null,
+      "m20Complete": {
+        "bit": 4,
+        "type": "R",
+        "address": 6002,
+        "dataType": "bit"
+      }
+    }
+  },
+  "interlockConfig": {
+    "enabled": true,
+    "controlAllowed": {
+      "conditions": [
+        {
+          "id": "doorClosed",
+          "name": "안전 도어 닫힘",
+          "pmcKey": "interlock.doorClosed",
+          "expected": true,
+          "required": true,
+          "description": "안전 도어가 닫혀 있어야 원격 제어 가능"
+        }
+      ]
+    },
+    "scheduleAllowed": {
+      "conditions": [
+        {
+          "id": "doorClosed",
+          "name": "안전 도어 닫힘",
+          "pmcKey": "interlock.doorClosed",
+          "expected": true,
+          "required": true,
+          "description": "안전 도어가 닫혀 있어야 스케줄러 실행 가능"
+        }
+      ]
+    }
+  },
+  "interlockModules": {
+    "scheduler": {
+      "enabled": true,
+      "conditions": [
+        {
+          "id": "sc-door",
+          "name": "안전 도어 닫힘",
+          "pmcAddr": "R6001.3",
+          "expected": true,
+          "description": "안전 도어가 닫혀 있어야 스케줄 실행 가능"
+        }
+      ]
+    },
+    "remotePanel": {
+      "enabled": true,
+      "conditions": [
+        {
+          "id": "rp-door",
+          "name": "안전 도어 닫힘",
+          "pmcAddr": "R6001.3",
+          "expected": true,
+          "description": "안전 도어가 닫혀 있어야 원격 조작 가능"
+        },
+        {
+          "id": "rp-estop",
+          "name": "비상정지 해제",
+          "pmcAddr": "R6001.2",
+          "expected": false,
+          "description": "비상정지 해제 상태여야 함"
+        }
+      ]
+    },
+    "fileTransferIn": {
+      "enabled": false,
+      "conditions": []
+    },
+    "fileTransferOut": {
+      "enabled": false,
+      "conditions": []
+    }
+  },
+  "remoteControlInterlock": {
+    "remoteEnabled": null,
+    "emergencyStopOff": {
+      "bit": 2,
+      "type": "R",
+      "address": 6001,
+      "dataType": "bit"
+    },
+    "localOperationOff": null
+  },
+  "virtualPanel": {
+    "modeKeys": {
+      "jog": {
+        "keyId": "jog",
+        "keyType": "selector",
+        "pmcOutput": {
+          "bit": 0,
+          "type": "R",
+          "address": 6105,
+          "dataType": "bit"
+        },
+        "displayName": "JOG",
+        "pmcFeedback": {
+          "bit": 0,
+          "type": "R",
+          "address": 6005,
+          "dataType": "bit"
+        },
+        "safetyLevel": "normal",
+        "requiresInterlock": true
+      },
+      "mdi": {
+        "keyId": "mdi",
+        "keyType": "selector",
+        "pmcOutput": {
+          "bit": 6,
+          "type": "R",
+          "address": 6104,
+          "dataType": "bit"
+        },
+        "displayName": "MDI",
+        "pmcFeedback": {
+          "bit": 6,
+          "type": "R",
+          "address": 6004,
+          "dataType": "bit"
+        },
+        "safetyLevel": "normal",
+        "requiresInterlock": true
+      },
+      "ref": {
+        "keyId": "ref",
+        "keyType": "selector",
+        "pmcOutput": {
+          "bit": 2,
+          "type": "R",
+          "address": 6105,
+          "dataType": "bit"
+        },
+        "displayName": "ZERO RETURN",
+        "pmcFeedback": {
+          "bit": 2,
+          "type": "R",
+          "address": 6005,
+          "dataType": "bit"
+        },
+        "safetyLevel": "normal",
+        "requiresInterlock": true
+      },
+      "edit": {
+        "keyId": "edit",
+        "keyType": "selector",
+        "pmcOutput": {
+          "bit": 4,
+          "type": "R",
+          "address": 6104,
+          "dataType": "bit"
+        },
+        "displayName": "EDIT",
+        "pmcFeedback": {
+          "bit": 4,
+          "type": "R",
+          "address": 6004,
+          "dataType": "bit"
+        },
+        "safetyLevel": "normal",
+        "requiresInterlock": true
+      },
+      "handle": {
+        "keyId": "handle",
+        "keyType": "selector",
+        "pmcOutput": {
+          "bit": 7,
+          "type": "R",
+          "address": 6104,
+          "dataType": "bit"
+        },
+        "displayName": "HANDLE",
+        "pmcFeedback": {
+          "bit": 7,
+          "type": "R",
+          "address": 6004,
+          "dataType": "bit"
+        },
+        "safetyLevel": "normal",
+        "requiresInterlock": true
+      },
+      "memory": {
+        "keyId": "memory",
+        "keyType": "selector",
+        "pmcOutput": {
+          "bit": 5,
+          "type": "R",
+          "address": 6104,
+          "dataType": "bit"
+        },
+        "displayName": "MEMORY",
+        "pmcFeedback": {
+          "bit": 5,
+          "type": "R",
+          "address": 6004,
+          "dataType": "bit"
+        },
+        "safetyLevel": "normal",
+        "requiresInterlock": true
+      }
+    },
+    "overrides": {
+      "feedRate": null,
+      "spindleRate": null
+    },
+    "toggleKeys": {
+      "dryRun": null,
+      "blockSkip": null,
+      "singleBlock": {
+        "keyId": "singleBlock",
+        "keyType": "toggle",
+        "pmcOutput": {
+          "bit": 1,
+          "type": "R",
+          "address": 6106,
+          "dataType": "bit"
+        },
+        "displayName": "SINGLE BLOCK",
+        "pmcFeedback": {
+          "bit": 1,
+          "type": "R",
+          "address": 6006,
+          "dataType": "bit"
+        },
+        "safetyLevel": "caution",
+        "requiresInterlock": true
+      },
+      "optionalStop": {
+        "keyId": "optionalStop",
+        "keyType": "toggle",
+        "pmcOutput": {
+          "bit": 7,
+          "type": "R",
+          "address": 6105,
+          "dataType": "bit"
+        },
+        "displayName": "OPTIONAL STOP",
+        "pmcFeedback": {
+          "bit": 7,
+          "type": "R",
+          "address": 6005,
+          "dataType": "bit"
+        },
+        "safetyLevel": "normal",
+        "requiresInterlock": true
+      }
+    },
+    "controlKeys": {
+      "reset": {
+        "keyId": "reset",
+        "keyType": "momentary",
+        "pmcOutput": {
+          "bit": 0,
+          "type": "R",
+          "address": 6103,
+          "dataType": "bit"
+        },
+        "displayName": "RESET",
+        "pmcFeedback": null,
+        "safetyLevel": "caution",
+        "requiresInterlock": true
+      },
+      "feedHold": {
+        "keyId": "feedHold",
+        "keyType": "momentary",
+        "pmcOutput": {
+          "bit": 3,
+          "type": "R",
+          "address": 6105,
+          "dataType": "bit"
+        },
+        "displayName": "FEED HOLD",
+        "pmcFeedback": {
+          "bit": 3,
+          "type": "R",
+          "address": 6005,
+          "dataType": "bit"
+        },
+        "safetyLevel": "caution",
+        "requiresInterlock": true
+      },
+      "alarmClear": null,
+      "cycleStart": {
+        "keyId": "cycleStart",
+        "keyType": "momentary",
+        "pmcOutput": {
+          "bit": 4,
+          "type": "R",
+          "address": 6105,
+          "dataType": "bit"
+        },
+        "displayName": "CYCLE START",
+        "pmcFeedback": {
+          "bit": 4,
+          "type": "R",
+          "address": 6005,
+          "dataType": "bit"
+        },
+        "safetyLevel": "critical",
+        "requiresInterlock": true
+      }
+    }
+  },
+  "panelLayout": [
+    {
+      "id": "grp-head",
+      "keys": [
+        {
+          "id": "HEAD1",
+          "size": "normal",
+          "color": "gray",
+          "label": "HEAD 1",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6104.0",
+          "lampAddr": "R6004.0"
+        },
+        {
+          "id": "HEAD2",
+          "size": "normal",
+          "color": "gray",
+          "label": "HEAD 2",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6104.1",
+          "lampAddr": "R6004.1"
+        },
+        {
+          "id": "HEAD_CHANGE",
+          "size": "normal",
+          "color": "gray",
+          "label": "HEAD CHANGE",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1500
+          },
+          "hasLamp": false,
+          "reqAddr": "R6103.7",
+          "lampAddr": ""
+        }
+      ],
+      "name": "HEAD"
+    },
+    {
+      "id": "grp-chuck",
+      "keys": [
+        {
+          "id": "MAIN_CHUCK",
+          "size": "normal",
+          "color": "gray",
+          "label": "MAIN CHUCKING",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6100.1",
+          "lampAddr": "R6000.1"
+        },
+        {
+          "id": "SUB_CHUCK",
+          "size": "normal",
+          "color": "gray",
+          "label": "SUB CHUCKING",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6100.3",
+          "lampAddr": "R6000.3"
+        }
+      ],
+      "name": "CHUCKING",
+      "sameRowAsPrev": true
+    },
+    {
+      "id": "grp-mode",
+      "keys": [
+        {
+          "id": "EDIT",
+          "size": "normal",
+          "color": "gray",
+          "label": "EDIT",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6104.4",
+          "lampAddr": "R6004.4"
+        },
+        {
+          "id": "MEMORY",
+          "size": "normal",
+          "color": "gray",
+          "label": "MEMORY",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6104.5",
+          "lampAddr": "R6004.5"
+        },
+        {
+          "id": "MDI",
+          "size": "normal",
+          "color": "gray",
+          "label": "MDI",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6104.6",
+          "lampAddr": "R6004.6"
+        },
+        {
+          "id": "JOG",
+          "size": "normal",
+          "color": "gray",
+          "label": "HANDLE",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6105.0",
+          "lampAddr": "R6005.0"
+        },
+        {
+          "id": "DNC",
+          "size": "normal",
+          "color": "gray",
+          "label": "DNC",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6105.1",
+          "lampAddr": "R6005.1"
+        }
+      ],
+      "name": "MODE"
+    },
+    {
+      "id": "grp-op",
+      "keys": [
+        {
+          "id": "SINGLE_BLOCK",
+          "size": "normal",
+          "color": "gray",
+          "label": "AUTO POWER OFF",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6105.5",
+          "lampAddr": "R6005.5"
+        },
+        {
+          "id": "OPT_STOP",
+          "size": "normal",
+          "color": "gray",
+          "label": "AIR CUT",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6105.6",
+          "lampAddr": "R6005.6"
+        },
+        {
+          "id": "AIR_CUT",
+          "size": "normal",
+          "color": "gray",
+          "label": "OPTINAL STOP",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6105.7",
+          "lampAddr": "R6005.7"
+        },
+        {
+          "id": "AUTO_PWR_OFF",
+          "size": "normal",
+          "color": "gray",
+          "label": "ONE CYCLE",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6106.0",
+          "lampAddr": "R6006.0"
+        },
+        {
+          "id": "WORK_LIGHT",
+          "size": "normal",
+          "color": "gray",
+          "label": "SINGLE BLOCK",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6106.1",
+          "lampAddr": "R6006.1"
+        },
+        {
+          "id": "k-1774079767388-r2fj",
+          "size": "normal",
+          "color": "gray",
+          "label": "WORK LIGHT",
+          "timing": {
+            "holdMs": 300,
+            "timeoutMs": 2000,
+            "longPressMs": 1000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6106.2",
+          "lampAddr": "R6006.2"
+        }
+      ],
+      "name": "FUNCTION"
+    },
+    {
+      "id": "grp-cycle",
+      "keys": [
+        {
+          "id": "CYCLE_START",
+          "size": "large",
+          "color": "green",
+          "label": "CYCLE START",
+          "timing": {
+            "holdMs": 500,
+            "timeoutMs": 3000,
+            "longPressMs": 2000
+          },
+          "hasLamp": true,
+          "reqAddr": "R6105.4",
+          "lampAddr": "R6005.4"
+        },
+        {
+          "id": "E_STOP",
+          "size": "large",
+          "color": "yellow",
+          "label": "FEED HOLD",
+          "timing": {
+            "holdMs": 1000,
+            "timeoutMs": 5000,
+            "longPressMs": 3000
+          },
+          "hasLamp": false,
+          "reqAddr": "R6105.3",
+          "lampAddr": "R6005.3"
+        },
+        {
+          "id": "RESET",
+          "size": "large",
+          "color": "gray",
+          "label": "RESET",
+          "timing": {
+            "holdMs": 500,
+            "timeoutMs": 3000,
+            "longPressMs": 1500
+          },
+          "hasLamp": false,
+          "reqAddr": "R6103.0",
+          "lampAddr": ""
+        }
+      ],
+      "name": "CYCLE"
+    }
+  ],
+  "topBarInterlock": {
+    "backup": {
+      "fields": [],
+      "interlockEnabled": false
+    },
+    "remote": {
+      "fields": [
+        {
+          "id": "rc-estop",
+          "label": "비상정지 해제",
+          "contact": "B",
+          "enabled": true,
+          "pmcAddr": "R6001.2"
+        }
+      ],
+      "interlockEnabled": true
+    },
+    "transfer": {
+      "fields": [],
+      "interlockEnabled": false
+    },
+    "scheduler": {
+      "fields": [
+        {
+          "id": "sc-door",
+          "label": "도어 닫힘",
+          "contact": "A",
+          "enabled": true,
+          "pmcAddr": "R6001.3"
+        },
+        {
+          "id": "sc-estop",
+          "label": "비상정지 해제",
+          "contact": "B",
+          "enabled": true,
+          "pmcAddr": "R6001.2"
+        }
+      ],
+      "interlockEnabled": true
+    }
+  },
+  "offsetConfig": {
+    "pageSize": 16,
+    "toolCount": 64
+  },
+  "counterConfig": {
+    "fields": [
+      {
+        "key": "preset",
+        "label": "PRESET",
+        "varNo": 500,
+        "varType": "macro",
+        "readonly": false
+      },
+      {
+        "key": "count",
+        "label": "COUNT",
+        "varNo": 501,
+        "varType": "macro",
+        "readonly": false
+      },
+      {
+        "key": "total",
+        "label": "TOTAL",
+        "varNo": 502,
+        "varType": "macro",
+        "readonly": true
+      },
+      {
+        "key": "remaining",
+        "label": "REMAINING",
+        "varNo": 503,
+        "varType": "macro",
+        "readonly": true
+      }
+    ]
+  },
+  "toolLifeConfig": {
+    "paths": [
+      {
+        "pathNo": 1,
+        "columns": [
+          {
+            "key": "preset",
+            "label": "PRESET",
+            "varType": "macro",
+            "readonly": false
+          },
+          {
+            "key": "count",
+            "label": "COUNT",
+            "varType": "macro",
+            "readonly": true
+          }
+        ],
+        "entries": [
+          {
+            "id": "p1-t1",
+            "toolNo": "T0101",
+            "varNos": {
+              "count": 3002,
+              "preset": 3001
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "p1-t2",
+            "toolNo": "T0202",
+            "varNos": {
+              "count": 3004,
+              "preset": 3003
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "p1-t3",
+            "toolNo": "T0303",
+            "varNos": {
+              "count": 3006,
+              "preset": 3005
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "p1-t4",
+            "toolNo": "T0404",
+            "varNos": {
+              "count": 3008,
+              "preset": 3007
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "p1-t5",
+            "toolNo": "T0505",
+            "varNos": {
+              "count": 3010,
+              "preset": 3009
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "p1-t6",
+            "toolNo": "T0606",
+            "varNos": {
+              "count": 3012,
+              "preset": 3011
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "p1-t7",
+            "toolNo": "T0707",
+            "varNos": {
+              "count": 3014,
+              "preset": 3013
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "p1-t8",
+            "toolNo": "T0808",
+            "varNos": {
+              "count": 3016,
+              "preset": 3015
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "p1-t9",
+            "toolNo": "T0909",
+            "varNos": {
+              "count": 3018,
+              "preset": 3017
+            },
+            "isSeparator": false
+          }
+        ]
+      },
+      {
+        "pathNo": 2,
+        "columns": [
+          {
+            "key": "preset",
+            "label": "PRESET",
+            "varType": "macro",
+            "readonly": false
+          },
+          {
+            "key": "count",
+            "label": "COUNT",
+            "varType": "macro",
+            "readonly": true
+          }
+        ],
+        "entries": [
+          {
+            "id": "p2-t1",
+            "toolNo": "T3101",
+            "varNos": {
+              "count": 3102,
+              "preset": 3101
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "p2-t2",
+            "toolNo": "T3202",
+            "varNos": {
+              "count": 3104,
+              "preset": 3103
+            },
+            "isSeparator": false
+          }
+        ]
+      }
+    ]
+  },
+  "schedulerConfig": {
+    "countMode": "M20_EDGE",
+    "countSignal": "scheduler.m20Complete",
+    "countDisplay": {
+      "macroNo": 500
+    },
+    "maxQueueSize": 15,
+    "oneCycleStopSupported": true,
+    "oneCycleStopPmcAddress": {
+      "bit": 0,
+      "type": "R",
+      "address": 6106,
+      "dataType": "bit"
+    }
+  },
+  "capabilities": {
+    "hasCAxis": true,
+    "hasYAxis": true,
+    "scheduler": true,
+    "monitoring": true,
+    "alarmHistory": true,
+    "fileTransfer": true,
+    "hasSubSpindle": true,
+    "remoteControl": true
+  }
+}

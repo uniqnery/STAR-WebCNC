@@ -25,6 +25,7 @@ public class MqttService : IAsyncDisposable
         // Agent → Server
         public static string AgentStatus(string machineId) => $"star-webcnc/agent/{machineId}/status";
         public static string Telemetry(string machineId) => $"star-webcnc/agent/{machineId}/telemetry";
+        public static string PmcBits(string machineId)   => $"star-webcnc/agent/{machineId}/pmc_bits";
         public static string Alarm(string machineId) => $"star-webcnc/agent/{machineId}/alarm";
         public static string CommandResult(string machineId) => $"star-webcnc/agent/{machineId}/command/result";
         public static string Event(string machineId) => $"star-webcnc/agent/{machineId}/event";
@@ -116,6 +117,14 @@ public class MqttService : IAsyncDisposable
     }
 
     /// <summary>
+    /// PMC 비트 빠른 발행 (100ms 주기 — 램프 응답속도용)
+    /// </summary>
+    public async Task PublishPmcBitsAsync(PmcBitsMessage pmcBits)
+    {
+        await PublishAsync(Topics.PmcBits(_settings.MachineId), pmcBits);
+    }
+
+    /// <summary>
     /// 알람 이벤트 발행
     /// </summary>
     public async Task PublishAlarmAsync(AlarmEventMessage alarm)
@@ -155,7 +164,15 @@ public class MqttService : IAsyncDisposable
             var payload = JsonConvert.SerializeObject(message, new JsonSerializerSettings
             {
                 NullValueHandling = NullValueHandling.Ignore,
-                DateTimeZoneHandling = DateTimeZoneHandling.Utc
+                DateTimeZoneHandling = DateTimeZoneHandling.Utc,
+                ContractResolver = new Newtonsoft.Json.Serialization.DefaultContractResolver
+                {
+                    NamingStrategy = new Newtonsoft.Json.Serialization.CamelCaseNamingStrategy
+                    {
+                        ProcessDictionaryKeys = false,  // Dictionary 키("R6001.3")는 대소문자 유지
+                        OverrideSpecifiedNames = true
+                    }
+                }
             });
 
             var mqttMessage = new MqttApplicationMessageBuilder()
@@ -228,7 +245,7 @@ public class MqttService : IAsyncDisposable
         var topic = args.ApplicationMessage.Topic;
         var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
 
-        _logger.LogDebug("Received message on {Topic}", topic);
+        _logger.LogInformation("Received message on {Topic} ({Bytes} bytes)", topic, payload.Length);
 
         try
         {
@@ -276,6 +293,62 @@ public class TelemetryMessage : MqttMessage
     public TelemetryData? Data { get; set; }
 }
 
+public class PathCoordinates
+{
+    [JsonProperty("absolute")]
+    public int[] Absolute { get; set; } = new int[4];
+    [JsonProperty("distanceToGo")]
+    public int[] DistanceToGo { get; set; } = new int[4];
+    /// <summary>
+    /// 축별 소수점 자릿수 (ODBAXIS.type): IS-B=3(0.001mm), IS-C=4(0.0001mm)
+    /// 프론트엔드에서 Math.pow(10, decimalPlaces[i])로 나눠서 mm 변환
+    /// </summary>
+    [JsonProperty("decimalPlaces")]
+    public int[] DecimalPlaces { get; set; } = new int[4];
+}
+
+/// <summary>
+/// 모달 G코드 + 실제 F/S 값 (프론트엔드 ModalGCodeInfo와 매핑)
+/// </summary>
+public class PathModal
+{
+    [JsonProperty("gCodeGrid")]
+    public string[][] GCodeGrid { get; set; } = new[]
+    {
+        new[]{"","","",""}, new[]{"","","",""},
+        new[]{"","","",""}, new[]{"","","",""},
+        new[]{"","","",""}
+    };
+    [JsonProperty("feedActual")]
+    public int FeedActual { get; set; }
+    [JsonProperty("spindleActual")]
+    public int SpindleActual { get; set; }
+    [JsonProperty("repeatCurrent")]
+    public int RepeatCurrent { get; set; }
+    [JsonProperty("repeatTotal")]
+    public int RepeatTotal { get; set; }
+}
+
+public class PathData
+{
+    [JsonProperty("programNo")]
+    public string ProgramNo { get; set; } = string.Empty;
+    [JsonProperty("blockNo")]
+    public string BlockNo { get; set; } = string.Empty;
+    [JsonProperty("programContent")]
+    public string[] ProgramContent { get; set; } = Array.Empty<string>();
+    [JsonProperty("currentLine")]
+    public int CurrentLine { get; set; }
+    [JsonProperty("axisNames")]
+    public string[] AxisNames { get; set; } = Array.Empty<string>();
+    [JsonProperty("coordinates")]
+    public PathCoordinates Coordinates { get; set; } = new();
+    [JsonProperty("modal")]
+    public PathModal Modal { get; set; } = new();
+    [JsonProperty("pathStatus")]
+    public string PathStatus { get; set; } = "---- ---- ---- ---";
+}
+
 public class TelemetryData
 {
     public int RunState { get; set; }
@@ -287,6 +360,33 @@ public class TelemetryData
     public bool AlarmActive { get; set; }
     public int[]? AbsolutePosition { get; set; }
     public int[]? MachinePosition { get; set; }
+
+    /// <summary>Path1 (주축) 상세 데이터</summary>
+    [JsonProperty("path1")]
+    public PathData? Path1 { get; set; }
+
+    /// <summary>Path2 (부축) 상세 데이터</summary>
+    [JsonProperty("path2")]
+    public PathData? Path2 { get; set; }
+
+    /// <summary>
+    /// PMC 비트 실시간 값 맵 — 탑바 인터락 pills 렌더링에 사용
+    /// Key: "R6001.3" 형식, Value: 0 또는 1
+    /// </summary>
+    public Dictionary<string, int>? PmcBits { get; set; }
+
+    /// <summary>
+    /// 오퍼레이터 메시지 목록 (NC프로그램 #3006, 외부 신호 등)
+    /// null이면 메시지 없음
+    /// </summary>
+    public List<OperatorMsgData>? OperatorMessages { get; set; }
+}
+
+public class OperatorMsgData
+{
+    public int    Number  { get; set; }
+    public short  MsgType { get; set; }
+    public string Message { get; set; } = "";
 }
 
 public class AlarmEventMessage : MqttMessage
@@ -296,6 +396,8 @@ public class AlarmEventMessage : MqttMessage
     public int AlarmNo { get; set; }
     public string? AlarmMsg { get; set; }
     public string? Category { get; set; }
+    /// <summary>FOCAS cnc_rdalmmsg2 type 코드 (0=SW,1=PW,2=IO,3=PS,4=OT,5=OH,6=SV,7=SR,8=MC,9=SP,10=DS,11=IE,12=BG,13=SN)</summary>
+    public short AlarmTypeCode { get; set; }
 }
 
 public class CommandMessage : MqttMessage
@@ -319,6 +421,16 @@ public class EventMessage : MqttMessage
     public string EventType { get; set; } = "M20_COMPLETE";
     public string? ProgramNo { get; set; }
     public Dictionary<string, object>? Data { get; set; }
+}
+
+/// <summary>
+/// PMC 비트 빠른 발행용 메시지 (pmc_bits 토픽, 100ms 주기)
+/// 텔레메트리 전체를 발행하지 않고 pmcBits만 빠르게 전달하여 램프 응답 지연을 최소화
+/// </summary>
+public class PmcBitsMessage : MqttMessage
+{
+    /// <summary>PMC 비트 값 맵 — Key: "R6001.3", Value: 0|1</summary>
+    public Dictionary<string, int>? PmcBits { get; set; }
 }
 
 #endregion

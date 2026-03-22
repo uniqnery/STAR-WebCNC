@@ -1,7 +1,8 @@
 // FactoryView Component - 공장 평면도 레이아웃
 
 import { useState, useRef } from 'react';
-import { Machine } from '../stores/machineStore';
+import { useNavigate } from 'react-router-dom';
+import { Machine, useMachineStore } from '../stores/machineStore';
 import { useLayoutStore, LayoutItem, LayoutItemType, ITEM_DEFAULTS } from '../stores/layoutStore';
 import { useAuthStore } from '../stores/authStore';
 import { getStatusFromTelemetry, getStatusColorHex } from '../lib/machineUtils';
@@ -17,6 +18,7 @@ interface FactoryViewProps {
 export function FactoryView({ machines, onSelectMachine }: FactoryViewProps) {
   const user = useAuthStore((state) => state.user);
   const isAdmin = user?.role === 'ADMIN';
+  const telemetryMap = useMachineStore((s) => s.telemetryMap);
 
   const {
     layout,
@@ -52,8 +54,8 @@ export function FactoryView({ machines, onSelectMachine }: FactoryViewProps) {
     const machine = machines.find((m) => m.machineId === machineId);
     if (!machine) return '#6B7280';
 
-    const telemetry = machine.realtime?.telemetry;
-    const isOnline = machine.realtime?.status === 'online';
+    const telemetry = telemetryMap[machine.machineId] ?? machine.realtime?.telemetry;
+    const isOnline = telemetryMap[machine.machineId] != null || machine.realtime?.status === 'online';
     const status = getStatusFromTelemetry(telemetry, isOnline);
     return getStatusColorHex(status);
   };
@@ -565,32 +567,82 @@ export function FactoryView({ machines, onSelectMachine }: FactoryViewProps) {
         )}
       </div>
 
-      {/* 장비 상세 팝업 모달 */}
+      {/* 장비 상세 팝업 모달 + Quick Action */}
       {popupMachine && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setPopupMachine(null)}
-        >
-          <div
-            className="relative max-w-sm w-full mx-4 animate-in fade-in zoom-in duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* 닫기 버튼 */}
-            <button
-              onClick={() => setPopupMachine(null)}
-              className="absolute -top-3 -right-3 z-10 w-8 h-8 bg-white dark:bg-gray-700 rounded-full shadow-lg
-                       flex items-center justify-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-
-            {/* MachineStatusCard 팝업 */}
-            <MachineStatusCard machine={popupMachine} />
-          </div>
-        </div>
+        <FactoryPopup
+          machine={popupMachine}
+          onClose={() => setPopupMachine(null)}
+        />
       )}
+    </div>
+  );
+}
+
+// Quick Action 팝업 (MachineStatusCard + 3개 바로가기 버튼)
+function FactoryPopup({ machine, onClose }: { machine: Machine; onClose: () => void }) {
+  const navigate = useNavigate();
+  const { selectMachine } = useMachineStore();
+
+  const handleAction = (path: string) => {
+    selectMachine(machine.machineId);
+    onClose();
+    navigate(path);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onClick={onClose}
+    >
+      <div
+        className="relative max-w-sm w-full mx-4 animate-in fade-in zoom-in duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* 닫기 버튼 */}
+        <button
+          onClick={onClose}
+          className="absolute -top-3 -right-3 z-10 w-8 h-8 bg-white dark:bg-gray-700 rounded-full shadow-lg
+                   flex items-center justify-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
+        {/* MachineStatusCard */}
+        <MachineStatusCard machine={machine} compact />
+
+        {/* Quick Action 버튼 */}
+        <div className="mt-2 grid grid-cols-3 gap-2">
+          <button
+            onClick={() => handleAction('/remote')}
+            className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+            </svg>
+            원격제어
+          </button>
+          <button
+            onClick={() => handleAction('/scheduler')}
+            className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+            </svg>
+            스케줄러
+          </button>
+          <button
+            onClick={() => handleAction('/transfer')}
+            className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            파일전송
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

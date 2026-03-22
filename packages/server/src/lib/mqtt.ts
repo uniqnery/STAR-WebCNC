@@ -9,6 +9,7 @@ export const TOPICS = {
   // Agent → Server
   AGENT_STATUS: 'star-webcnc/agent/+/status',           // Agent 상태 보고
   AGENT_TELEMETRY: 'star-webcnc/agent/+/telemetry',     // 장비 실시간 데이터
+  AGENT_PMC_BITS: 'star-webcnc/agent/+/pmc_bits',       // PMC 비트 빠른 발행 (100ms, 램프용)
   AGENT_ALARM: 'star-webcnc/agent/+/alarm',             // 알람 발생/해제
   AGENT_COMMAND_RESULT: 'star-webcnc/agent/+/command/result', // 명령 실행 결과
   AGENT_EVENT: 'star-webcnc/agent/+/event',             // M20 등 이벤트
@@ -54,6 +55,8 @@ export interface AlarmMessage extends MqttMessage {
   alarmNo: number;
   alarmMsg: string;
   category?: string;
+  /** FOCAS alarm type code: 3=PS (P/S) = #3006 macro alarm candidate */
+  alarmTypeCode?: number;
 }
 
 export interface CommandMessage extends MqttMessage {
@@ -73,9 +76,15 @@ export interface CommandResultMessage extends MqttMessage {
 
 export interface EventMessage extends MqttMessage {
   machineId: string;
-  eventType: 'M20_COMPLETE' | 'PROGRAM_START' | 'PROGRAM_END';
+  eventType: 'M20_COMPLETE' | 'M20_SUB_COMPLETE' | 'PROGRAM_START' | 'PROGRAM_END';
   programNo?: string;
   data?: Record<string, unknown>;
+}
+
+/** PMC 비트 빠른 발행 메시지 (pmc_bits 토픽, 100ms 주기) */
+export interface PmcBitsMessage extends MqttMessage {
+  machineId: string;
+  pmcBits: Record<string, 0 | 1>;
 }
 
 // Event handlers type
@@ -152,6 +161,7 @@ class MqttService {
     const topics = [
       TOPICS.AGENT_STATUS,
       TOPICS.AGENT_TELEMETRY,
+      TOPICS.AGENT_PMC_BITS,
       TOPICS.AGENT_ALARM,
       TOPICS.AGENT_COMMAND_RESULT,
       TOPICS.AGENT_EVENT,

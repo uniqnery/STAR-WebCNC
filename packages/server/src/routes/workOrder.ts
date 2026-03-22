@@ -74,7 +74,7 @@ router.get('/:id', authenticate, async (req: Request, res: Response, next: NextF
 });
 
 // Create work order
-router.post('/', authenticate, requireRole(['ADMIN', 'AS']), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const {
       orderNumber,
@@ -145,7 +145,7 @@ router.post('/', authenticate, requireRole(['ADMIN', 'AS']), async (req: Request
 });
 
 // Update work order
-router.put('/:id', authenticate, requireRole(['ADMIN', 'AS']), async (req: Request, res: Response, next: NextFunction) => {
+router.put('/:id', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const {
@@ -208,7 +208,7 @@ router.put('/:id', authenticate, requireRole(['ADMIN', 'AS']), async (req: Reque
 });
 
 // Start work order
-router.post('/:id/start', authenticate, requireRole(['ADMIN', 'AS']), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/start', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 
@@ -260,7 +260,7 @@ router.post('/:id/start', authenticate, requireRole(['ADMIN', 'AS']), async (req
 });
 
 // Complete work order
-router.post('/:id/complete', authenticate, requireRole(['ADMIN', 'AS']), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/complete', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 
@@ -312,7 +312,7 @@ router.post('/:id/complete', authenticate, requireRole(['ADMIN', 'AS']), async (
 });
 
 // Cancel work order
-router.post('/:id/cancel', authenticate, requireRole(['ADMIN', 'AS']), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/cancel', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 

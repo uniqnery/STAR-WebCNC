@@ -105,6 +105,20 @@ class ApiClient {
     });
     return this.handleResponse<T>(response);
   }
+
+  // multipart/form-data 전송 (Content-Type 헤더 제외 — 브라우저가 자동 설정)
+  async postForm<T>(path: string, form: FormData): Promise<ApiResponse<T>> {
+    const headers: HeadersInit = {};
+    const token = useAuthStore.getState().accessToken;
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      body: form,
+    });
+    return this.handleResponse<T>(response);
+  }
 }
 
 export const api = new ApiClient(API_BASE_URL);
@@ -118,14 +132,14 @@ export const authApi = {
         id: string;
         username: string;
         email: string;
-        role: 'USER' | 'ADMIN' | 'AS';
+        role: 'USER' | 'ADMIN' | 'HQ_ENGINEER';
       };
     }>('/api/auth/login', { username, password }),
 
-  register: (username: string, email: string, password: string) =>
+  register: (username: string, email: string, password: string, registrationCode: string) =>
     api.post<{ id: string; username: string; email: string }>(
       '/api/auth/register',
-      { username, email, password }
+      { username, email, password, registrationCode }
     ),
 
   logout: () => api.post('/api/auth/logout'),
@@ -138,7 +152,7 @@ export const authApi = {
       id: string;
       username: string;
       email: string;
-      role: 'USER' | 'ADMIN' | 'AS';
+      role: 'USER' | 'ADMIN' | 'HQ_ENGINEER';
     }>('/api/auth/me'),
 };
 
@@ -168,12 +182,46 @@ export const machineApi = {
 
   extendControl: (id: string) =>
     api.post(`/api/machines/${id}/control/extend`),
+
+  create: (payload: {
+    machineId: string;
+    name: string;
+    ipAddress: string;
+    port: number;
+    serialNumber: string;
+    location?: string;
+    templateId: string;
+  }) => api.post<{ id: string; machineId: string }>('/api/machines', payload),
+
+  delete: (id: string) => api.delete(`/api/machines/${id}`),
 };
 
 // Command API
 export const commandApi = {
+  /** 명령 전송 (즉시 PENDING 응답) */
   send: (machineId: string, command: string, params?: Record<string, unknown>) =>
     api.post<{ correlationId: string; status: string }>(`/api/commands/${machineId}`, {
+      command,
+      params,
+    }),
+
+  /**
+   * 명령 전송 후 Agent 실행 결과까지 동기 대기 (?wait=true)
+   * timeoutMs 초과 시 504 응답 (COMMAND_TIMEOUT)
+   */
+  sendAndWait: (
+    machineId: string,
+    command: string,
+    params?: Record<string, unknown>,
+    timeoutMs = 30_000,
+  ) =>
+    api.post<{
+      correlationId: string;
+      status: string;
+      result?: unknown;
+      errorCode?: string;
+      errorMessage?: string;
+    }>(`/api/commands/${machineId}?wait=true&timeout=${timeoutMs}`, {
       command,
       params,
     }),
@@ -394,4 +442,138 @@ export const dncApi = {
   // 장비 DNC 경로 설정 저장 (관리자 전용)
   saveConfig: (machineId: string, config: { path1: string; path2: string; path3?: string }) =>
     api.put(`/api/machines/${machineId}/dnc-config`, config),
+};
+
+// NC Data API (Offset / Count / Tool-Life)
+export const ncDataApi = {
+  // 오프셋 읽기 (마모만, path=1|2)
+  readOffsets: (machineId: string, path: number) =>
+    api.get(`/api/machines/${machineId}/offsets?path=${path}&count=64`),
+
+  // 오프셋 쓰기 (단일 항목, 제어권 필요)
+  // no: 공구 번호 (1-based), axis: 'X'|'Z'|'Y'|'R', value: mm 단위
+  writeOffset: (machineId: string, path: number, no: number, axis: string, value: number) =>
+    api.put(`/api/machines/${machineId}/offsets`, { path, no, axis, value }),
+
+  // 카운터 데이터 읽기 (템플릿 CounterConfig 기반)
+  readCount: (machineId: string) =>
+    api.get(`/api/machines/${machineId}/count`),
+
+  // 카운터 변수 쓰기 (제어권 필요)
+  writeCountVar: (machineId: string, varNo: number, value: number) =>
+    api.put(`/api/machines/${machineId}/count`, { varNo, value }),
+
+  // 공구 수명 데이터 읽기 (path=1|2)
+  readToolLife: (machineId: string, path = 1) =>
+    api.get(`/api/machines/${machineId}/tool-life?path=${path}`),
+
+  // 공구 수명 변수 쓰기 (제어권 필요)
+  writeToolLifeVar: (machineId: string, varNo: number, value: number, varType?: string, dataType?: string) =>
+    api.put(`/api/machines/${machineId}/tool-life`, { varNo, value, varType, dataType }),
+};
+
+// File Management API (저장소/트랜스퍼/뷰어)
+export const fileApi = {
+  // DNC 저장소 파일 목록
+  listRepoFiles: (machineId: string, pathKey: string) =>
+    api.get(`/api/files/repo/${machineId}/${pathKey}`),
+
+  // PC 공용 저장소 파일 목록
+  listShareFiles: () =>
+    api.get('/api/files/share'),
+
+  // 외부 PC → share 폴더 파일 업로드 (multipart)
+  uploadShareFile: (file: File) => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return api.postForm('/api/files/share/upload', form);
+  },
+
+  // CNC 프로그램 목록 (기존 transferApi.listPrograms 래핑)
+  listCncFiles: (machineId: string) =>
+    api.get(`/api/transfer/${machineId}/programs`),
+
+  // 파일 내용 읽기
+  readFile: (root: string, machineId: string, fileName: string) =>
+    api.get(`/api/files/read?root=${root}&machineId=${machineId}&name=${encodeURIComponent(fileName)}`),
+
+  // 파일 저장
+  writeFile: (root: string, machineId: string, fileName: string, content: string) =>
+    api.put('/api/files/write', { root, machineId, fileName, content }),
+
+  // 파일 삭제
+  deleteFiles: (root: string, machineId: string, fileNames: string[]) =>
+    api.post('/api/files/delete', { root, machineId, fileNames }),
+
+  // 파일 전송 (PC ↔ CNC)
+  transfer: (machineId: string, direction: string, fileNames: string[], conflictPolicy: string) =>
+    api.post('/api/files/transfer', { machineId, direction, fileNames, conflictPolicy }),
+};
+
+// Template API (HQ_ENGINEER/ADMIN 전용 - 장비 템플릿 관리)
+export const templateApi = {
+  getAll: () =>
+    api.get('/api/templates'),
+
+  getById: (id: string) =>
+    api.get(`/api/templates/${id}`),
+
+  create: (template: Record<string, unknown>) =>
+    api.post('/api/templates', template),
+
+  update: (id: string, template: Record<string, unknown>) =>
+    api.put(`/api/templates/${id}`, template),
+
+  remove: (id: string) =>
+    api.delete(`/api/templates/${id}`),
+
+  reload: (id: string) =>
+    api.post(`/api/templates/${id}/reload`),
+};
+
+// Diagnostics API
+export interface AgentDiagStatus {
+  machineId: string;
+  machineName: string;
+  online: boolean;
+  lastSeenMs?: number;
+  ipAddress: string;
+}
+
+export interface DiagnosticsData {
+  timestamp: string;
+  services: {
+    database: { connected: boolean; latencyMs?: number; error?: string };
+    redis: { connected: boolean; error?: string };
+    mqtt: { connected: boolean; error?: string };
+    websocket: { clientCount: number };
+  };
+  agents: AgentDiagStatus[];
+}
+
+export const settingsApi = {
+  getRegistrationCodes: () =>
+    api.get<{ adminCode: string; operatorCode: string; hqCodeSet: boolean }>(
+      '/api/settings/registration-codes'
+    ),
+  updateRegistrationCodes: (codes: { adminCode?: string; operatorCode?: string }) =>
+    api.put('/api/settings/registration-codes', codes),
+};
+
+export const diagnosticsApi = {
+  /** 시스템 전체 연결 상태 조회 */
+  getStatus: () =>
+    api.get<DiagnosticsData>('/api/diagnostics'),
+
+  /** 특정 장비 Agent에 PING 명령 전송 후 응답 대기 (5초) */
+  pingAgent: (machineId: string) =>
+    api.post<{
+      correlationId: string;
+      status: string;
+      result?: { pong: boolean; timestamp: string };
+      errorCode?: string;
+      errorMessage?: string;
+    }>(`/api/commands/${machineId}?wait=true&timeout=5000`, {
+      command: 'PING',
+    }),
 };

@@ -5,6 +5,9 @@ import { useState } from 'react';
 import { PathData } from '../stores/machineStore';
 import { useCameraForMachine, useCameraStore } from '../stores/cameraStore';
 import { CameraStream } from './CameraStream';
+import { OffsetView } from './ncmonitor/OffsetView';
+import { CountView } from './ncmonitor/CountView';
+import { ToolLifeView } from './ncmonitor/ToolLifeView';
 
 export type MonitorTab = 'monitor' | 'camera' | 'offset' | 'count' | 'tool-life';
 
@@ -13,9 +16,14 @@ interface NCMonitorProps {
   path2?: PathData;
   machineMode?: string;  // PROGRAM( CHECK ), PROGRAM( MEM ) 등
   machineId?: string;    // 카메라 매핑용
+  /** 외부에서 탭 상태를 제어할 때 사용. 없으면 내부 상태로 동작 */
+  activeTab?: MonitorTab;
+  onTabChange?: (tab: MonitorTab) => void;
+  /** true 시 하단 탭 바 숨김 (탭 바를 외부에서 별도 렌더링할 때) */
+  hideTabs?: boolean;
 }
 
-const TABS: { id: MonitorTab; label: string }[] = [
+export const TABS: { id: MonitorTab; label: string }[] = [
   { id: 'monitor', label: '모니터' },
   { id: 'camera', label: '카메라' },
   { id: 'offset', label: 'OFFSET' },
@@ -23,8 +31,13 @@ const TABS: { id: MonitorTab; label: string }[] = [
   { id: 'tool-life', label: 'TOOL-LIFE' },
 ];
 
-export function NCMonitor({ path1, path2, machineMode, machineId }: NCMonitorProps) {
-  const [activeTab, setActiveTab] = useState<MonitorTab>('monitor');
+export function NCMonitor({ path1, path2, machineMode, machineId, activeTab: externalTab, onTabChange, hideTabs }: NCMonitorProps) {
+  const [internalTab, setInternalTab] = useState<MonitorTab>('monitor');
+  const activeTab = externalTab ?? internalTab;
+  const setActiveTab = (tab: MonitorTab) => {
+    setInternalTab(tab);
+    onTabChange?.(tab);
+  };
   const cameraEnabled = useCameraStore((s) => s.cameraEnabled);
   const cameraForMachine = useCameraForMachine(machineId || '');
 
@@ -43,32 +56,34 @@ export function NCMonitor({ path1, path2, machineMode, machineId }: NCMonitorPro
           )
         )}
         {activeTab === 'offset' && (
-          <PlaceholderView title="OFFSET" description="Path1 / Path2 Wear Offset (64개) 연동 예정" />
+          <OffsetView machineId={machineId} />
         )}
         {activeTab === 'count' && (
-          <PlaceholderView title="COUNT" description="카운트 화면 실제 장비 연동 예정" />
+          <CountView machineId={machineId} />
         )}
         {activeTab === 'tool-life' && (
-          <PlaceholderView title="TOOL-LIFE" description="공구 수명 카운트 실제 장비 연동 예정" />
+          <ToolLifeView machineId={machineId} />
         )}
       </div>
 
-      {/* 하단 탭 선택 */}
-      <div className="flex border-t border-gray-700">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 py-2 text-xs font-medium transition-colors ${
-              activeTab === tab.id
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      {/* 하단 탭 선택 (hideTabs=true 시 숨김) */}
+      {!hideTabs && (
+        <div className="flex border-t border-gray-700">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                activeTab === tab.id
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -76,13 +91,19 @@ export function NCMonitor({ path1, path2, machineMode, machineId }: NCMonitorPro
 // ============================================================
 // 모니터 뷰 (실제 NC 화면 레이아웃)
 // ============================================================
+const DEFAULT_AXES = ['X', 'Y', 'Z', 'C'];
+
 function MonitorView({ path1, path2, machineMode }: { path1?: PathData; path2?: PathData; machineMode?: string }) {
-  const formatPos = (val?: number) => {
+  // decimalPlaces: ODBAXIS.type (IS-B=3→/1000, IS-C=4→/10000). 0이면 기본값 3
+  const formatPos = (val?: number, decimalPlaces?: number) => {
     if (val === undefined) return '0.000';
-    return (val / 1000).toFixed(3);
+    const dp = (decimalPlaces && decimalPlaces > 0) ? decimalPlaces : 3;
+    return (val / Math.pow(10, dp)).toFixed(dp);
   };
 
-  const axes = ['X', 'Y', 'Z', 'C'];
+  // CNC 실제 축 이름 우선, 없으면 기본값
+  const axes1 = (path1?.axisNames && path1.axisNames.length > 0) ? path1.axisNames : DEFAULT_AXES;
+  const axes2 = (path2?.axisNames && path2.axisNames.length > 0) ? path2.axisNames : DEFAULT_AXES;
 
   return (
     <div className="text-green-400 font-mono text-xs p-2 space-y-0">
@@ -133,19 +154,19 @@ function MonitorView({ path1, path2, machineMode }: { path1?: PathData; path2?: 
           <div className="grid grid-cols-2">
             <div className="border-r border-gray-700">
               <div className="bg-gray-800 px-2 py-0.5 text-center text-[10px] text-cyan-300">ABSOLUTE</div>
-              {axes.map((axis, i) => (
+              {axes1.map((axis, i) => (
                 <div key={`p1a-${axis}`} className="flex justify-between px-2 py-0.5">
-                  <span className="text-cyan-300">{axis}1</span>
-                  <span className="text-white">{formatPos(path1?.coordinates?.absolute[i])}</span>
+                  <span className="text-cyan-300">{axis}</span>
+                  <span className="text-white">{formatPos(path1?.coordinates?.absolute[i], path1?.coordinates?.decimalPlaces?.[i])}</span>
                 </div>
               ))}
             </div>
             <div>
               <div className="bg-gray-800 px-2 py-0.5 text-center text-[10px] text-cyan-300">DISTANCE TO GO</div>
-              {axes.map((axis, i) => (
+              {axes1.map((axis, i) => (
                 <div key={`p1d-${axis}`} className="flex justify-between px-2 py-0.5">
-                  <span className="text-cyan-300">{axis}1</span>
-                  <span className="text-yellow-300">{formatPos(path1?.coordinates?.distanceToGo[i])}</span>
+                  <span className="text-cyan-300">{axis}</span>
+                  <span className="text-yellow-300">{formatPos(path1?.coordinates?.distanceToGo[i], path1?.coordinates?.decimalPlaces?.[i])}</span>
                 </div>
               ))}
             </div>
@@ -156,19 +177,19 @@ function MonitorView({ path1, path2, machineMode }: { path1?: PathData; path2?: 
           <div className="grid grid-cols-2">
             <div className="border-r border-gray-700">
               <div className="bg-gray-800 px-2 py-0.5 text-center text-[10px] text-cyan-300">ABSOLUTE</div>
-              {axes.map((axis, i) => (
+              {axes2.map((axis, i) => (
                 <div key={`p2a-${axis}`} className="flex justify-between px-2 py-0.5">
-                  <span className="text-cyan-300">{axis}2</span>
-                  <span className="text-white">{formatPos(path2?.coordinates?.absolute[i])}</span>
+                  <span className="text-cyan-300">{axis}</span>
+                  <span className="text-white">{formatPos(path2?.coordinates?.absolute[i], path2?.coordinates?.decimalPlaces?.[i])}</span>
                 </div>
               ))}
             </div>
             <div>
               <div className="bg-gray-800 px-2 py-0.5 text-center text-[10px] text-cyan-300">DISTANCE TO GO</div>
-              {axes.map((axis, i) => (
+              {axes2.map((axis, i) => (
                 <div key={`p2d-${axis}`} className="flex justify-between px-2 py-0.5">
-                  <span className="text-cyan-300">{axis}2</span>
-                  <span className="text-yellow-300">{formatPos(path2?.coordinates?.distanceToGo[i])}</span>
+                  <span className="text-cyan-300">{axis}</span>
+                  <span className="text-yellow-300">{formatPos(path2?.coordinates?.distanceToGo[i], path2?.coordinates?.decimalPlaces?.[i])}</span>
                 </div>
               ))}
             </div>
@@ -203,29 +224,27 @@ function ModalGCodeGrid({ modal, pathLabel, isRight }: {
   pathLabel: string;
   isRight?: boolean;
 }) {
-  const grid = modal?.gCodeGrid || [['','',''],['','',''],['','',''],['','',''],['','','']];
+  const grid = modal?.gCodeGrid ?? [['','','',''],['','','',''],['','','',''],['','','',''],['','','','']];
+  const hasAnyCode = grid.some((row) => row.some((cell) => cell.trim() !== ''));
 
   return (
     <div className={`px-1 py-1 text-[10px] ${isRight ? '' : 'border-r border-gray-700'}`}>
       {grid.map((row, i) => (
         <div key={i} className="flex gap-1">
-          <span className="w-8 text-green-400">{row[0]}</span>
-          <span className="w-8 text-green-400">{row[1]}</span>
-          <span className="w-10 text-green-400">{row[2]}</span>
-          <span className="flex-1 text-right text-white">
-            {i === 0 && <>F <span className="text-yellow-300">{modal?.fProgrammed ?? 0}</span> M <span className="text-white">{modal?.mCode ?? 0}</span></>}
-            {i === 1 && <span className="text-gray-500">H</span>}
-            {i === 2 && <span className="text-gray-500">D</span>}
-            {i === 3 && <>T <span className="text-yellow-300">{modal?.tTool ?? 0}</span></>}
-            {i === 4 && <>S <span className="text-yellow-300">{modal?.sProgrammed ?? 0}</span></>}
-          </span>
+          {row.map((cell, j) => (
+            <span
+              key={j}
+              className={`w-8 ${cell.trim() ? 'text-green-400' : hasAnyCode ? 'text-gray-700' : 'text-gray-600'}`}
+            >
+              {cell.trim() || '---'}
+            </span>
+          ))}
         </div>
       ))}
-      {/* Feed Actual + Repeat */}
+      {/* Feed Actual */}
       <div className="flex justify-between mt-0.5 text-gray-400">
         <span>F</span>
         <span>{modal?.feedActual ?? 0}MM/MIN</span>
-        <span>REPEAT{modal?.repeatCurrent ?? 0}/{modal?.repeatTotal ?? 0}</span>
       </div>
       {/* Spindle Actual */}
       <div className="flex justify-between text-gray-400">

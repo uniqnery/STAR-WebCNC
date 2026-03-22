@@ -7,14 +7,16 @@ const MOCK_USER = {
   id: 'dev-user-001',
   username: 'admin',
   email: 'admin@star-webcnc.local',
-  role: 'ADMIN' as const,
+  role: 'HQ_ENGINEER' as const,
 };
+
+export type UserRole = 'USER' | 'ADMIN' | 'HQ_ENGINEER';
 
 export interface User {
   id: string;
   username: string;
   email: string;
-  role: 'USER' | 'ADMIN' | 'AS';
+  role: UserRole;
 }
 
 interface AuthState {
@@ -66,6 +68,7 @@ export const useAuthStore = create<AuthState>()(
       name: 'auth-storage',
       partialize: (state) => ({
         user: state.user,
+        accessToken: state.accessToken,
         isAuthenticated: state.isAuthenticated,
       }),
     }

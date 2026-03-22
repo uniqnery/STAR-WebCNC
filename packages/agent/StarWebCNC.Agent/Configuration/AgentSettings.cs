@@ -18,6 +18,12 @@ public class AgentSettings
     public string MachineId { get; set; } = "MC-001";
 
     /// <summary>
+    /// 사용할 CNC 템플릿 ID (예: FANUC_0i-TF Plus_SB-20R2_V1)
+    /// 서버 /api/templates/{templateId}에서 로드
+    /// </summary>
+    public string TemplateId { get; set; } = "FANUC_0i-TF Plus_SB-20R2_V1";
+
+    /// <summary>
     /// CNC 연결 설정
     /// </summary>
     public CncConnectionSettings Cnc { get; set; } = new();

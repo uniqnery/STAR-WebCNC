@@ -37,9 +37,9 @@ model User {
 }
 
 enum UserRole {
-  USER    // 일반 사용자 (모니터링 전용)
-  ADMIN   // 관리자 (스케줄러, 설정 변경)
-  AS      // AS 담당자 (템플릿 관리, 전체 접근)
+  USER          // 일반 사용자 (모니터링 전용)
+  ADMIN         // 관리자 (스케줄러, 설정 변경)
+  HQ_ENGINEER   // 본사 엔지니어 (템플릿 관리, 전체 접근)
 }
 
 model RefreshToken {
@@ -79,10 +79,17 @@ model Machine {
   schedulerMode    SchedulerMode @default(MANUAL) @map("scheduler_mode")
   maxQueueSize     Int           @default(15) @map("max_queue_size")
 
+  // Machine identity
+  serialNumber     String?       @map("serial_number")   // CNC 시리얼번호
+  location         String?                               // 설비 위치/라인명
+
   // Network folders
   inputFolder      String?       @map("input_folder")
   outputFolder     String?       @map("output_folder")
   backupFolder     String?       @map("backup_folder")
+
+  // DNC path configuration (JSON: { path1, path2, path3? })
+  dncConfig        Json          @default("{}") @map("dnc_config")
 
   // Relations
   template         Template      @relation(fields: [templateId], references: [id])
@@ -102,29 +109,60 @@ enum SchedulerMode {
 
 model Template {
   id          String   @id @default(uuid())
-  templateId  String   @unique @map("template_id") // 예: FANUC_0iTF_v2
+  templateId  String   @unique @map("template_id") // 예: FANUC_0i-TF Plus_SB-20R2_V1
   version     String                               // SemVer
-  name        String                               // 표시명
-  description String?
+  name        String                               // 표시명 (예: Star SB-20R2 (FANUC 0i-TF Plus))
+  description String   @default("")
+
+  // System info (기본 정보 - 빠른 조회용 별도 컬럼 유지)
   cncType     String   @map("cnc_type")            // FANUC, MITSUBISHI, etc.
-  seriesName  String   @map("series_name")         // 0i-TF, 30i-B, etc.
+  seriesName  String   @map("series_name")         // 0i-TF Plus, 30i-B, etc.
+
+  // Full system info JSON
+  systemInfo  Json     @default("{}") @map("system_info")
+
+  // Axis configuration (path1/path2/path3)
+  axisConfig  Json     @default("{}") @map("axis_config")
 
   // PMC mapping stored as JSON
-  pmcMap      Json     @map("pmc_map")
+  pmcMap      Json     @default("{}") @map("pmc_map")
 
-  // Interlock configuration
-  interlockConfig Json @map("interlock_config")
+  // [DEPRECATED] Old interlock config - kept for backward compatibility
+  interlockConfig Json @default("{}") @map("interlock_config")
+
+  // [NEW] Interlock modules - 4-module new architecture
+  interlockModules Json @default("{}") @map("interlock_modules")
+
+  // Remote control interlock PMC addresses
+  remoteControlInterlock Json @default("{}") @map("remote_control_interlock")
+
+  // Virtual panel key definitions (legacy - use panelLayout)
+  virtualPanel Json @default("{}") @map("virtual_panel")
+
+  // Panel layout (PanelGroup[] - editable via PanelEditor)
+  panelLayout Json @default("[]") @map("panel_layout")
+
+  // TopBar interlock display config (page-based)
+  topBarInterlock Json @default("{}") @map("top_bar_interlock")
+
+  // NC Data config (Offset / Counter / Tool-Life)
+  offsetConfig   Json @default("{}") @map("offset_config")
+  counterConfig  Json @default("{}") @map("counter_config")
+  toolLifeConfig Json @default("{}") @map("tool_life_config")
+
+  // PMC 비트 기반 메시지 정의
+  pmcMessages Json @default("[]") @map("pmc_messages")
 
   // Scheduler configuration
-  schedulerConfig Json @map("scheduler_config")
+  schedulerConfig Json @default("{}") @map("scheduler_config")
 
   // Capabilities
-  capabilities Json
+  capabilities Json @default("{}")
 
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
-  createdBy   String?  @map("created_by")
+  createdBy   String   @default("") @map("created_by")
 
   // Relations
   machines    Machine[]

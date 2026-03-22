@@ -2,6 +2,7 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../lib/prisma';
+import { Prisma } from '@prisma/client';
 import { authenticate, requireRole } from '../middleware/auth';
 
 const router = Router();
@@ -19,7 +20,7 @@ interface AuditLogInput {
 }
 
 // Get audit logs with filtering and pagination
-router.get('/', authenticate, requireRole(['ADMIN', 'AS']), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
@@ -86,7 +87,7 @@ router.get('/', authenticate, requireRole(['ADMIN', 'AS']), async (req: Request,
 });
 
 // Get audit log detail
-router.get('/:id', authenticate, requireRole(['ADMIN', 'AS']), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 
@@ -121,7 +122,7 @@ router.get('/:id', authenticate, requireRole(['ADMIN', 'AS']), async (req: Reque
 });
 
 // Get audit statistics
-router.get('/stats/summary', authenticate, requireRole(['ADMIN', 'AS']), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/stats/summary', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { days } = req.query;
     const daysCount = parseInt(days as string) || 7;
@@ -214,7 +215,7 @@ export async function createAuditLog(input: AuditLogInput): Promise<void> {
         action: input.action,
         targetType: input.targetType,
         targetId: input.targetId,
-        params: input.params || {},
+        params: (input.params ?? {}) as Prisma.InputJsonValue,
         result: input.result,
         errorMsg: input.errorMsg,
         ipAddress: input.ipAddress,

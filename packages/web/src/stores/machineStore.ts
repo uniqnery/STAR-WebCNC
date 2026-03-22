@@ -1,22 +1,21 @@
 // Machine Store - Zustand
 
 import { create } from 'zustand';
+import { wsClient } from '../lib/wsClient';
+import { machineApi } from '../lib/api';
+import { useAuthStore } from './authStore';
+import { useFileStore } from './fileStore';
 
 // Path 좌표 데이터 (CNC 자동선반 Path1/Path2)
 export interface PathCoordinates {
-  absolute: number[];      // ABSOLUTE [X, Y, Z, C]
-  distanceToGo: number[];  // DISTANCE TO GO [X, Y, Z, C]
+  absolute: number[];       // ABSOLUTE [X, Y, Z, C] — raw CNC integer value
+  distanceToGo: number[];   // DISTANCE TO GO [X, Y, Z, C] — raw CNC integer value
+  decimalPlaces?: number[]; // 축별 소수점 자릿수 (ODBAXIS.type): IS-B=3, IS-C=4
 }
 
 // 모달 G코드 정보 (활성 G코드 그리드 + F/M/T/S 값)
 export interface ModalGCodeInfo {
-  gCodeGrid: [string, string, string][];  // 5행 × 3열 G코드 그리드
-  fProgrammed: number;   // F 프로그래밍 값
-  mCode: number;         // 활성 M코드
-  hOffset?: number;      // H 공구길이보정
-  dOffset?: number;      // D 공구반경보정
-  tTool: number;         // T 공구번호
-  sProgrammed: number;   // S 프로그래밍 값
+  gCodeGrid: string[][];  // 5행 × 4열 G코드 모달 그리드 (group 1-20)
   feedActual: number;    // 실제 이송 (mm/min)
   repeatCurrent: number; // 반복 현재
   repeatTotal: number;   // 반복 전체
@@ -29,6 +28,7 @@ export interface PathData {
   blockNo: string;             // 블록 번호 (N00020 등)
   programContent: string[];    // 실행 중인 프로그램 라인들 (약 6줄)
   currentLine: number;         // 현재 실행 중인 라인 인덱스 (> 표시)
+  axisNames?: string[];        // CNC에서 읽은 실제 축 이름 (X, Z, C2 등)
   coordinates: PathCoordinates;
   modal: ModalGCodeInfo;       // 모달 G코드 + F/M/T/S
   pathStatus: string;          // 상태 표시 (예: 'MEM STRT ---- ---')
@@ -96,6 +96,88 @@ export interface TelemetryData {
 
   // 인터록 상태
   interlock?: InterlockStatus;
+
+  // PMC 비트 실시간 값 (address string → 0|1, 예: { 'R6001.3': 1, 'R6001.2': 0 })
+  pmcBits?: Record<string, 0 | 1>;
+
+  // 오퍼레이터 메시지 (NC프로그램 #3006, 외부 신호 등) — telemetry 1s 주기
+  operatorMessages?: OperatorMessage[];
+
+  // NC 데이터 탭
+  offsetData?: OffsetData;
+  countData?: CountData;
+  toolLifeData?: ToolLifeData;
+}
+
+export interface OperatorMessage {
+  number: number;
+  msgType: number;   // 0=EX(외부), 1=매크로(#3006) 등
+  message: string;
+}
+
+// ─── OFFSET 데이터 ───
+export type OffsetViewMode = 'wear' | 'geometry';
+
+export interface OffsetEntry {
+  no: number;       // 보정 번호 (1~64)
+  x: number;        // X 보정값 (mm) - R/W
+  y: number;        // Y 보정값 (mm) - R/W
+  z: number;        // Z 보정값 (mm) - R/W
+  r: number;        // R 노즈 반경 (mm) - R/W
+  t: number;        // T 타입 코드 - READ-ONLY
+}
+
+export interface OffsetData {
+  path1Wear: OffsetEntry[];
+  path2Wear: OffsetEntry[];
+  path1Geometry: OffsetEntry[];
+  path2Geometry: OffsetEntry[];
+}
+
+// ─── COUNT 데이터 ───
+export interface CounterData {
+  counterOn: boolean;    // R/W
+  preset: number;        // R/W
+  count: number;         // R (리셋만 가능)
+  total: number;         // R
+}
+
+export interface TimeData {
+  runningTime: string;     // R
+  cycleTime: string;       // R
+  remainingTime: string;   // R (계산값)
+  completionTime: string;  // R (계산값)
+}
+
+export interface BarFeederData {
+  barLength: number;       // R (mm)
+  remnant: number;         // R (mm)
+  partLength: number;      // R (mm)
+  cutOffWidth: number;     // R (mm)
+  requiredBars: number;    // R
+  numberOfParts: number;   // R
+  barChangeTime: string;   // R
+}
+
+export interface CountData {
+  counter: CounterData;
+  time: TimeData;
+  barFeeder: BarFeederData;
+}
+
+// ─── TOOL-LIFE 데이터 ───
+export interface ToolLifeEntry {
+  toolNo: string;     // T0100 등 - R
+  preset: number;     // R/W
+  count: number;      // R
+}
+
+export interface ToolLifeData {
+  counterOn: boolean;           // R/W
+  nonStopTimePeriod: boolean;   // R/W
+  countUpNotice: boolean;       // R/W
+  path1Tools: ToolLifeEntry[];
+  path2Tools: ToolLifeEntry[];
 }
 
 // DNC 경로 설정 (Path 단위)
@@ -133,6 +215,8 @@ export interface Machine {
   port: number;
   isActive: boolean;
   pathCount?: number;  // 지원 Path 수 (기본 2, 최대 3)
+  serialNumber?: string;  // CNC 시리얼번호
+  location?: string;      // 설비 위치/라인명
   template?: {
     templateId: string;
     name: string;
@@ -159,6 +243,13 @@ export interface Alarm {
   clearedAt?: string;
 }
 
+// 제어권 상태
+export interface ControlLockEntry {
+  isOwner: boolean;
+  ownerUsername: string | null;
+  expiresAt: number | null; // timestamp ms
+}
+
 interface MachineState {
   machines: Machine[];
   selectedMachineId: string | null;
@@ -167,13 +258,18 @@ interface MachineState {
   focasEvents: Record<string, FocasEvent[]>;  // FOCAS 이벤트 로그
   schedulerJobs: Record<string, SchedulerJob[]>;  // 스케줄러 작업 목록 (페이지 이동 시 유지)
   dncConfigs: Record<string, MachineDncConfig>;   // 장비별 DNC 경로 설정
+  controlLockMap: Record<string, ControlLockEntry>;  // 장비별 제어권 상태
+  controlLockDurationMin: number;  // 제어권 타이머 (분)
   isLoading: boolean;
   error: string | null;
 
   // Actions
   setMachines: (machines: Machine[]) => void;
+  addMachine: (machine: Machine) => void;
+  deleteMachine: (machineId: string) => void;
   selectMachine: (machineId: string | null) => void;
   updateTelemetry: (machineId: string, data: TelemetryData) => void;
+  updatePmcBits: (machineId: string, pmcBits: Record<string, 0 | 1>) => void;
   addAlarm: (machineId: string, alarm: Alarm) => void;
   clearAlarm: (machineId: string, alarmNo: number) => void;
   addFocasEvent: (machineId: string, event: FocasEvent) => void;
@@ -181,151 +277,26 @@ interface MachineState {
   setSchedulerJobs: (machineId: string, jobs: SchedulerJob[]) => void;
   clearSchedulerJobs: (machineId: string) => void;
   setDncConfig: (machineId: string, config: MachineDncConfig) => void;
+  acquireControlLock: (machineId: string, username: string) => void;
+  releaseControlLock: (machineId: string) => void;
+  extendControlLock: (machineId: string) => void;
+  setControlLockDuration: (minutes: number) => void;
+  updateOffsetEntry: (machineId: string, path: 'path1' | 'path2', mode: OffsetViewMode, no: number, field: 'x' | 'y' | 'z' | 'r', value: number) => void;
+  updateCountData: (machineId: string, updates: Partial<{ counterOn: boolean; preset: number; resetCount: boolean }>) => void;
+  updateToolLifeData: (machineId: string, updates: Partial<{ counterOn: boolean; nonStopTimePeriod: boolean; countUpNotice: boolean }>) => void;
+  updateToolLifePreset: (machineId: string, path: 'path1' | 'path2', toolNo: string, preset: number) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
+
+  // REST API
+  fetchMachines: () => Promise<void>;
+
+  // WebSocket
+  wsConnected: boolean;
+  initWebSocket: (token: string) => void;
+  destroyWebSocket: () => void;
 }
 
-// Mock data for UI testing (used when backend is not available)
-const MOCK_MACHINES: Machine[] = [
-  {
-    id: '1', machineId: 'MC-001', name: '1호기 자동선반', ipAddress: '192.168.1.101', port: 8193, isActive: true, pathCount: 2,
-    template: { templateId: 'FANUC_0iTF_v1', name: 'FANUC 0i-TF', cncType: 'FANUC', seriesName: '0i-TF' },
-    realtime: { status: 'online', telemetry: {
-      runState: 2, mode: 'AUTO', programNo: 'O1001', subProgramNo: 'O9001', productName: 'SHAFT-A',
-      feedrate: 120, spindleSpeed: 2500, spindleLoad: 42, partsCount: 87, presetCount: 100, cycleTime: 45, dailyRunRate: 78.5, alarmActive: false,
-      absolutePosition: [125340, -45670, 89120, 0], machinePosition: [325340, -245670, 289120, 0]
-    }},
-  },
-  {
-    id: '2', machineId: 'MC-002', name: '2호기 자동선반', ipAddress: '192.168.1.102', port: 8193, isActive: true, pathCount: 2,
-    template: { templateId: 'FANUC_0iTF_v1', name: 'FANUC 0i-TF', cncType: 'FANUC', seriesName: '0i-TF' },
-    realtime: { status: 'online', telemetry: {
-      runState: 0, mode: 'MDI', programNo: 'O1002', subProgramNo: 'O9002', productName: 'BOSS-B',
-      feedrate: 0, spindleSpeed: 0, spindleLoad: 0, partsCount: 45, presetCount: 80, cycleTime: 0, dailyRunRate: 45.2, alarmActive: true,
-      absolutePosition: [0, 0, 150000, 0], machinePosition: [200000, -200000, 350000, 0]
-    }},
-  },
-  {
-    id: '3', machineId: 'MC-003', name: '3호기 자동선반', ipAddress: '192.168.1.103', port: 8193, isActive: true, pathCount: 2,
-    template: { templateId: 'FANUC_0iTF_v1', name: 'FANUC 0i-TF', cncType: 'FANUC', seriesName: '0i-TF' },
-    realtime: { status: 'online', telemetry: {
-      runState: 2, mode: 'AUTO', programNo: 'O1003', subProgramNo: 'O9003', productName: 'COLLAR-C',
-      feedrate: 100, spindleSpeed: 3000, spindleLoad: 65, partsCount: 156, presetCount: 200, cycleTime: 38, dailyRunRate: 92.1, alarmActive: false,
-      absolutePosition: [78900, -23450, 56780, 0], machinePosition: [278900, -223450, 256780, 0]
-    }},
-  },
-  {
-    id: '4', machineId: 'MC-004', name: '4호기 자동선반', ipAddress: '192.168.1.104', port: 8193, isActive: true, pathCount: 3,
-    template: { templateId: 'FANUC_0iTF_v1', name: 'FANUC 0i-TF', cncType: 'FANUC', seriesName: '0i-TF' },
-    realtime: { status: 'offline', telemetry: undefined },
-  },
-];
-
-const MOCK_TELEMETRY: Record<string, TelemetryData> = {
-  'MC-001': {
-    runState: 2, mode: 'AUTO', programNo: 'O1001', subProgramNo: 'O9001', productName: 'SHAFT-A',
-    feedrate: 120, spindleSpeed: 2500, spindleLoad: 42, partsCount: 87, presetCount: 100,
-    cycleTime: 45, dailyRunRate: 78.5, alarmActive: false,
-    absolutePosition: [125340, -45670, 89120, 0], machinePosition: [325340, -245670, 289120, 0],
-    path1: {
-      programNo: 'O1421', blockNo: 'N00020',
-      programContent: ['M750 ;', '>M82;', '', 'M40;', 'M3S2500;', ''],
-      currentLine: 1,
-      coordinates: { absolute: [5500, 0, 20550, 32400], distanceToGo: [0, 0, 0, 0] },
-      modal: {
-        gCodeGrid: [['G00','G40','G54'],['G97','G25','G64'],['G69','G22','G18'],['G99','G80',''],['G21','G67','G40.1']],
-        fProgrammed: 0.05, mCode: 9010, tTool: 1, sProgrammed: 10, hOffset: undefined, dOffset: undefined,
-        feedActual: 0, repeatCurrent: 0, repeatTotal: 0, spindleActual: 10,
-      },
-      pathStatus: 'MEM STRT ---- ---',
-    },
-    path2: {
-      programNo: 'O1402', blockNo: 'N00001',
-      programContent: ['>M82;', '', 'G131B0.0(B5.0);', 'G02-5.0M14;', '', 'M68;'],
-      currentLine: 0,
-      coordinates: { absolute: [0, 0, 0, 38000], distanceToGo: [0, 0, 0, 0] },
-      modal: {
-        gCodeGrid: [['G00','G40','G54'],['G97','G25','G64'],['G69','G22','G18'],['G99','G80',''],['G21','G67','G40.1']],
-        fProgrammed: 1.0, mCode: 995, tTool: 1, sProgrammed: 2000, hOffset: undefined, dOffset: undefined,
-        feedActual: 0, repeatCurrent: 0, repeatTotal: 0, spindleActual: 157,
-      },
-      pathStatus: 'MEM STRT ---- ---',
-    },
-    interlock: { doorLock: true, memoryMode: true, barFeederAuto: true, coolantOn: true, machiningMode: false, cuttingMode: true }
-  },
-  'MC-002': {
-    runState: 0, mode: 'MDI', programNo: 'O1002', subProgramNo: 'O9002', productName: 'BOSS-B',
-    feedrate: 0, spindleSpeed: 0, spindleLoad: 0, partsCount: 45, presetCount: 80,
-    cycleTime: 0, dailyRunRate: 45.2, alarmActive: true,
-    absolutePosition: [0, 0, 150000, 0], machinePosition: [200000, -200000, 350000, 0],
-    path1: {
-      programNo: 'O1002', blockNo: 'N00001',
-      programContent: ['>G28 U0 W0;', 'T0101;', 'G50 S3000;', 'G96 S200 M03;', 'G00 X50.0 Z2.0;', 'G01 Z0 F0.2;'],
-      currentLine: 0,
-      coordinates: { absolute: [0, 0, 150000, 0], distanceToGo: [0, 0, 0, 0] },
-      modal: {
-        gCodeGrid: [['G28','G40','G54'],['G97','G25','G64'],['G69','G22','G18'],['G99','G80',''],['G21','G67','G40.1']],
-        fProgrammed: 0, mCode: 0, tTool: 0, sProgrammed: 0,
-        feedActual: 0, repeatCurrent: 0, repeatTotal: 0, spindleActual: 0,
-      },
-      pathStatus: 'MDI **** ---- ---',
-    },
-    path2: {
-      programNo: 'O9002', blockNo: 'N00001',
-      programContent: ['>G28 U0 W0;', 'M30;', '', '', '', ''],
-      currentLine: 0,
-      coordinates: { absolute: [0, 0, 0, 0], distanceToGo: [0, 0, 0, 0] },
-      modal: {
-        gCodeGrid: [['G28','G40','G54'],['G97','G25','G64'],['G69','G22','G18'],['G99','G80',''],['G21','G67','G40.1']],
-        fProgrammed: 0, mCode: 0, tTool: 0, sProgrammed: 0,
-        feedActual: 0, repeatCurrent: 0, repeatTotal: 0, spindleActual: 0,
-      },
-      pathStatus: 'MDI **** ---- ---',
-    },
-    interlock: { doorLock: false, memoryMode: true, barFeederAuto: false, coolantOn: false, machiningMode: false, cuttingMode: false }
-  },
-  'MC-003': {
-    runState: 2, mode: 'AUTO', programNo: 'O1003', subProgramNo: 'O9003', productName: 'COLLAR-C',
-    feedrate: 100, spindleSpeed: 3000, spindleLoad: 65, partsCount: 156, presetCount: 200,
-    cycleTime: 38, dailyRunRate: 92.1, alarmActive: false,
-    absolutePosition: [78900, -23450, 56780, 0], machinePosition: [278900, -223450, 256780, 0],
-    path1: {
-      programNo: 'O1003', blockNo: 'N00200',
-      programContent: ['G00 X40.0 Z2.0;', '>G01 X20.0 F0.12;', 'Z-40.0;', 'G02 X25.0 Z-45.0 R5.0;', 'G01 Z-60.0;', 'G00 X40.0;'],
-      currentLine: 1,
-      coordinates: { absolute: [20000, 0, -20000, 0], distanceToGo: [0, 0, 20000, 0] },
-      modal: {
-        gCodeGrid: [['G01','G40','G54'],['G97','G25','G64'],['G69','G22','G18'],['G99','G80',''],['G21','G67','G40.1']],
-        fProgrammed: 0.12, mCode: 3, tTool: 1, sProgrammed: 3000,
-        feedActual: 100, repeatCurrent: 0, repeatTotal: 0, spindleActual: 3000,
-      },
-      pathStatus: 'MEM STRT ---- ---',
-    },
-    path2: {
-      programNo: 'O9003', blockNo: 'N00102',
-      programContent: ['G00 X60.0 Z0;', '>G01 X50.0 F0.08;', 'Z-35.0;', 'X55.0;', 'G00 Z5.0;', 'X60.0;'],
-      currentLine: 1,
-      coordinates: { absolute: [50000, 0, -17500, 0], distanceToGo: [0, 0, 17500, 0] },
-      modal: {
-        gCodeGrid: [['G01','G40','G54'],['G97','G25','G64'],['G69','G22','G18'],['G99','G80',''],['G21','G67','G40.1']],
-        fProgrammed: 0.08, mCode: 3, tTool: 1, sProgrammed: 2200,
-        feedActual: 80, repeatCurrent: 0, repeatTotal: 0, spindleActual: 2200,
-      },
-      pathStatus: 'MEM STRT ---- ---',
-    },
-    interlock: { doorLock: true, memoryMode: true, barFeederAuto: true, coolantOn: true, machiningMode: false, cuttingMode: true }
-  },
-};
-
-// Mock FOCAS 이벤트
-const MOCK_FOCAS_EVENTS: Record<string, FocasEvent[]> = {
-  'MC-001': [
-    { id: 'evt-1', machineId: 'MC-001', type: 'PROGRAM_SELECT', message: '프로그램 O1001으로 변경되었습니다', timestamp: new Date(Date.now() - 300000).toISOString() },
-    { id: 'evt-2', machineId: 'MC-001', type: 'CYCLE_START', message: '사이클스타트가 전송되었습니다', timestamp: new Date(Date.now() - 295000).toISOString() },
-    { id: 'evt-3', machineId: 'MC-001', type: 'CYCLE_START_ACK', message: '사이클스타트가 실행되었습니다', timestamp: new Date(Date.now() - 294000).toISOString() },
-    { id: 'evt-4', machineId: 'MC-001', type: 'M20_COMPLETE', message: '카운트가 완료되었습니다 (87/100)', details: { count: 87, preset: 100 }, timestamp: new Date(Date.now() - 60000).toISOString() },
-  ],
-};
 
 // localStorage 헬퍼
 const SCHEDULER_STORAGE_KEY = 'star-webcnc-scheduler-jobs';
@@ -365,36 +336,128 @@ function saveDncConfigs(configs: Record<string, MachineDncConfig>) {
   }
 }
 
-const MOCK_ALARMS: Record<string, Alarm[]> = {
-  'MC-002': [
-    { id: 'alarm-1', alarmNo: 1001, alarmMsg: 'SERVO ALARM: OVERLOAD', category: 'servo', occurredAt: new Date().toISOString() },
-  ],
-};
+// Machines (localStorage)
+const MACHINES_STORAGE_KEY = 'star-webcnc-machines';
 
-export const useMachineStore = create<MachineState>((set) => ({
-  machines: MOCK_MACHINES,
+function loadMachines(): Machine[] | null {
+  try {
+    const raw = localStorage.getItem(MACHINES_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Machine[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveMachines(machines: Machine[]) {
+  try {
+    localStorage.setItem(MACHINES_STORAGE_KEY, JSON.stringify(machines));
+  } catch {
+    // localStorage full or unavailable
+  }
+}
+
+// Control lock duration (localStorage)
+const CONTROL_LOCK_DURATION_KEY = 'star-webcnc-control-lock-duration';
+
+function loadControlLockDuration(): number {
+  try {
+    const raw = localStorage.getItem(CONTROL_LOCK_DURATION_KEY);
+    return raw ? parseInt(raw) : 5;
+  } catch {
+    return 5;
+  }
+}
+
+function saveControlLockDuration(minutes: number) {
+  try {
+    localStorage.setItem(CONTROL_LOCK_DURATION_KEY, String(minutes));
+  } catch {
+    // localStorage full or unavailable
+  }
+}
+
+// WS 핸들러 cleanup 함수 (initWebSocket 재호출 시 기존 핸들러 제거 후 재등록)
+let _wsCleanups: Array<() => void> = [];
+
+export const useMachineStore = create<MachineState>((set, get) => ({
+  machines: loadMachines() ?? [],
   selectedMachineId: null,
-  telemetryMap: MOCK_TELEMETRY,
-  activeAlarms: MOCK_ALARMS,
-  focasEvents: MOCK_FOCAS_EVENTS,
+  telemetryMap: {},
+  activeAlarms: {},
+  focasEvents: {},
   schedulerJobs: loadSchedulerJobs(),
   dncConfigs: loadDncConfigs(),
+  controlLockMap: {},
+  controlLockDurationMin: loadControlLockDuration(),
   isLoading: false,
   error: null,
+  wsConnected: false,
 
-  setMachines: (machines) =>
-    set({ machines }),
+  setMachines: (machines) => {
+    saveMachines(machines);
+    return set({ machines });
+  },
+
+  addMachine: (machine) =>
+    set((state) => {
+      const updated = [...state.machines, machine];
+      saveMachines(updated);
+      return { machines: updated };
+    }),
+
+  deleteMachine: (machineId) =>
+    set((state) => {
+      const updated = state.machines.filter((m) => m.machineId !== machineId);
+      saveMachines(updated);
+      return {
+        machines: updated,
+        selectedMachineId:
+          state.selectedMachineId === machineId ? null : state.selectedMachineId,
+      };
+    }),
 
   selectMachine: (machineId) =>
     set({ selectedMachineId: machineId }),
 
   updateTelemetry: (machineId, data) =>
-    set((state) => ({
-      telemetryMap: {
-        ...state.telemetryMap,
-        [machineId]: data,
-      },
-    })),
+    set((state) => {
+      // 에이전트가 path1/path2/offsetData 등 rich 필드 없이 기본 telemetry만 보낼 수 있으므로
+      // 기존 데이터와 merge — 새 값이 있으면 덮어쓰고, field 자체가 없으면(undefined) 기존 값 유지
+      // 주의: null은 "없음"이 아니라 "에이전트가 명시적으로 비움"이므로 그대로 설정
+      const existing = state.telemetryMap[machineId];
+      const merged: TelemetryData = existing
+        ? {
+            ...existing,
+            ...data,
+            path1: 'path1' in data ? data.path1 : existing.path1,
+            path2: 'path2' in data ? data.path2 : existing.path2,
+            offsetData: 'offsetData' in data ? data.offsetData : existing.offsetData,
+            countData: 'countData' in data ? data.countData : existing.countData,
+            toolLifeData: 'toolLifeData' in data ? data.toolLifeData : existing.toolLifeData,
+          }
+        : data;
+      return {
+        telemetryMap: {
+          ...state.telemetryMap,
+          [machineId]: merged,
+        },
+        machines: state.machines.map((m) =>
+          m.machineId === machineId
+            ? { ...m, realtime: { ...m.realtime, status: 'online' as const, telemetry: merged } }
+            : m
+        ),
+      };
+    }),
+
+  updatePmcBits: (machineId, pmcBits) =>
+    set((state) => {
+      const existing = state.telemetryMap[machineId];
+      if (!existing) return state; // 텔레메트리가 아직 없으면 무시 (첫 telemetry 이후 적용)
+      const merged = { ...existing, pmcBits };
+      return {
+        telemetryMap: { ...state.telemetryMap, [machineId]: merged },
+      };
+    }),
 
   addAlarm: (machineId, alarm) =>
     set((state) => {
@@ -460,11 +523,307 @@ export const useMachineStore = create<MachineState>((set) => ({
       return { dncConfigs: updated };
     }),
 
+  acquireControlLock: (machineId, username) =>
+    set((state) => {
+      const dur = state.controlLockDurationMin;
+      return {
+        controlLockMap: {
+          ...state.controlLockMap,
+          [machineId]: {
+            isOwner: true,
+            ownerUsername: username,
+            expiresAt: Date.now() + dur * 60 * 1000,
+          },
+        },
+      };
+    }),
+
+  releaseControlLock: (machineId) =>
+    set((state) => {
+      const updated = { ...state.controlLockMap };
+      delete updated[machineId];
+      return { controlLockMap: updated };
+    }),
+
+  extendControlLock: (machineId) =>
+    set((state) => {
+      const entry = state.controlLockMap[machineId];
+      if (!entry?.isOwner) return state;
+      const dur = state.controlLockDurationMin;
+      return {
+        controlLockMap: {
+          ...state.controlLockMap,
+          [machineId]: { ...entry, expiresAt: Date.now() + dur * 60 * 1000 },
+        },
+      };
+    }),
+
+  setControlLockDuration: (minutes) => {
+    saveControlLockDuration(minutes);
+    return set({ controlLockDurationMin: minutes });
+  },
+
+  updateOffsetEntry: (machineId, path, mode, no, field, value) =>
+    set((state) => {
+      const tel = state.telemetryMap[machineId];
+      if (!tel?.offsetData) return state;
+      const key = `${path}${mode.charAt(0).toUpperCase() + mode.slice(1)}` as keyof OffsetData;
+      const entries = [...tel.offsetData[key]];
+      const idx = entries.findIndex((e) => e.no === no);
+      if (idx >= 0) entries[idx] = { ...entries[idx], [field]: value };
+      return {
+        telemetryMap: {
+          ...state.telemetryMap,
+          [machineId]: { ...tel, offsetData: { ...tel.offsetData, [key]: entries } },
+        },
+      };
+    }),
+
+  updateCountData: (machineId, updates) =>
+    set((state) => {
+      const tel = state.telemetryMap[machineId];
+      if (!tel?.countData) return state;
+      const counter = { ...tel.countData.counter };
+      if (updates.counterOn !== undefined) counter.counterOn = updates.counterOn;
+      if (updates.preset !== undefined) counter.preset = updates.preset;
+      if (updates.resetCount) counter.count = 0;
+      return {
+        telemetryMap: {
+          ...state.telemetryMap,
+          [machineId]: { ...tel, countData: { ...tel.countData, counter } },
+        },
+      };
+    }),
+
+  updateToolLifeData: (machineId, updates) =>
+    set((state) => {
+      const tel = state.telemetryMap[machineId];
+      if (!tel?.toolLifeData) return state;
+      return {
+        telemetryMap: {
+          ...state.telemetryMap,
+          [machineId]: { ...tel, toolLifeData: { ...tel.toolLifeData, ...updates } },
+        },
+      };
+    }),
+
+  updateToolLifePreset: (machineId, path, toolNo, preset) =>
+    set((state) => {
+      const tel = state.telemetryMap[machineId];
+      if (!tel?.toolLifeData) return state;
+      const key = path === 'path1' ? 'path1Tools' : 'path2Tools';
+      const tools = tel.toolLifeData[key].map((t) =>
+        t.toolNo === toolNo ? { ...t, preset } : t
+      );
+      return {
+        telemetryMap: {
+          ...state.telemetryMap,
+          [machineId]: { ...tel, toolLifeData: { ...tel.toolLifeData, [key]: tools } },
+        },
+      };
+    }),
+
   setLoading: (isLoading) =>
     set({ isLoading }),
 
   setError: (error) =>
     set({ error }),
+
+  fetchMachines: async () => {
+    try {
+      const res = await machineApi.getAll();
+      if (res.success && res.data?.items) {
+        const serverMachines = res.data.items as Machine[];
+        if (serverMachines.length > 0) {
+          saveMachines(serverMachines);
+
+          // Rebuild controlLockMap from server realtime data
+          const { controlLockDurationMin } = get();
+          const currentUserId = useAuthStore.getState().user?.id;
+          const controlLockMap: Record<string, ControlLockEntry> = {};
+          for (const m of serverMachines) {
+            const lock = m.realtime?.controlLock;
+            if (lock) {
+              // Estimate expiry: acquiredAt + lock duration (server resets TTL on each extend)
+              const acquiredMs = new Date(lock.acquiredAt).getTime();
+              controlLockMap[m.machineId] = {
+                isOwner: lock.ownerId === currentUserId,
+                ownerUsername: lock.ownerUsername,
+                expiresAt: acquiredMs + controlLockDurationMin * 60 * 1000,
+              };
+            }
+          }
+
+          // Seed telemetryMap from REST response (initial data before WebSocket arrives)
+          const initialTelemetry: Record<string, TelemetryData> = {};
+          for (const m of serverMachines) {
+            if (m.realtime?.telemetry) {
+              initialTelemetry[m.machineId] = m.realtime.telemetry as TelemetryData;
+            }
+          }
+
+          set({
+            machines: serverMachines,
+            controlLockMap,
+            ...(Object.keys(initialTelemetry).length > 0 && { telemetryMap: initialTelemetry }),
+          });
+
+          // Re-subscribe WS to updated machine IDs
+          if (wsClient.isConnected) {
+            wsClient.subscribe(serverMachines.map((m) => m.machineId));
+          }
+        }
+      }
+    } catch {
+      // Server unavailable — keep mock/localStorage
+    }
+  },
+
+  initWebSocket: (token) => {
+    // Skip in dev mode (no real server)
+    if (!token || token === 'dev-token') return;
+
+    // 기존 핸들러 정리 후 재등록 (HMR / 재호출 안전)
+    _wsCleanups.forEach((fn) => fn());
+    _wsCleanups = [];
+
+    const cleanupConnect = wsClient.onConnect(() => {
+        set({ wsConnected: true });
+        // Subscribe to all currently known machines
+        const machineIds = get().machines.map((m) => m.machineId);
+        if (machineIds.length > 0) {
+          wsClient.subscribe(machineIds);
+        }
+      });
+
+    const cleanupDisconnect = wsClient.onDisconnect(() => {
+      set({ wsConnected: false });
+    });
+
+    const cleanupMessage = wsClient.onMessage((msg) => {
+        const store = get();
+        switch (msg.type) {
+          case 'telemetry': {
+            const p = msg.payload as { machineId: string; data: TelemetryData };
+            if (p?.machineId && p?.data) {
+              store.updateTelemetry(p.machineId, p.data);
+            }
+            break;
+          }
+          case 'pmc_update': {
+            // PMC 비트 빠른 업데이트 (100ms 주기) — pmcBits만 교체, 나머지 telemetry 유지
+            const p = msg.payload as { machineId: string; pmcBits: Record<string, 0 | 1> };
+            if (p?.machineId && p?.pmcBits) {
+              store.updatePmcBits(p.machineId, p.pmcBits);
+            }
+            break;
+          }
+          case 'alarm': {
+            const p = msg.payload as {
+              machineId: string;
+              alarmNo: number;
+              alarmMsg: string;
+              type: 'occurred' | 'cleared';
+              category?: string;
+              alarmTypeCode?: number;
+            };
+            if (!p?.machineId) break;
+            if (p.type === 'occurred') {
+              store.addAlarm(p.machineId, {
+                id: `alarm-${Date.now()}-${p.alarmNo}`,
+                alarmNo: p.alarmNo,
+                alarmMsg: p.alarmMsg,
+                category: p.category,
+                occurredAt: msg.timestamp,
+              });
+            } else {
+              store.clearAlarm(p.machineId, p.alarmNo);
+            }
+            break;
+          }
+          case 'event': {
+            const p = msg.payload as { machineId: string; eventType: string } & Record<string, unknown>;
+            if (!p?.machineId) break;
+            store.addFocasEvent(p.machineId, {
+              id: `evt-ws-${Date.now()}`,
+              machineId: p.machineId,
+              type: p.eventType as FocasEventType,
+              message: `${p.eventType} 이벤트`,
+              details: p,
+              timestamp: msg.timestamp,
+            });
+            break;
+          }
+          case 'command_result': {
+            const p = msg.payload as {
+              machineId: string;
+              correlationId: string;
+              status: 'success' | 'failure';
+              errorCode?: string;
+              errorMessage?: string;
+            };
+            if (p?.machineId) {
+              store.addFocasEvent(p.machineId, {
+                id: `cmd-${Date.now()}-${p.correlationId?.slice(0, 8)}`,
+                machineId: p.machineId,
+                type: 'COMMAND_RESULT' as FocasEventType,
+                message: `명령 결과: ${p.status}`,
+                details: msg.payload as Record<string, unknown>,
+                timestamp: msg.timestamp,
+              });
+            }
+            // CNC→PC 전송 실패 처리: correlationId = "xfer-{ts}-{fileName}"
+            if (p?.status === 'failure' && p.correlationId?.startsWith('xfer-')) {
+              const parts = p.correlationId.split('-');
+              const fileName = parts.slice(2).join('-'); // "xfer-ts-O0170" → "O0170"
+              const errMsg = p.errorCode === 'CNC_NOT_IN_EDIT_MODE'
+                ? 'CNC를 EDIT 모드로 전환하세요'
+                : (p.errorMessage ?? p.errorCode ?? '전송 실패');
+              useFileStore.setState((fs) => ({
+                transferQueue: fs.transferQueue.map((j) => {
+                  if (j.direction !== 'CNC_TO_PC' || j.status === 'DONE' || j.status === 'ERROR') return j;
+                  const jBase = j.fileName.replace(/\.nc$/i, '');
+                  const eBase = fileName.replace(/\.nc$/i, '');
+                  return jBase === eBase ? { ...j, status: 'ERROR' as const, error: errMsg } : j;
+                }),
+              }));
+            }
+            break;
+          }
+          case 'file_downloaded': {
+            // CNC→PC 파일 저장 완료 — PC 공용 저장소 목록 갱신 + 전송 큐 완료 처리
+            const fdPayload = msg.payload as { machineId?: string; fileName?: string };
+            const fdFileName = fdPayload?.fileName ?? '';
+            const fileStore = useFileStore.getState();
+            // share 목록 즉시 새로고침
+            void fileStore.loadShareFiles();
+            // 전송 큐에서 해당 파일 DONE 처리 (CNC_TO_PC 방향, TRANSFERRING 상태)
+            useFileStore.setState((fs) => ({
+              transferQueue: fs.transferQueue.map((j) => {
+                if (j.direction !== 'CNC_TO_PC' || j.status === 'DONE' || j.status === 'ERROR') return j;
+                // fileName 비교: "O0170" vs "O0170.nc" 등 확장자 무시
+                const jBase = j.fileName.replace(/\.nc$/i, '');
+                const eBase = fdFileName.replace(/\.nc$/i, '');
+                return jBase === eBase ? { ...j, status: 'DONE' as const, progress: 100 } : j;
+              }),
+            }));
+            break;
+          }
+          default:
+            break;
+        }
+    });
+
+    _wsCleanups = [cleanupConnect, cleanupDisconnect, cleanupMessage];
+
+    // tokenGetter: 재연결 시마다 최신 accessToken 사용 (만료 후 갱신 대응)
+    wsClient.connect(() => useAuthStore.getState().accessToken || '');
+  },
+
+  destroyWebSocket: () => {
+    wsClient.disconnect();
+    set({ wsConnected: false });
+  },
 }));
 
 // Selectors
@@ -492,4 +851,12 @@ export const useSchedulerJobs = (machineId: string) => {
 
 export const useDncConfig = (machineId: string) => {
   return useMachineStore((state) => state.dncConfigs[machineId]);
+};
+
+export const useControlLock = (machineId: string) => {
+  return useMachineStore((state) => state.controlLockMap[machineId]);
+};
+
+export const useControlLockDuration = () => {
+  return useMachineStore((state) => state.controlLockDurationMin);
 };

@@ -1,32 +1,63 @@
 // RemoteControl Page - 리모트 오퍼레이션 패널
-// 스케줄러와 동일 레이아웃, 우측 패널만 PMC 기반 오퍼레이션 패널로 교체
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   useMachineStore,
   useMachineTelemetry,
   useFocasEvents,
-  InterlockStatus,
+  useMachineAlarms,
+  useControlLock,
+  type Alarm,
 } from '../stores/machineStore';
-import { useAuthStore } from '../stores/authStore';
-import { machineApi, commandApi } from '../lib/api';
+import {
+  useTemplateStore,
+  type PanelGroup,
+  type PanelKey,
+  type PmcMessageEntry,
+  type GroupNameAlign,
+  type GroupNameSize,
+  type GroupNameWeight,
+  type GroupNameColor,
+} from '../stores/templateStore';
+import { TABS, type MonitorTab } from '../components/NCMonitor';
+import { DEFAULT_PANEL_GROUPS } from '../config/pmcTemplate';
+import { commandApi } from '../lib/api';
 import { NCMonitor } from '../components/NCMonitor';
 import { FocasEventLog } from '../components/FocasEventLog';
+import { MachineTopBar } from '../components/MachineTopBar';
 import { useLongPress } from '../hooks/useLongPress';
-import {
-  DEFAULT_PMC_TEMPLATE,
-  PmcButtonDef,
-  getButtonsByCategory,
-} from '../config/pmcTemplate';
 
 export function RemoteControl() {
-  const user = useAuthStore((state) => state.user);
-  const { machines, selectedMachineId, selectMachine, addFocasEvent } = useMachineStore();
+  const { selectedMachineId, addFocasEvent } = useMachineStore();
   const telemetry = useMachineTelemetry(selectedMachineId || '');
   const focasEvents = useFocasEvents(selectedMachineId || '');
+  const activeAlarms = useMachineAlarms(selectedMachineId || '');
+  const controlLock = useControlLock(selectedMachineId || '');
 
-  const [hasControlLock, setHasControlLock] = useState(false);
-  const [controlLockOwner, setControlLockOwner] = useState<string | null>(null);
+  // 템플릿에서 panelLayout 로드
+  const { templates, loadTemplates } = useTemplateStore();
+  const selectedTemplate = useTemplateStore(
+    (s) => s.templates.find((t) => t.id === s.selectedTemplateId) ?? null,
+  );
+
+  useEffect(() => {
+    if (templates.length === 0) loadTemplates();
+  }, [templates.length, loadTemplates]);
+
+  // panelLayout: 템플릿 → fallback DEFAULT_PANEL_GROUPS
+  const panelGroups: PanelGroup[] =
+    selectedTemplate?.panelLayout && selectedTemplate.panelLayout.length > 0
+      ? selectedTemplate.panelLayout
+      : DEFAULT_PANEL_GROUPS;
+
+  // PMC 메시지: 템플릿 등록 항목 중 pmcBits에서 활성(1)인 것만 표시
+  const pmcBits = telemetry?.pmcBits ?? {};
+  const activePmcMessages: PmcMessageEntry[] = (selectedTemplate?.pmcMessages ?? [])
+    .filter(m => m.pmcAddr && pmcBits[m.pmcAddr] === 1);
+
+  const hasControlLock = controlLock?.isOwner ?? false;
+
+  const [monitorTab, setMonitorTab] = useState<MonitorTab>('monitor');
   const [activePressId, setActivePressId] = useState<string | null>(null);
   const [activeProgress, setActiveProgress] = useState(0);
   const [activeLabel, setActiveLabel] = useState('');
@@ -34,82 +65,35 @@ export function RemoteControl() {
   const [buttonWarnings, setButtonWarnings] = useState<Record<string, string>>({});
   const warningTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  const machine = machines.find((m) => m.machineId === selectedMachineId);
-  const canManage = user?.role === 'ADMIN' || user?.role === 'AS';
+  // 조작 가능 조건: 인터록 + 제어권 (TODO: interlockSatisfied 재활성화 — 실기기 인터락 검증 후)
+  const canOperate = hasControlLock; // && interlockSatisfied;
 
-  // 인터록 조건 전체 만족 여부
-  const interlock = telemetry?.interlock;
-  const interlockSatisfied = interlock
-    ? interlock.doorLock && interlock.memoryMode
-    : false;
-
-  // 조작 가능 조건: 인터록 + 제어권
-  const canOperate = hasControlLock && interlockSatisfied;
-
-  // 조작 불가 이유
-  const getDisabledReason = () => {
-    if (!selectedMachineId) return '';
-    if (!hasControlLock) {
-      if (controlLockOwner) return `${controlLockOwner}님이 제어권을 보유 중입니다`;
-      return '제어권을 획득해야 조작할 수 있습니다';
-    }
-    if (!interlockSatisfied) return '인터록 조건이 만족되지 않았습니다';
-    return '';
-  };
-
-  // 제어권 상태 확인
-  useEffect(() => {
-    if (!selectedMachineId) return;
-    const checkLock = async () => {
-      try {
-        const response = await machineApi.getById(selectedMachineId);
-        if (response.success && response.data) {
-          const data = response.data as any;
-          const lock = data.realtime?.controlLock;
-          if (lock) {
-            setHasControlLock(lock.ownerId === user?.id);
-            setControlLockOwner(lock.ownerUsername);
-          } else {
-            setHasControlLock(false);
-            setControlLockOwner(null);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to check control lock:', err);
-      }
-    };
-    checkLock();
-  }, [selectedMachineId, user?.id]);
-
-  // 제어권 획득/해제
-  const handleControlLock = async () => {
-    if (!selectedMachineId || !canManage) return;
-    setHasControlLock(!hasControlLock);
-  };
-
-  // Mock 램프 상태 (실제 구현 시 PMC-R Read로 교체)
+  // 램프 상태: lampAddr이 있으면 telemetry.pmcBits 기반, 없으면 mode/runState fallback
   useEffect(() => {
     const states: Record<string, boolean> = {};
-    // MODE 램프: 현재 모드에 해당하는 키만 ON
+    const pmcBits = telemetry?.pmcBits ?? {};
     const modeMap: Record<string, string> = {
-      EDIT: 'EDIT', MEM: 'MEMORY', MDI: 'MDI', JOG: 'JOG', DNC: 'DNC',
+      EDIT: 'EDIT', MEM: 'MEMORY', MDI: 'MDI',
+      HANDLE: 'HANDLE', JOG: 'JOG', JOG_HANDLE: 'JOG', DNC: 'DNC',
     };
-    DEFAULT_PMC_TEMPLATE.forEach((btn) => {
-      if (btn.category === 'MODE') {
-        states[btn.id] = telemetry?.mode ? modeMap[telemetry.mode] === btn.id : false;
-      } else if (btn.hasLamp) {
-        states[btn.id] = false;
+    for (const group of panelGroups) {
+      for (const key of group.keys) {
+        if (!key.hasLamp) continue;
+        if (key.lampAddr && key.lampAddr in pmcBits) {
+          // 실PMC 비트
+          states[key.id] = pmcBits[key.lampAddr] === 1;
+        } else if (group.name === 'MODE') {
+          // PMC 미수신 시 telemetry.mode fallback
+          states[key.id] = telemetry?.mode ? modeMap[telemetry.mode] === key.id : false;
+        } else if (key.id === 'CYCLE_START') {
+          states[key.id] = (telemetry?.runState ?? 0) === 2;
+        } else {
+          states[key.id] = false;
+        }
       }
-    });
-    // CYCLE START 램프: 가동 중일 때 ON
-    if (telemetry?.runState === 2) states['CYCLE_START'] = true;
+    }
     setLampStates(states);
-  }, [telemetry?.mode, telemetry?.runState]);
-
-  // Mock 경광등 상태
-  const towerRed = telemetry?.alarmActive ?? false;
-  const towerYellow = telemetry?.runState === 1;
-  const towerGreen = telemetry?.runState === 2;
+  }, [telemetry?.pmcBits, telemetry?.mode, telemetry?.runState, panelGroups]);
 
   // 경고 설정 (5초 후 자동 제거)
   const setWarning = useCallback((id: string, msg: string) => {
@@ -134,177 +118,134 @@ export function RemoteControl() {
   }, []);
 
   // 버튼 실행 핸들러
-  const handleButtonExecute = useCallback(async (def: PmcButtonDef) => {
+  const handleButtonExecute = useCallback(async (key: PanelKey) => {
     if (!selectedMachineId || !canOperate) return;
 
-    // 경고 초기화 + 기존 타이머 제거
-    if (warningTimers.current[def.id]) {
-      clearTimeout(warningTimers.current[def.id]);
-      delete warningTimers.current[def.id];
+    if (warningTimers.current[key.id]) {
+      clearTimeout(warningTimers.current[key.id]);
+      delete warningTimers.current[key.id];
     }
     setButtonWarnings((prev) => {
       const next = { ...prev };
-      delete next[def.id];
+      delete next[key.id];
       return next;
     });
 
-    // 이벤트 로그: 명령 전송
     addFocasEvent(selectedMachineId, {
       id: `evt-${Date.now()}`,
       machineId: selectedMachineId,
       type: 'COMMAND_SENT',
-      message: `[${def.label}] PMC Write → ${def.reqAddr} = 1`,
+      message: `[${key.label}] PMC Write → ${key.reqAddr} = 1`,
       timestamp: new Date().toISOString(),
     });
 
     try {
       const response = await commandApi.send(selectedMachineId, 'PMC_WRITE', {
-        address: def.reqAddr,
+        address: key.reqAddr,
         value: 1,
-        holdMs: def.timing.holdMs,
+        holdMs: key.timing.holdMs,
       });
 
-      // Hold 후 해제 로그
       addFocasEvent(selectedMachineId, {
         id: `evt-${Date.now()}-release`,
         machineId: selectedMachineId,
         type: 'COMMAND_ACK',
-        message: `[${def.label}] PMC Release → ${def.reqAddr} = 0 (hold ${def.timing.holdMs}ms)`,
+        message: `[${key.label}] PMC Release → ${key.reqAddr} = 0 (hold ${key.timing.holdMs}ms)`,
         timestamp: new Date().toISOString(),
       });
 
       if (!response.success) {
-        setWarning(def.id, '통신 오류');
+        setWarning(key.id, '통신 오류');
       }
     } catch {
-      setWarning(def.id, '타임아웃');
+      setWarning(key.id, '타임아웃');
       addFocasEvent(selectedMachineId, {
         id: `evt-${Date.now()}-err`,
         machineId: selectedMachineId,
         type: 'COMMAND_SENT',
-        message: `[${def.label}] 오류 발생`,
+        message: `[${key.label}] 오류 발생`,
         timestamp: new Date().toISOString(),
       });
     }
-  }, [selectedMachineId, canOperate, addFocasEvent]);
-
-  // 장비 미선택 시
-  if (!selectedMachineId || !machine) {
-    return (
-      <div className="p-6">
-        <div className="mb-6 flex items-center gap-4">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">리모트 컨트롤</h1>
-          <select
-            value=""
-            onChange={(e) => selectMachine(e.target.value || null)}
-            className="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">장비 선택</option>
-            {machines.map((m) => (
-              <option key={m.id} value={m.machineId}>{m.name}</option>
-            ))}
-          </select>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-8 text-center text-gray-500">
-          리모트 컨트롤을 사용하려면 장비를 선택하세요
-        </div>
-      </div>
-    );
-  }
-
-  const disabledReason = getDisabledReason();
+  }, [selectedMachineId, canOperate, addFocasEvent, setWarning]);
 
   return (
     <div className="p-6 space-y-4">
-      {/* Header: 제목 + 장비선택 + 제어권 */}
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">리모트 컨트롤</h1>
-          <select
-            value={selectedMachineId}
-            onChange={(e) => selectMachine(e.target.value || null)}
-            className="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">장비 선택</option>
-            {machines.map((m) => (
-              <option key={m.id} value={m.machineId}>{m.name}</option>
-            ))}
-          </select>
-        </div>
-        <div className="text-right">
-          <button
-            onClick={handleControlLock}
-            disabled={!canManage}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-              hasControlLock
-                ? 'bg-green-600 text-white hover:bg-green-700'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            } disabled:opacity-50 disabled:cursor-not-allowed`}
-          >
-            {hasControlLock ? '제어권 해제' : '제어권 획득'}
-          </button>
-          <p className={`text-sm mt-1 ${
-            hasControlLock ? 'text-green-600' : controlLockOwner ? 'text-red-500' : 'text-gray-500'
-          }`}>
-            {hasControlLock ? '제어권을 보유하고 있습니다' : controlLockOwner ? `${controlLockOwner}님이 사용중입니다` : '제어권 획득이 가능합니다'}
-          </p>
-        </div>
-      </div>
-
-      {/* Interlock Bar */}
-      <InterlockBar interlock={telemetry?.interlock} />
-
-      {/* 조작 불가 안내 */}
-      {disabledReason && (
-        <div className="p-3 bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 rounded-lg text-sm">
-          {disabledReason}
-        </div>
-      )}
+      {/* MachineTopBar */}
+      <MachineTopBar
+        pageTitle="원격 조작반"
+        pageId="remote"
+      />
 
       {/* 2분할 레이아웃: NC 모니터 / 오퍼레이션 패널 (5:5) */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* 좌측: NC 모니터 + 경광등 */}
-        <div className="h-[580px] relative">
-          <NCMonitor
-            path1={telemetry?.path1}
-            path2={telemetry?.path2}
-            machineMode={telemetry?.mode ? `PROGRAM( ${telemetry.mode} )` : undefined}
-            machineId={selectedMachineId || undefined}
-          />
-          <TowerLight red={towerRed} yellow={towerYellow} green={towerGreen} />
-        </div>
+      {selectedMachineId && (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* 좌측: NC 모니터(탭 숨김) + 알람/메시지 + 탭 바 */}
+            <div className="flex flex-col gap-2 h-[580px]">
+              <div className="flex-1 min-h-0">
+                <NCMonitor
+                  path1={telemetry?.path1}
+                  path2={telemetry?.path2}
+                  machineMode={telemetry?.mode ? `PROGRAM( ${telemetry.mode} )` : undefined}
+                  machineId={selectedMachineId || undefined}
+                  activeTab={monitorTab}
+                  onTabChange={setMonitorTab}
+                  hideTabs
+                />
+              </div>
+              <AlarmStrip alarms={activeAlarms} pmcMessages={activePmcMessages} />
+              {/* 탭 바 — 우측 패널 하단과 수평 맞춤 */}
+              <div className="shrink-0 flex rounded-lg overflow-hidden border border-gray-700">
+                {TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setMonitorTab(tab.id)}
+                    className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                      monitorTab === tab.id
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-        {/* 우측: 오퍼레이션 패널 */}
-        <div className="bg-gray-800 text-white rounded-lg shadow p-4 flex flex-col h-[580px]">
-          <OperationPanel
-            template={DEFAULT_PMC_TEMPLATE}
-            lampStates={lampStates}
-            buttonWarnings={buttonWarnings}
-            disabled={!canOperate}
-            activePressId={activePressId}
-            onPressStart={(id, label) => { setActivePressId(id); setActiveLabel(label); }}
-            onPressProgress={(p) => setActiveProgress(p)}
-            onPressEnd={() => { setActivePressId(null); setActiveProgress(0); setActiveLabel(''); }}
-            onExecute={handleButtonExecute}
-          />
-        </div>
-      </div>
+            {/* 우측: 오퍼레이션 패널 */}
+            <div className="bg-gray-800 text-white rounded-lg shadow p-4 flex flex-col h-[580px]">
+              <OperationPanel
+                groups={panelGroups}
+                lampStates={lampStates}
+                buttonWarnings={buttonWarnings}
+                disabled={!canOperate}
+                activePressId={activePressId}
+                onPressStart={(id, label) => { setActivePressId(id); setActiveLabel(label); }}
+                onPressProgress={(p) => setActiveProgress(p)}
+                onPressEnd={() => { setActivePressId(null); setActiveProgress(0); setActiveLabel(''); }}
+                onExecute={handleButtonExecute}
+              />
+            </div>
+          </div>
 
-      {/* FOCAS 이벤트 로그 */}
-      <FocasEventLog events={focasEvents} />
+          {/* FOCAS 이벤트 로그 */}
+          <FocasEventLog events={focasEvents} />
 
-      {/* 롱프레스 중앙 오버레이 */}
-      {activePressId && (
-        <LongPressOverlay progress={activeProgress} label={activeLabel} />
+          {/* 롱프레스 중앙 오버레이 */}
+          {activePressId && (
+            <LongPressOverlay progress={activeProgress} label={activeLabel} />
+          )}
+        </>
       )}
     </div>
   );
 }
 
-// ─── 오퍼레이션 패널 ───
+// ─── 오퍼레이션 패널 (PanelGroup 기반) ───
 
 interface OperationPanelProps {
-  template: PmcButtonDef[];
+  groups: PanelGroup[];
   lampStates: Record<string, boolean>;
   buttonWarnings: Record<string, string>;
   disabled: boolean;
@@ -312,117 +253,127 @@ interface OperationPanelProps {
   onPressStart: (id: string, label: string) => void;
   onPressProgress: (progress: number) => void;
   onPressEnd: () => void;
-  onExecute: (def: PmcButtonDef) => void;
+  onExecute: (key: PanelKey) => void;
 }
 
 function OperationPanel({
-  template, lampStates, buttonWarnings, disabled,
+  groups, lampStates, buttonWarnings, disabled,
   activePressId, onPressStart, onPressProgress, onPressEnd, onExecute,
 }: OperationPanelProps) {
-  const headButtons = getButtonsByCategory(template, 'HEAD');
-  const chuckButtons = getButtonsByCategory(template, 'CHUCKING');
-  const modeButtons = getButtonsByCategory(template, 'MODE');
-  const opButtons = getButtonsByCategory(template, 'OPERATION');
-  const cycleButtons = getButtonsByCategory(template, 'CYCLE');
+  // 같은 줄 그룹을 묶어 "행" 단위로 구성
+  const rows: PanelGroup[][] = [];
+  for (const group of groups) {
+    if (group.sameRowAsPrev && rows.length > 0) {
+      rows[rows.length - 1].push(group);
+    } else {
+      rows.push([group]);
+    }
+  }
 
-  const renderButton = (def: PmcButtonDef, size?: 'lg') => (
-    <PmcButton
-      key={def.id}
-      def={def}
-      lampOn={lampStates[def.id] ?? false}
-      warning={buttonWarnings[def.id]}
-      disabled={disabled || !def.enabled || (activePressId !== null && activePressId !== def.id)}
-      size={size}
-      onPressStart={onPressStart}
-      onPressProgress={onPressProgress}
-      onPressEnd={onPressEnd}
-      onExecute={onExecute}
-    />
-  );
+  const lastRowIdx = rows.length - 1;
+
+  const renderGroup = (group: PanelGroup) => {
+    const justifyCls = KEYS_JUSTIFY_CLS[group.nameAlign || 'left'];
+    return (
+      <GroupSection key={group.id} group={group}>
+        <div className={`flex flex-wrap gap-2 ${justifyCls}`}>
+          {group.keys.map((key) => (
+            <PmcButton
+              key={key.id}
+              panelKey={key}
+              lampOn={lampStates[key.id] ?? false}
+              warning={buttonWarnings[key.id]}
+              disabled={disabled || (activePressId !== null && activePressId !== key.id)}
+              onPressStart={onPressStart}
+              onPressProgress={onPressProgress}
+              onPressEnd={onPressEnd}
+              onExecute={onExecute}
+            />
+          ))}
+        </div>
+      </GroupSection>
+    );
+  };
 
   return (
     <div className="flex flex-col gap-3 h-full overflow-y-auto px-3 py-2">
-      {/* HEAD + CHUCKING 한 줄, 세로 구분선 */}
-      <div className="flex items-start gap-4">
-        <CategorySection label="HEAD">
-          <div className="flex flex-wrap gap-2">
-            {headButtons.filter((b) => b.enabled).map((b) => renderButton(b))}
-          </div>
-        </CategorySection>
-        <div className="self-stretch w-px bg-gray-700" />
-        <CategorySection label="CHUCKING">
-          <div className="flex flex-wrap gap-2">
-            {chuckButtons.map((b) => renderButton(b))}
-          </div>
-        </CategorySection>
-      </div>
-
-      <div className="border-t border-gray-700" />
-
-      {/* MODE */}
-      <CategorySection label="MODE">
-        <div className="flex flex-wrap gap-2">
-          {modeButtons.map((b) => renderButton(b))}
+      {rows.map((row, ri) => (
+        <div key={row[0].id}>
+          {ri > 0 && <div className="border-t border-gray-700 mb-3" />}
+          {ri === lastRowIdx && <div className="flex-1 min-h-2" />}
+          {row.length === 1 ? (
+            renderGroup(row[0])
+          ) : (
+            <div className="flex items-start gap-4">
+              {row.map((group, gi) => (
+                <div key={group.id} className="flex items-start gap-4">
+                  {gi > 0 && <div className="self-stretch w-px bg-gray-700" />}
+                  {renderGroup(group)}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      </CategorySection>
-
-      <div className="border-t border-gray-700" />
-
-      {/* OPERATION */}
-      <CategorySection label="OPERATION">
-        <div className="flex flex-wrap gap-2">
-          {opButtons.map((b) => renderButton(b))}
-        </div>
-      </CategorySection>
-
-      {/* Spacer */}
-      <div className="flex-1 min-h-2" />
-
-      <div className="border-t border-gray-700" />
-
-      {/* CYCLE - 큰 버튼 */}
-      <CategorySection label="CYCLE">
-        <div className="flex flex-wrap gap-3">
-          {cycleButtons.map((b) => renderButton(b, 'lg'))}
-        </div>
-      </CategorySection>
+      ))}
     </div>
   );
 }
 
-function CategorySection({ label, children }: { label: string; children: React.ReactNode }) {
+const GROUP_NAME_SIZE_CLS: Record<GroupNameSize, string> = {
+  xs: 'text-[10px]', sm: 'text-xs', base: 'text-sm',
+};
+const GROUP_NAME_WEIGHT_CLS: Record<GroupNameWeight, string> = {
+  normal: 'font-normal', semibold: 'font-semibold', bold: 'font-bold',
+};
+const GROUP_NAME_COLOR_CLS: Record<GroupNameColor, string> = {
+  gray: 'text-gray-500', white: 'text-white', blue: 'text-blue-400',
+  green: 'text-green-400', yellow: 'text-yellow-400', red: 'text-red-400',
+};
+const GROUP_NAME_ALIGN_CLS: Record<GroupNameAlign, string> = {
+  left: 'text-left', center: 'text-center', right: 'text-right',
+};
+const KEYS_JUSTIFY_CLS: Record<GroupNameAlign, string> = {
+  left: '', center: 'justify-center', right: 'justify-end',
+};
+
+function GroupSection({ group, children }: { group: PanelGroup; children: React.ReactNode }) {
+  const sizeCls = GROUP_NAME_SIZE_CLS[group.nameFontSize || 'xs'];
+  const weightCls = GROUP_NAME_WEIGHT_CLS[group.nameFontWeight || 'semibold'];
+  const colorCls = GROUP_NAME_COLOR_CLS[group.nameColor || 'gray'];
+  const alignCls = GROUP_NAME_ALIGN_CLS[group.nameAlign || 'left'];
+
   return (
     <div>
-      <div className="text-[10px] text-gray-500 mb-2 font-semibold tracking-widest uppercase">{label}</div>
+      <div className={`${sizeCls} ${weightCls} ${colorCls} ${alignCls} mb-2 tracking-widest uppercase`}>
+        {group.name}
+      </div>
       {children}
     </div>
   );
 }
 
-// ─── PMC 버튼 ───
+// ─── PMC 버튼 (PanelKey 기반) ───
 
 interface PmcButtonProps {
-  def: PmcButtonDef;
+  panelKey: PanelKey;
   lampOn: boolean;
   warning?: string;
   disabled: boolean;
-  size?: 'lg';
   onPressStart: (id: string, label: string) => void;
   onPressProgress: (progress: number) => void;
   onPressEnd: () => void;
-  onExecute: (def: PmcButtonDef) => void;
+  onExecute: (key: PanelKey) => void;
 }
 
-function PmcButton({ def, lampOn, warning, disabled, size, onPressStart, onPressProgress, onPressEnd, onExecute }: PmcButtonProps) {
+function PmcButton({ panelKey, lampOn, warning, disabled, onPressStart, onPressProgress, onPressEnd, onExecute }: PmcButtonProps) {
   const { isPressed, progress, handlers } = useLongPress({
-    longPressMs: def.timing.longPressMs,
-    onComplete: () => onExecute(def),
-    onStart: () => onPressStart(def.id, def.label),
+    longPressMs: panelKey.timing.longPressMs,
+    onComplete: () => { onPressEnd(); onExecute(panelKey); },
+    onStart: () => onPressStart(panelKey.id, panelKey.label),
     onCancel: () => onPressEnd(),
     disabled,
   });
 
-  // 프로그레스를 부모에 전달 (useEffect로 렌더 외부에서 처리)
   const onPressProgressRef = useRef(onPressProgress);
   onPressProgressRef.current = onPressProgress;
   useEffect(() => {
@@ -431,7 +382,6 @@ function PmcButton({ def, lampOn, warning, disabled, size, onPressStart, onPress
     }
   }, [isPressed, progress]);
 
-  // 색상별 스타일 (그라데이션 + 보더 + 글로우)
   const colorConfig: Record<string, { bg: string; bgPressed: string; border: string; text: string; glow: string }> = {
     green: {
       bg: 'bg-gradient-to-b from-green-600 to-green-700',
@@ -470,11 +420,18 @@ function PmcButton({ def, lampOn, warning, disabled, size, onPressStart, onPress
     },
   };
 
-  const c = colorConfig[def.color || 'gray'];
-  // 일반 버튼: 70x86 (4:5), CYCLE 버튼: 72x90 (4:5)
-  const btnW = size === 'lg' ? 'w-[72px]' : 'w-[70px]';
-  const btnH = size === 'lg' ? 'h-[90px]' : 'h-[86px]';
-  const fontSize = size === 'lg' ? 'text-[11px]' : 'text-[10px]';
+  const c = colorConfig[panelKey.color || 'gray'];
+
+  const sizeConfig: Record<string, { w: string; h: string; font: string }> = {
+    small:  { w: 'w-[56px]', h: 'h-[70px]', font: 'text-[9px]' },
+    normal: { w: 'w-[70px]', h: 'h-[86px]', font: 'text-[10px]' },
+    wide:   { w: 'w-[110px]', h: 'h-[86px]', font: 'text-[10px]' },
+    large:  { w: 'w-[80px]', h: 'h-[96px]', font: 'text-[11px]' },
+  };
+  const sz = sizeConfig[panelKey.size] || sizeConfig.normal;
+  const btnW = sz.w;
+  const btnH = sz.h;
+  const fontSize = sz.font;
 
   return (
     <button
@@ -489,8 +446,7 @@ function PmcButton({ def, lampOn, warning, disabled, size, onPressStart, onPress
         }`}
       style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none' }}
     >
-      {/* 램프 표시등 */}
-      {def.hasLamp && (
+      {panelKey.hasLamp && (
         <span className={`absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full border ${
           lampOn
             ? 'bg-green-400 border-green-300 shadow-[0_0_8px_rgba(74,222,128,0.8)]'
@@ -498,12 +454,10 @@ function PmcButton({ def, lampOn, warning, disabled, size, onPressStart, onPress
         }`} />
       )}
 
-      {/* 버튼 라벨 */}
       <span className={`${c.text} ${fontSize} font-semibold leading-tight text-center drop-shadow-sm`}>
-        {def.label}
+        {panelKey.label}
       </span>
 
-      {/* 롱프레스 프로그레스 바 (버튼 하단) */}
       {isPressed && (
         <div className="absolute bottom-0 left-1 right-1 h-1 bg-black/30 rounded-full overflow-hidden">
           <div
@@ -513,7 +467,6 @@ function PmcButton({ def, lampOn, warning, disabled, size, onPressStart, onPress
         </div>
       )}
 
-      {/* 경고 표시 (페이드아웃 애니메이션) */}
       {warning && (
         <WarningBadge text={warning} />
       )}
@@ -527,7 +480,7 @@ function WarningBadge({ text }: { text: string }) {
   const [fading, setFading] = useState(false);
 
   useEffect(() => {
-    const timer = setTimeout(() => setFading(true), 4000); // 4초 후 페이드 시작
+    const timer = setTimeout(() => setFading(true), 4000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -542,6 +495,53 @@ function WarningBadge({ text }: { text: string }) {
   );
 }
 
+// ─── 실시간 알람/메시지 스트립 ───
+
+interface AlarmStripProps {
+  alarms: Alarm[];
+  pmcMessages?: PmcMessageEntry[];
+}
+
+function AlarmStrip({ alarms, pmcMessages = [] }: AlarmStripProps) {
+  const hasAlarms = alarms.length > 0;
+  const hasMsgs = pmcMessages.length > 0;
+  const hasAny = hasAlarms || hasMsgs;
+
+  return (
+    <div className={`shrink-0 h-[96px] rounded-lg border px-3 py-2 flex flex-col gap-1 overflow-y-auto transition-colors ${
+      hasAlarms ? 'bg-red-950/40 border-red-700/60' : hasMsgs ? 'bg-yellow-950/30 border-yellow-700/50' : 'bg-gray-900 border-gray-700'
+    }`}>
+      {hasAny ? (
+        <>
+          {alarms.map((a) => (
+            <div key={a.id} className="flex items-start gap-2 min-w-0 shrink-0">
+              <span className="shrink-0 text-[10px] font-bold text-red-400 leading-4 tabular-nums">
+                {a.category ? `${a.category}` : 'ALM'} {a.alarmNo}
+              </span>
+              <span className="flex-1 text-[11px] text-red-200 leading-4 truncate">
+                {a.alarmMsg}
+              </span>
+              <span className="shrink-0 text-[10px] text-red-500/70 leading-4 tabular-nums">
+                {new Date(a.occurredAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </span>
+            </div>
+          ))}
+          {pmcMessages.map((m) => (
+            <div key={m.id} className="flex items-start gap-2 min-w-0 shrink-0">
+              <span className="shrink-0 text-[10px] font-bold text-yellow-500 leading-4">MSG</span>
+              <span className="flex-1 text-[11px] text-yellow-200 leading-4 truncate">
+                {m.message}
+              </span>
+            </div>
+          ))}
+        </>
+      ) : (
+        <span className="text-[11px] text-gray-600 m-auto">알람 없음</span>
+      )}
+    </div>
+  );
+}
+
 // ─── 롱프레스 중앙 오버레이 ───
 
 function LongPressOverlay({ progress, label }: { progress: number; label: string }) {
@@ -553,9 +553,7 @@ function LongPressOverlay({ progress, label }: { progress: number; label: string
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 pointer-events-none">
       <div className="flex flex-col items-center gap-3">
         <svg width="120" height="120" className="transform -rotate-90">
-          {/* 배경 원 */}
           <circle cx="60" cy="60" r={radius} stroke="#374151" strokeWidth="6" fill="none" />
-          {/* 프로그레스 원 */}
           <circle
             cx="60" cy="60" r={radius}
             stroke="#60a5fa"
@@ -569,68 +567,6 @@ function LongPressOverlay({ progress, label }: { progress: number; label: string
         </svg>
         <span className="text-white text-sm font-medium">{label}</span>
         <span className="text-gray-400 text-xs">손을 떼면 취소</span>
-      </div>
-    </div>
-  );
-}
-
-// ─── 3색 경광등 ───
-
-function TowerLight({ red, yellow, green }: { red: boolean; yellow: boolean; green: boolean }) {
-  const lights = [
-    { on: red, color: 'bg-red-500', glow: 'shadow-[0_0_12px_rgba(239,68,68,0.7)]' },
-    { on: yellow, color: 'bg-yellow-400', glow: 'shadow-[0_0_12px_rgba(250,204,21,0.7)]' },
-    { on: green, color: 'bg-green-500', glow: 'shadow-[0_0_12px_rgba(34,197,94,0.7)]' },
-  ];
-
-  return (
-    <div className="absolute right-3 top-3 flex flex-col gap-2 bg-gray-800/80 rounded-lg p-2">
-      {lights.map((light, i) => (
-        <div
-          key={i}
-          className={`w-5 h-5 rounded-full border border-gray-600 ${
-            light.on ? `${light.color} ${light.glow}` : 'bg-gray-700'
-          }`}
-        />
-      ))}
-    </div>
-  );
-}
-
-// ─── 인터록 바 (스케줄러와 동일) ───
-
-function InterlockBar({ interlock }: { interlock?: InterlockStatus }) {
-  const items = [
-    { key: 'doorLock', label: '도어록', value: interlock?.doorLock },
-    { key: 'memoryMode', label: '메모리모드', value: interlock?.memoryMode },
-    { key: 'barFeederAuto', label: '바피더오토', value: interlock?.barFeederAuto },
-    { key: 'coolantOn', label: '절삭유ON', value: interlock?.coolantOn },
-    { key: 'machiningMode', label: '머시닝모드', value: interlock?.machiningMode },
-    { key: 'cuttingMode', label: '절단모드', value: interlock?.cuttingMode },
-    { key: 'extra1', label: '-', value: interlock?.extra1 },
-    { key: 'extra2', label: '-', value: interlock?.extra2 },
-  ];
-
-  return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-3">
-      <div className="flex flex-wrap gap-2">
-        {items.map((item) => (
-          <div
-            key={item.key}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 ${
-              item.value === undefined
-                ? 'bg-gray-100 text-gray-400 dark:bg-gray-700'
-                : item.value
-                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-            }`}
-          >
-            <span className={`w-2 h-2 rounded-full ${
-              item.value === undefined ? 'bg-gray-400' : item.value ? 'bg-green-500' : 'bg-red-500'
-            }`} />
-            {item.label}
-          </div>
-        ))}
       </div>
     </div>
   );

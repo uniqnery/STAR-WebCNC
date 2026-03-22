@@ -3,7 +3,8 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage, Server } from 'http';
-import { parse as parseCookie } from 'cookie';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { parse: parseCookie } = require('cookie') as { parse: (str: string) => Record<string, string> };
 import { v4 as uuidv4 } from 'uuid';
 import { verifyAccessToken, verifyRefreshToken } from '../auth/jwt';
 import { config } from '../config';
@@ -211,7 +212,7 @@ class WebSocketService {
    */
   private handleMessage(ws: ExtendedWebSocket, data: unknown): void {
     try {
-      const message: WsIncomingMessage = JSON.parse(data.toString());
+      const message: WsIncomingMessage = JSON.parse(String(data));
 
       switch (message.type) {
         case 'subscribe':
@@ -354,7 +355,7 @@ class WebSocketService {
    */
   sendAlarm(
     machineId: string,
-    alarm: { alarmNo: number; alarmMsg: string; type: 'occurred' | 'cleared' }
+    alarm: { alarmNo: number; alarmMsg: string; type: 'occurred' | 'cleared'; category?: string; alarmTypeCode?: number }
   ): void {
     this.broadcastToMachine(machineId, {
       type: 'alarm',
@@ -377,6 +378,17 @@ class WebSocketService {
         machineId,
         data,
       },
+    });
+  }
+
+  /**
+   * Send PMC bits fast update to subscribed clients (100ms 주기 — 램프 응답용)
+   */
+  sendPmcBits(machineId: string, pmcBits: Record<string, 0 | 1>): void {
+    this.broadcastToMachine(machineId, {
+      type: 'pmc_update',
+      timestamp: new Date().toISOString(),
+      payload: { machineId, pmcBits },
     });
   }
 

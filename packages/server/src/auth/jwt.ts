@@ -21,8 +21,9 @@ export function generateAccessToken(payload: {
     role: payload.role,
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return jwt.sign(tokenPayload, config.jwt.accessSecret, {
-    expiresIn: config.jwt.accessExpiresIn,
+    expiresIn: config.jwt.accessExpiresIn as any,
   });
 }
 
@@ -70,8 +71,9 @@ export function generateRefreshToken(userId: string): {
     jti,
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const token = jwt.sign(tokenPayload, config.jwt.refreshSecret, {
-    expiresIn: config.jwt.refreshExpiresIn,
+    expiresIn: config.jwt.refreshExpiresIn as any,
   });
 
   return { token, jti, expiresAt };

@@ -7,6 +7,7 @@
     <UserSecretsId>dotnet-StarWebCNC.Agent-fd5ebadf-2a0b-4bd5-bd99-7756b6a22875</UserSecretsId>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PlatformTarget>x64</PlatformTarget>
+    <PublishDir>c:\Star-WebCNC\agent-dist</PublishDir>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,6 +26,7 @@
   <!-- Copy FOCAS DLLs to output -->
   <ItemGroup>
     <None Include="..\..\..\libs\focas\Fwlib64.dll" CopyToOutputDirectory="PreserveNewest" Link="Fwlib64.dll" />
+    <None Include="..\..\..\libs\focas\Fwlibe64.dll" CopyToOutputDirectory="PreserveNewest" Link="Fwlibe64.dll" />
     <None Include="..\..\..\libs\focas\fwlib30i64.dll" CopyToOutputDirectory="PreserveNewest" Link="fwlib30i64.dll" />
   </ItemGroup>
 

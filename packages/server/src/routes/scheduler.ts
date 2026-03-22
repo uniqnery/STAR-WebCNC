@@ -108,7 +108,7 @@ router.get('/jobs/:id', async (req: Request, res: Response) => {
 });
 
 // Create new job (Admin/AS only)
-router.post('/jobs', requireRole('ADMIN', 'AS'), async (req: Request, res: Response) => {
+router.post('/jobs', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, res: Response) => {
   try {
     const { machineId, programNo, targetCount, oneCycleStop } = req.body;
 
@@ -196,7 +196,7 @@ router.post('/jobs', requireRole('ADMIN', 'AS'), async (req: Request, res: Respo
 });
 
 // Start job
-router.post('/jobs/:id/start', requireRole('ADMIN', 'AS'), async (req: Request, res: Response) => {
+router.post('/jobs/:id/start', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, res: Response) => {
   try {
     const job = await prisma.schedulerJob.findUnique({
       where: { id: req.params.id },
@@ -244,6 +244,7 @@ router.post('/jobs/:id/start', requireRole('ADMIN', 'AS'), async (req: Request, 
     await mqttService.publish(
       TOPICS.SERVER_SCHEDULER(job.machine.machineId),
       {
+        timestamp: new Date().toISOString(),
         type: 'JOB_START',
         jobId: job.id,
         programNo: job.programNo,
@@ -266,7 +267,7 @@ router.post('/jobs/:id/start', requireRole('ADMIN', 'AS'), async (req: Request, 
 });
 
 // Pause job
-router.post('/jobs/:id/pause', requireRole('ADMIN', 'AS'), async (req: Request, res: Response) => {
+router.post('/jobs/:id/pause', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, res: Response) => {
   try {
     const job = await prisma.schedulerJob.findUnique({
       where: { id: req.params.id },
@@ -311,6 +312,7 @@ router.post('/jobs/:id/pause', requireRole('ADMIN', 'AS'), async (req: Request, 
     await mqttService.publish(
       TOPICS.SERVER_SCHEDULER(job.machine.machineId),
       {
+        timestamp: new Date().toISOString(),
         type: 'JOB_PAUSE',
         jobId: job.id,
       }
@@ -330,7 +332,7 @@ router.post('/jobs/:id/pause', requireRole('ADMIN', 'AS'), async (req: Request, 
 });
 
 // Cancel job
-router.post('/jobs/:id/cancel', requireRole('ADMIN', 'AS'), async (req: Request, res: Response) => {
+router.post('/jobs/:id/cancel', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, res: Response) => {
   try {
     const job = await prisma.schedulerJob.findUnique({
       where: { id: req.params.id },
@@ -367,6 +369,7 @@ router.post('/jobs/:id/cancel', requireRole('ADMIN', 'AS'), async (req: Request,
     await mqttService.publish(
       TOPICS.SERVER_SCHEDULER(job.machine.machineId),
       {
+        timestamp: new Date().toISOString(),
         type: 'JOB_CANCEL',
         jobId: job.id,
       }
@@ -386,7 +389,7 @@ router.post('/jobs/:id/cancel', requireRole('ADMIN', 'AS'), async (req: Request,
 });
 
 // Set one-cycle stop
-router.post('/jobs/:id/one-cycle-stop', requireRole('ADMIN', 'AS'), async (req: Request, res: Response) => {
+router.post('/jobs/:id/one-cycle-stop', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, res: Response) => {
   try {
     const { enabled } = req.body;
 
@@ -433,6 +436,7 @@ router.post('/jobs/:id/one-cycle-stop', requireRole('ADMIN', 'AS'), async (req: 
     await mqttService.publish(
       TOPICS.SERVER_SCHEDULER(job.machine.machineId),
       {
+        timestamp: new Date().toISOString(),
         type: 'ONE_CYCLE_STOP',
         jobId: job.id,
         enabled,

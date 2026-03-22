@@ -1,7 +1,7 @@
 // Database Seed Script
-// Creates initial users, templates, machines, and sample data for UI testing
+// Creates initial users, templates, and 1 machine for production use
 
-import { PrismaClient, UserRole, SchedulerJobStatus, WorkOrderStatus, AlarmType } from '@prisma/client';
+import { PrismaClient, UserRole } from '@prisma/client';
 import bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -35,12 +35,12 @@ async function main() {
       username: 'as_manager',
       email: 'as@star-webcnc.local',
       passwordHash: asPassword,
-      role: UserRole.AS,
+      role: UserRole.HQ_ENGINEER,
       isActive: true,
       isApproved: true,
     },
   });
-  console.log(`✅ AS user: ${asUser.username}`);
+  console.log(`✅ HQ_ENGINEER user: ${asUser.username}`);
 
   const userPassword = await bcrypt.hash('user123!', 12);
   const normalUser = await prisma.user.upsert({
@@ -60,249 +60,263 @@ async function main() {
   // ============================================
   // Template
   // ============================================
-  const template = await prisma.template.upsert({
-    where: { templateId: 'FANUC_0iTF_v1' },
-    update: {},
-    create: {
-      templateId: 'FANUC_0iTF_v1',
+  const templateData = {
+      templateId: 'FANUC_0i-TF Plus_SB-20R2_V1',
       version: '1.0.0',
-      name: 'FANUC 0i-TF 자동선반 기본 템플릿',
-      description: 'Star 자동선반 FANUC 0i-TF 컨트롤러용 기본 템플릿',
+      name: 'Star SB-20R2 (FANUC 0i-TF Plus)',
+      description: 'Star SB-20R2 2계통 자동선반, FANUC 0i-TF Plus 컨트롤러',
       cncType: 'FANUC',
-      seriesName: '0i-TF',
+      seriesName: '0i-TF Plus',
+      createdBy: 'as_manager',
+
+      systemInfo: {
+        cncType: 'FANUC',
+        seriesName: '0i-TF Plus',
+        modelName: 'SB-20R2',
+        maxPaths: 2,
+        maxAxes: 5,
+        supportedOptions: [],
+        coordinateDecimalPlaces: 4,
+      },
+
+      axisConfig: {
+        path1: { axes: ['X', 'Z', 'C', 'Y', 'A', 'CRG'], spindleName: 'S1', toolPrefix: 'T0100 ~ T3523' },
+        path2: { axes: ['X', 'Z', 'C', 'A'], spindleName: 'S2', toolPrefix: 'T2000 ~ T2900' },
+        path3: { axes: null, spindleName: null, toolPrefix: null },
+      },
+
       pmcMap: {
-        operation: {
-          running: { type: 'G', address: 7, bit: 3, desc: '운전 중' },
-          alarm: { type: 'G', address: 8, bit: 0, desc: '알람 발생' },
-          emergency: { type: 'X', address: 8, bit: 4, desc: '비상정지' },
+        interlock: {
+          doorClosed:     { type: 'R', address: 6001, bit: 3, dataType: 'bit' },
+          chuckClamped:   { type: 'R', address: 6000, bit: 2, dataType: 'bit' },
+          spindleStopped: null,
+          coolantLevel:   { type: 'R', address: 6001, bit: 6, dataType: 'bit' },
         },
-        mode: {
-          auto: { type: 'G', address: 43, bit: 1, desc: '자동 모드' },
-          mdi: { type: 'G', address: 43, bit: 2, desc: 'MDI 모드' },
-          edit: { type: 'G', address: 43, bit: 3, desc: '편집 모드' },
+        status: {
+          operationMode:    null,
+          cycleRunning:     { type: 'R', address: 6003, bit: 0, dataType: 'bit' },
+          subCycleRunning:  { type: 'R', address: 6003, bit: 1, dataType: 'bit' },
+          alarmActive:      null,
+          emergencyStop:    { type: 'R', address: 6001, bit: 2, dataType: 'bit' },
+          programEnd:       { type: 'R', address: 6002, bit: 4, dataType: 'bit' },
+          subProgramEnd:    { type: 'R', address: 6002, bit: 5, dataType: 'bit' },
+          machineReady:     { type: 'R', address: 6001, bit: 1, dataType: 'bit' },
         },
+        control: {
+          cycleStart:  { type: 'R', address: 6105, bit: 4, dataType: 'bit' },
+          feedHold:    { type: 'R', address: 6105, bit: 3, dataType: 'bit' },
+          singleBlock: { type: 'R', address: 6106, bit: 1, dataType: 'bit' },
+          reset:       { type: 'R', address: 6103, bit: 0, dataType: 'bit' },
+        },
+        counters: { partCount: null, targetCount: null, cycleTime: null },
         scheduler: {
-          loadable: { type: 'R', address: 500, bit: 0, desc: '프로그램 로드 가능' },
-          dataReady: { type: 'R', address: 500, bit: 1, desc: '데이터 준비 완료' },
-        },
-        signals: {
-          m20Complete: { type: 'F', address: 64, bit: 4, desc: 'M20 완료 신호' },
-          cycleStart: { type: 'G', address: 7, bit: 2, desc: '사이클 스타트' },
+          loadable:    null,
+          dataReady:   null,
+          m20Complete: { type: 'R', address: 6002, bit: 4, dataType: 'bit' },
         },
       },
+
       interlockConfig: {
+        enabled: true,
         controlAllowed: {
-          conditions: [
-            { signal: 'operation.running', expected: false, desc: '운전 중 아님' },
-            { signal: 'operation.alarm', expected: false, desc: '알람 없음' },
-            { signal: 'operation.emergency', expected: false, desc: '비상정지 아님' },
-          ],
+          conditions: [{ id: 'doorClosed', name: '안전 도어 닫힘', pmcKey: 'interlock.doorClosed', expected: true, required: true, description: '안전 도어가 닫혀 있어야 원격 제어 가능' }],
         },
         scheduleAllowed: {
-          conditions: [
-            { signal: 'scheduler.loadable', expected: true, desc: '프로그램 로드 가능' },
-            { signal: 'mode.auto', expected: true, desc: '자동 모드' },
-          ],
+          conditions: [{ id: 'doorClosed', name: '안전 도어 닫힘', pmcKey: 'interlock.doorClosed', expected: true, required: true, description: '안전 도어가 닫혀 있어야 스케줄러 실행 가능' }],
         },
       },
+
+      interlockModules: {
+        remotePanel: { enabled: true, conditions: [
+          { id: 'rp-door',  name: '안전 도어 닫힘', pmcAddr: 'R6001.3', expected: true,  description: '안전 도어가 닫혀 있어야 원격 조작 가능' },
+          { id: 'rp-estop', name: '비상정지 해제',  pmcAddr: 'R6001.2', expected: false, description: '비상정지 해제 상태여야 함' },
+        ]},
+        scheduler: { enabled: true, conditions: [
+          { id: 'sc-door', name: '안전 도어 닫힘', pmcAddr: 'R6001.3', expected: true, description: '안전 도어가 닫혀 있어야 스케줄 실행 가능' },
+        ]},
+        fileTransferIn:  { enabled: false, conditions: [] },
+        fileTransferOut: { enabled: false, conditions: [] },
+      },
+
+      remoteControlInterlock: {
+        remoteEnabled:     null,
+        localOperationOff: null,
+        emergencyStopOff:  { type: 'R', address: 6001, bit: 2, dataType: 'bit' },
+      },
+
+      virtualPanel: {
+        modeKeys: {
+          edit:   { keyId: 'edit',   displayName: 'EDIT',        keyType: 'selector', pmcOutput: { type: 'R', address: 6104, bit: 4, dataType: 'bit' }, pmcFeedback: { type: 'R', address: 6004, bit: 4, dataType: 'bit' }, requiresInterlock: true, safetyLevel: 'normal' },
+          memory: { keyId: 'memory', displayName: 'MEMORY',      keyType: 'selector', pmcOutput: { type: 'R', address: 6104, bit: 5, dataType: 'bit' }, pmcFeedback: { type: 'R', address: 6004, bit: 5, dataType: 'bit' }, requiresInterlock: true, safetyLevel: 'normal' },
+          mdi:    { keyId: 'mdi',    displayName: 'MDI',         keyType: 'selector', pmcOutput: { type: 'R', address: 6104, bit: 6, dataType: 'bit' }, pmcFeedback: { type: 'R', address: 6004, bit: 6, dataType: 'bit' }, requiresInterlock: true, safetyLevel: 'normal' },
+          jog:    null,
+          ref:    { keyId: 'ref',    displayName: 'ZERO RETURN', keyType: 'selector', pmcOutput: { type: 'R', address: 6105, bit: 2, dataType: 'bit' }, pmcFeedback: { type: 'R', address: 6005, bit: 2, dataType: 'bit' }, requiresInterlock: true, safetyLevel: 'normal' },
+          handle: { keyId: 'handle', displayName: 'HANDLE',      keyType: 'selector', pmcOutput: { type: 'R', address: 6105, bit: 0, dataType: 'bit' }, pmcFeedback: { type: 'R', address: 6005, bit: 0, dataType: 'bit' }, requiresInterlock: true, safetyLevel: 'normal' },
+          dnc:    { keyId: 'dnc',    displayName: 'DNC',         keyType: 'selector', pmcOutput: { type: 'R', address: 6105, bit: 1, dataType: 'bit' }, pmcFeedback: { type: 'R', address: 6005, bit: 1, dataType: 'bit' }, requiresInterlock: true, safetyLevel: 'normal' },
+        },
+        controlKeys: {
+          cycleStart: { keyId: 'cycleStart', displayName: 'CYCLE START', keyType: 'momentary', pmcOutput: { type: 'R', address: 6105, bit: 4, dataType: 'bit' }, pmcFeedback: { type: 'R', address: 6005, bit: 4, dataType: 'bit' }, requiresInterlock: true, safetyLevel: 'critical' },
+          feedHold:   { keyId: 'feedHold',   displayName: 'FEED HOLD',   keyType: 'momentary', pmcOutput: { type: 'R', address: 6105, bit: 3, dataType: 'bit' }, pmcFeedback: { type: 'R', address: 6005, bit: 3, dataType: 'bit' }, requiresInterlock: true, safetyLevel: 'caution' },
+          reset:      { keyId: 'reset',      displayName: 'RESET',       keyType: 'momentary', pmcOutput: { type: 'R', address: 6103, bit: 0, dataType: 'bit' }, pmcFeedback: null, requiresInterlock: true, safetyLevel: 'caution' },
+          alarmClear: null,
+        },
+        toggleKeys: {
+          singleBlock:  { keyId: 'singleBlock',  displayName: 'SINGLE BLOCK',   keyType: 'toggle', pmcOutput: { type: 'R', address: 6106, bit: 1, dataType: 'bit' }, pmcFeedback: { type: 'R', address: 6006, bit: 1, dataType: 'bit' }, requiresInterlock: true, safetyLevel: 'caution' },
+          dryRun:       null,
+          optionalStop: { keyId: 'optionalStop', displayName: 'OPTIONAL STOP',  keyType: 'toggle', pmcOutput: { type: 'R', address: 6105, bit: 7, dataType: 'bit' }, pmcFeedback: { type: 'R', address: 6005, bit: 7, dataType: 'bit' }, requiresInterlock: true, safetyLevel: 'normal' },
+          blockSkip:    null,
+        },
+        overrides: { feedRate: null, spindleRate: null },
+      },
+
       schedulerConfig: {
         maxQueueSize: 15,
-        countSignal: 'signals.m20Complete',
-        countMode: 'M20_RISING_EDGE',
-        autoStartNext: true,
+        countSignal: 'scheduler.m20Complete',
+        countMode: 'M20_EDGE',
+        oneCycleStopSupported: true,
+        oneCycleStopPmcAddress: { type: 'R', address: 6106, bit: 0, dataType: 'bit' },
+        countDisplay: { macroNo: 500 },
+        subM20Signal: { type: 'R', address: 6002, bit: 5, dataType: 'bit' },
       },
+
       capabilities: {
-        monitoring: true,
-        scheduler: true,
-        fileTransfer: true,
-        alarmHistory: true,
-        parameterBackup: true,
+        monitoring: true, scheduler: true, fileTransfer: true, alarmHistory: true,
+        remoteControl: true, hasSubSpindle: true, hasCAxis: true, hasYAxis: true,
       },
-    },
+
+      panelLayout: [
+        { id: 'grp-head', name: 'HEAD', keys: [
+          { id: 'HEAD1',       label: 'HEAD 1',      hasLamp: true,  color: 'gray', size: 'normal', reqAddr: 'R6104.0', lampAddr: 'R6004.0', timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 } },
+          { id: 'HEAD2',       label: 'HEAD 2',      hasLamp: true,  color: 'gray', size: 'normal', reqAddr: 'R6104.1', lampAddr: 'R6004.1', timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 } },
+          { id: 'HEAD_CHANGE', label: 'HEAD CHANGE', hasLamp: false, color: 'gray', size: 'normal', reqAddr: 'R6103.7', lampAddr: '',        timing: { longPressMs: 1500, holdMs: 300, timeoutMs: 2000 } },
+        ]},
+        { id: 'grp-chuck', name: 'CHUCKING', sameRowAsPrev: true, keys: [
+          { id: 'MAIN_CHUCK', label: 'MAIN CHUCKING', hasLamp: true, color: 'gray', size: 'normal', reqAddr: 'R6100.1', lampAddr: 'R6000.1', timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 } },
+          { id: 'SUB_CHUCK',  label: 'SUB CHUCKING',  hasLamp: true, color: 'gray', size: 'normal', reqAddr: 'R6100.3', lampAddr: 'R6000.3', timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 } },
+        ]},
+        { id: 'grp-mode', name: 'MODE', keys: [
+          { id: 'EDIT',   label: 'EDIT',   hasLamp: true, color: 'gray', size: 'normal', reqAddr: 'R6104.4', lampAddr: 'R6004.4', timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 } },
+          { id: 'MEMORY', label: 'MEMORY', hasLamp: true, color: 'gray', size: 'normal', reqAddr: 'R6104.5', lampAddr: 'R6004.5', timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 } },
+          { id: 'MDI',    label: 'MDI',    hasLamp: true, color: 'gray', size: 'normal', reqAddr: 'R6104.6', lampAddr: 'R6004.6', timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 } },
+          { id: 'HANDLE', label: 'HANDLE', hasLamp: true, color: 'gray', size: 'normal', reqAddr: 'R6105.0', lampAddr: 'R6005.0', timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 } },
+          { id: 'DNC',    label: 'DNC',    hasLamp: true, color: 'gray', size: 'normal', reqAddr: 'R6105.1', lampAddr: 'R6005.1', timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 } },
+        ]},
+        { id: 'grp-op', name: 'OPERATION', keys: [
+          { id: 'SINGLE_BLOCK', label: 'SINGLE BLOCK',   hasLamp: true, color: 'gray', size: 'normal', reqAddr: 'R6106.1', lampAddr: 'R6006.1', timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 } },
+          { id: 'OPT_STOP',     label: 'OPTIONAL STOP',  hasLamp: true, color: 'gray', size: 'normal', reqAddr: 'R6105.7', lampAddr: 'R6005.7', timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 } },
+          { id: 'ONE_CYCLE',    label: 'ONE CYCLE',      hasLamp: true, color: 'gray', size: 'normal', reqAddr: 'R6106.0', lampAddr: 'R6006.0', timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 } },
+          { id: 'AIR_CUT',      label: 'AIR CUT',        hasLamp: true, color: 'gray', size: 'normal', reqAddr: 'R6105.6', lampAddr: 'R6005.6', timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 } },
+          { id: 'AUTO_PWR_OFF', label: 'AUTO POWER OFF', hasLamp: true, color: 'gray', size: 'normal', reqAddr: 'R6105.5', lampAddr: 'R6005.5', timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 } },
+          { id: 'WORK_LIGHT',   label: 'WORK LIGHT',     hasLamp: true, color: 'gray', size: 'normal', reqAddr: 'R6106.2', lampAddr: 'R6006.2', timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 } },
+        ]},
+        { id: 'grp-cycle', name: 'CYCLE', keys: [
+          { id: 'CYCLE_START', label: 'CYCLE START',    hasLamp: true,  color: 'green',  size: 'large', reqAddr: 'R6105.4', lampAddr: 'R6005.4', timing: { longPressMs: 2000, holdMs: 500,  timeoutMs: 3000 } },
+          { id: 'FEED_HOLD',   label: 'FEED HOLD',      hasLamp: true,  color: 'yellow', size: 'large', reqAddr: 'R6105.3', lampAddr: 'R6005.3', timing: { longPressMs: 1000, holdMs: 300,  timeoutMs: 2000 } },
+          { id: 'E_STOP',      label: 'EMERGENCY STOP', hasLamp: false, color: 'red',    size: 'large', reqAddr: '',        lampAddr: '',        timing: { longPressMs: 3000, holdMs: 1000, timeoutMs: 5000 } },
+          { id: 'RESET',       label: 'RESET',          hasLamp: false, color: 'gray',   size: 'large', reqAddr: 'R6103.0', lampAddr: '',        timing: { longPressMs: 1500, holdMs: 500,  timeoutMs: 3000 } },
+        ]},
+      ],
+
+      topBarInterlock: {
+        remote: {
+          interlockEnabled: true,
+          fields: [
+            { id: 'rc-door',  label: '도어 닫힘',   pmcAddr: 'R6001.3', contact: 'A', enabled: true },
+            { id: 'rc-estop', label: '비상정지 해제', pmcAddr: 'R6001.2', contact: 'B', enabled: true },
+          ],
+        },
+        scheduler: {
+          interlockEnabled: true,
+          fields: [
+            { id: 'sc-door',  label: '도어 닫힘',   pmcAddr: 'R6001.3', contact: 'A', enabled: true },
+            { id: 'sc-estop', label: '비상정지 해제', pmcAddr: 'R6001.2', contact: 'B', enabled: true },
+          ],
+        },
+        transfer: { interlockEnabled: false, fields: [] },
+        backup:   { interlockEnabled: false, fields: [] },
+      },
+
+      offsetConfig: { toolCount: 64, pageSize: 16 },
+
+      counterConfig: {
+        fields: [
+          { key: 'preset',    label: 'PRESET',    varType: 'macro', varNo: 500, readonly: false },
+          { key: 'count',     label: 'COUNT',     varType: 'macro', varNo: 501, readonly: false },
+          { key: 'total',     label: 'TOTAL',     varType: 'macro', varNo: 502, readonly: true  },
+          { key: 'remaining', label: 'REMAINING', varType: 'macro', varNo: 503, readonly: true  },
+        ],
+      },
+
+      pmcMessages: [
+        { id: 'pmc-msg-1', pmcAddr: 'A209.5', message: 'Are you sure of AIR-CUT mode?' },
+        { id: 'pmc-msg-2', pmcAddr: 'A209.6', message: 'Are you sure of ONLY SUB mode?' },
+      ],
+
+      toolLifeConfig: {
+        paths: [
+          {
+            pathNo: 1,
+            columns: [
+              { key: 'preset', label: 'PRESET', varType: 'macro', readonly: false },
+              { key: 'count',  label: 'COUNT',  varType: 'macro', readonly: true  },
+            ],
+            entries: [
+              { id: 'p1-t1', toolNo: 'T0101', isSeparator: false, varNos: { preset: 3001, count: 3002 } },
+              { id: 'p1-t2', toolNo: 'T0202', isSeparator: false, varNos: { preset: 3003, count: 3004 } },
+              { id: 'p1-t3', toolNo: 'T0303', isSeparator: false, varNos: { preset: 3005, count: 3006 } },
+              { id: 'p1-t4', toolNo: 'T0404', isSeparator: false, varNos: { preset: 3007, count: 3008 } },
+              { id: 'p1-t5', toolNo: 'T0505', isSeparator: false, varNos: { preset: 3009, count: 3010 } },
+              { id: 'p1-t6', toolNo: 'T0606', isSeparator: false, varNos: { preset: 3011, count: 3012 } },
+              { id: 'p1-t7', toolNo: 'T0707', isSeparator: false, varNos: { preset: 3013, count: 3014 } },
+              { id: 'p1-t8', toolNo: 'T0808', isSeparator: false, varNos: { preset: 3015, count: 3016 } },
+              { id: 'p1-t9', toolNo: 'T0909', isSeparator: false, varNos: { preset: 3017, count: 3018 } },
+            ],
+          },
+          {
+            pathNo: 2,
+            columns: [
+              { key: 'preset', label: 'PRESET', varType: 'macro', readonly: false },
+              { key: 'count',  label: 'COUNT',  varType: 'macro', readonly: true  },
+            ],
+            entries: [
+              { id: 'p2-t1', toolNo: 'T3101', isSeparator: false, varNos: { preset: 3101, count: 3102 } },
+              { id: 'p2-t2', toolNo: 'T3202', isSeparator: false, varNos: { preset: 3103, count: 3104 } },
+            ],
+          },
+        ],
+      },
+  };
+
+  const template = await prisma.template.upsert({
+    where: { templateId: 'FANUC_0i-TF Plus_SB-20R2_V1' },
+    update: {},          // 이미 존재하면 건드리지 않음 — UI 편집 내용 보존
+    create: templateData,
   });
   console.log(`✅ Template: ${template.templateId}`);
 
   // ============================================
-  // Machines (4대)
+  // Machine (1대 - 실장비 연동용)
   // ============================================
-  const machines = [
-    { machineId: 'MC-001', name: '1호기 자동선반', ip: '192.168.1.101' },
-    { machineId: 'MC-002', name: '2호기 자동선반', ip: '192.168.1.102' },
-    { machineId: 'MC-003', name: '3호기 자동선반', ip: '192.168.1.103' },
-    { machineId: 'MC-004', name: '4호기 자동선반', ip: '192.168.1.104' },
-  ];
-
-  const createdMachines = [];
-  for (const m of machines) {
-    const machine = await prisma.machine.upsert({
-      where: { machineId: m.machineId },
-      update: {},
-      create: {
-        machineId: m.machineId,
-        name: m.name,
-        templateId: template.id,
-        ipAddress: m.ip,
-        port: 8193,
-        timeout: 3000,
-        retryCount: 3,
-        isActive: true,
-        schedulerMode: 'MANUAL',
-        maxQueueSize: 15,
-        inputFolder: `//${m.ip}/cnc/input`,
-        outputFolder: `//${m.ip}/cnc/output`,
-        backupFolder: `//${m.ip}/cnc/backup`,
-      },
-    });
-    createdMachines.push(machine);
-    console.log(`✅ Machine: ${machine.machineId} (${machine.name})`);
-  }
-
-  // ============================================
-  // Sample Alarms
-  // ============================================
-  const now = new Date();
-  const alarmsData = [
-    { machineIdx: 0, alarmNo: 1001, msg: 'SERVO ALARM: OVERLOAD', type: AlarmType.ALARM, hoursAgo: 2 },
-    { machineIdx: 0, alarmNo: 2010, msg: 'SPINDLE ALARM: OVERHEAT', type: AlarmType.WARNING, hoursAgo: 5, cleared: true },
-    { machineIdx: 1, alarmNo: 3001, msg: 'PMC ALARM: CHUCK ERROR', type: AlarmType.ALARM, hoursAgo: 1 },
-    { machineIdx: 2, alarmNo: 1005, msg: 'SERVO ALARM: POSITION ERROR', type: AlarmType.CRITICAL, hoursAgo: 0.5 },
-    { machineIdx: 3, alarmNo: 2001, msg: 'SPINDLE ALARM: SPEED DEVIATION', type: AlarmType.WARNING, hoursAgo: 8, cleared: true },
-  ];
-
-  for (const a of alarmsData) {
-    const occurredAt = new Date(now.getTime() - a.hoursAgo * 60 * 60 * 1000);
-    await prisma.alarm.create({
-      data: {
-        machineDbId: createdMachines[a.machineIdx].id,
-        alarmNo: a.alarmNo,
-        alarmMsg: a.msg,
-        alarmType: a.type,
-        category: a.msg.split(':')[0].toLowerCase().replace(' alarm', ''),
-        occurredAt,
-        clearedAt: a.cleared ? new Date(occurredAt.getTime() + 30 * 60 * 1000) : null,
-        duration: a.cleared ? 30 * 60 : null,
-      },
-    });
-  }
-  console.log(`✅ Sample alarms created: ${alarmsData.length}`);
-
-  // ============================================
-  // Work Orders
-  // ============================================
-  const workOrdersData = [
-    { orderNo: 'WO-2026-001', product: 'SHAFT-A100', name: '샤프트 A100', qty: 500, status: WorkOrderStatus.COMPLETED, machine: 0, produced: 500 },
-    { orderNo: 'WO-2026-002', product: 'GEAR-B200', name: '기어 B200', qty: 300, status: WorkOrderStatus.IN_PROGRESS, machine: 1, produced: 187 },
-    { orderNo: 'WO-2026-003', product: 'BOLT-C300', name: '볼트 C300', qty: 1000, status: WorkOrderStatus.IN_PROGRESS, machine: 2, produced: 423 },
-    { orderNo: 'WO-2026-004', product: 'NUT-D400', name: '너트 D400', qty: 800, status: WorkOrderStatus.PENDING, machine: 3, produced: 0 },
-    { orderNo: 'WO-2026-005', product: 'PIN-E500', name: '핀 E500', qty: 200, status: WorkOrderStatus.PENDING, machine: null, produced: 0 },
-  ];
-
-  for (const wo of workOrdersData) {
-    await prisma.workOrder.upsert({
-      where: { orderNumber: wo.orderNo },
-      update: {},
-      create: {
-        orderNumber: wo.orderNo,
-        productCode: wo.product,
-        productName: wo.name,
-        targetQuantity: wo.qty,
-        producedQty: wo.produced,
-        status: wo.status,
-        assignedMachine: wo.machine !== null ? createdMachines[wo.machine].machineId : null,
-        programNumber: wo.machine !== null ? `O${1000 + wo.machine}` : null,
-        priority: workOrdersData.indexOf(wo),
-        scheduledStart: wo.status !== WorkOrderStatus.PENDING ? new Date(now.getTime() - 24 * 60 * 60 * 1000) : null,
-        actualStart: wo.status === WorkOrderStatus.IN_PROGRESS || wo.status === WorkOrderStatus.COMPLETED
-          ? new Date(now.getTime() - 20 * 60 * 60 * 1000) : null,
-        actualEnd: wo.status === WorkOrderStatus.COMPLETED ? new Date(now.getTime() - 4 * 60 * 60 * 1000) : null,
-      },
-    });
-  }
-  console.log(`✅ Work orders created: ${workOrdersData.length}`);
-
-  // ============================================
-  // Scheduler Jobs
-  // ============================================
-  const schedulerJobsData = [
-    { machineIdx: 0, programNo: 'O1001', target: 100, completed: 100, status: SchedulerJobStatus.COMPLETED },
-    { machineIdx: 1, programNo: 'O1002', target: 150, completed: 87, status: SchedulerJobStatus.RUNNING },
-    { machineIdx: 2, programNo: 'O1003', target: 200, completed: 45, status: SchedulerJobStatus.PAUSED },
-    { machineIdx: 3, programNo: 'O1004', target: 80, completed: 0, status: SchedulerJobStatus.PENDING },
-  ];
-
-  for (const job of schedulerJobsData) {
-    await prisma.schedulerJob.create({
-      data: {
-        machineDbId: createdMachines[job.machineIdx].id,
-        programNo: job.programNo,
-        targetCount: job.target,
-        completedCount: job.completed,
-        status: job.status,
-        oneCycleStop: false,
-        createdById: admin.id,
-        startedAt: job.status !== SchedulerJobStatus.PENDING ? new Date(now.getTime() - 5 * 60 * 60 * 1000) : null,
-        completedAt: job.status === SchedulerJobStatus.COMPLETED ? new Date(now.getTime() - 1 * 60 * 60 * 1000) : null,
-      },
-    });
-  }
-  console.log(`✅ Scheduler jobs created: ${schedulerJobsData.length}`);
-
-  // ============================================
-  // Production Logs
-  // ============================================
-  for (let i = 0; i < 50; i++) {
-    const machineIdx = i % 4;
-    const hoursAgo = Math.floor(i / 4) + 1;
-    const startTime = new Date(now.getTime() - hoursAgo * 60 * 60 * 1000);
-    const cycleTime = 30 + Math.floor(Math.random() * 30); // 30-60 seconds
-
-    await prisma.productionLog.create({
-      data: {
-        machineId: createdMachines[machineIdx].id,
-        programNo: `O${1000 + machineIdx}`,
-        startTime,
-        endTime: new Date(startTime.getTime() + cycleTime * 1000),
-        cycleTime,
-        partsCount: 1,
-        status: Math.random() > 0.05 ? 'completed' : 'error',
-        errorCode: Math.random() > 0.95 ? '1001' : null,
-      },
-    });
-  }
-  console.log(`✅ Production logs created: 50`);
-
-  // ============================================
-  // Audit Logs
-  // ============================================
-  const auditActions = [
-    { action: 'auth.login', target: 'user' },
-    { action: 'scheduler.start', target: 'machine' },
-    { action: 'scheduler.pause', target: 'machine' },
-    { action: 'control.acquire', target: 'machine' },
-    { action: 'control.release', target: 'machine' },
-    { action: 'workOrder.create', target: 'workOrder' },
-    { action: 'transfer.upload', target: 'machine' },
-  ];
-
-  for (let i = 0; i < 30; i++) {
-    const auditData = auditActions[i % auditActions.length];
-    const hoursAgo = i * 2;
-
-    await prisma.auditLog.create({
-      data: {
-        userId: i % 3 === 0 ? admin.id : (i % 3 === 1 ? asUser.id : normalUser.id),
-        userRole: i % 3 === 0 ? 'ADMIN' : (i % 3 === 1 ? 'AS' : 'USER'),
-        action: auditData.action,
-        targetType: auditData.target,
-        targetId: auditData.target === 'machine' ? createdMachines[i % 4].machineId : null,
-        params: {},
-        result: Math.random() > 0.1 ? 'success' : 'failure',
-        ipAddress: '192.168.1.' + (10 + (i % 10)),
-        createdAt: new Date(now.getTime() - hoursAgo * 60 * 60 * 1000),
-      },
-    });
-  }
-  console.log(`✅ Audit logs created: 30`);
+  const machine = await prisma.machine.upsert({
+    where: { machineId: 'MC-001' },
+    update: {},
+    create: {
+      machineId: 'MC-001',
+      name: '1호기 자동선반',
+      templateId: template.id,
+      ipAddress: '192.168.1.101',   // ← 실장비 IP로 변경 필요
+      port: 8193,
+      timeout: 3000,
+      retryCount: 3,
+      isActive: true,
+      schedulerMode: 'MANUAL',
+      maxQueueSize: 15,
+      inputFolder: '',
+      outputFolder: '',
+      backupFolder: '',
+    },
+  });
+  console.log(`✅ Machine: ${machine.machineId} (${machine.name})`);
 
   // ============================================
   // Global Settings
@@ -312,6 +326,8 @@ async function main() {
     { key: 'scheduler.defaultQueueSize', value: '15' },
     { key: 'control.lockTimeout', value: '300' },
     { key: 'control.heartbeatInterval', value: '30' },
+    { key: 'registration.adminCode', value: 'ADMIN-0000' },
+    { key: 'registration.operatorCode', value: 'OP-0000' },
   ];
 
   for (const s of settings) {
@@ -329,19 +345,15 @@ async function main() {
   console.log('\n' + '='.repeat(50));
   console.log('🎉 Seeding completed!');
   console.log('='.repeat(50));
-  console.log('\n📋 Test Credentials:');
+  console.log('\n📋 Credentials:');
   console.log('   Admin:    admin / admin123!');
-  console.log('   AS:       as_manager / as123!');
+  console.log('   HQ_ENG:   as_manager / as123!');
   console.log('   Operator: operator / user123!');
   console.log('\n📊 Created Data:');
   console.log(`   - Users: 3`);
-  console.log(`   - Templates: 1`);
-  console.log(`   - Machines: 4`);
-  console.log(`   - Alarms: ${alarmsData.length}`);
-  console.log(`   - Work Orders: ${workOrdersData.length}`);
-  console.log(`   - Scheduler Jobs: ${schedulerJobsData.length}`);
-  console.log(`   - Production Logs: 50`);
-  console.log(`   - Audit Logs: 30`);
+  console.log(`   - Templates: 1 (SB-20R2)`);
+  console.log(`   - Machines: 1 (MC-001 — 실장비 IP 변경 필요)`);
+  console.log('\n⚠️  실장비 IP: packages/server/prisma/seed.ts 에서 192.168.1.101 을 실제 IP로 변경 후 re-seed 하세요');
 }
 
 main()

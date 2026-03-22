@@ -2,10 +2,13 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
+import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../lib/prisma';
 import { mqttService, TOPICS } from '../lib/mqtt';
+import { commandWaiter } from '../lib/commandWaiter';
 import { authenticate } from '../middleware/auth';
 import { createAuditLog } from './audit';
+import { CommandStatus } from '@prisma/client';
 
 const router = Router();
 
@@ -44,29 +47,39 @@ router.get('/:machineId/programs', authenticate, async (req: Request, res: Respo
       });
     }
 
-    // Request program list from Agent via MQTT
-    const correlationId = `prog-list-${Date.now()}`;
+    // Agent에 LIST_PROGRAMS 명령 전송 후 응답 대기
+    const correlationId = uuidv4();
+    await prisma.commandLog.create({
+      data: {
+        correlationId,
+        machineId: machine.id,
+        command: 'LIST_PROGRAMS',
+        status: CommandStatus.PENDING,
+      },
+    });
 
-    mqttService.publish(TOPICS.SERVER_COMMAND(machineId), {
+    mqttService.publish(TOPICS.COMMAND_TO(machineId), {
+      timestamp: new Date().toISOString(),
       command: 'LIST_PROGRAMS',
       correlationId,
       params: {},
     });
 
-    // In a real implementation, wait for agent response via MQTT/Redis
-    // For now, return a mock response
-    res.json({
-      success: true,
-      data: {
-        programs: [
-          { programNo: 'O0001', name: 'MAIN PROG 1', size: 1024, modified: new Date().toISOString() },
-          { programNo: 'O0002', name: 'SUB PROG 1', size: 512, modified: new Date().toISOString() },
-          { programNo: 'O1000', name: 'TEST PROG', size: 2048, modified: new Date().toISOString() },
-        ],
-        machineId,
-        timestamp: new Date().toISOString(),
-      },
-    });
+    try {
+      const cmdResult = await commandWaiter.wait(correlationId, 15_000);
+      if (cmdResult.status !== 'success') {
+        return res.status(502).json({
+          success: false,
+          error: { code: cmdResult.errorCode ?? 'AGENT_ERROR', message: cmdResult.errorMessage ?? '프로그램 목록 조회 실패' },
+        });
+      }
+      return res.json({ success: true, data: cmdResult.result });
+    } catch {
+      return res.status(504).json({
+        success: false,
+        error: { code: 'COMMAND_TIMEOUT', message: 'Agent 응답 시간 초과 (15초)' },
+      });
+    }
   } catch (error) {
     next(error);
   }
@@ -103,7 +116,8 @@ router.post('/:machineId/upload', authenticate, upload.single('file'), async (re
     const targetProgramNo = programNo || extractProgramNo(file.originalname, content);
 
     // Send upload command to Agent via MQTT
-    mqttService.publish(TOPICS.SERVER_COMMAND(machineId), {
+    mqttService.publish(TOPICS.COMMAND_TO(machineId), {
+      timestamp: new Date().toISOString(),
       command: 'UPLOAD_PROGRAM',
       correlationId,
       params: {
@@ -172,7 +186,8 @@ router.get('/:machineId/download/:programNo', authenticate, async (req: Request,
     const correlationId = `download-${Date.now()}`;
 
     // Send download command to Agent via MQTT
-    mqttService.publish(TOPICS.SERVER_COMMAND(machineId), {
+    mqttService.publish(TOPICS.COMMAND_TO(machineId), {
+      timestamp: new Date().toISOString(),
       command: 'DOWNLOAD_PROGRAM',
       correlationId,
       params: { programNo },

@@ -84,6 +84,20 @@ export function authorize(...allowedRoles: UserRole[]) {
 }
 
 /**
+ * requireRole - alias for authorize, supports both array and rest-param call styles
+ * requireRole(['ADMIN', 'HQ_ENGINEER']) or requireRole('ADMIN', 'HQ_ENGINEER')
+ */
+export function requireRole(
+  rolesOrFirst: UserRole | UserRole[],
+  ...rest: UserRole[]
+) {
+  const roles: UserRole[] = Array.isArray(rolesOrFirst)
+    ? rolesOrFirst
+    : [rolesOrFirst, ...rest];
+  return authorize(...roles);
+}
+
+/**
  * Optional authentication middleware
  * Attaches user info if token is valid, but doesn't reject if missing
  */

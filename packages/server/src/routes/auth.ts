@@ -21,6 +21,70 @@ import {
 const router = Router();
 
 /**
+ * POST /auth/register
+ * 신규 회원가입 — registrationCode로 역할 결정
+ */
+router.post('/register', async (req: Request, res: Response) => {
+  try {
+    const { username, email, password, registrationCode = '' } = req.body as {
+      username: string; email: string; password: string; registrationCode?: string;
+    };
+
+    if (!username || !email || !password) {
+      return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: '필수 항목을 입력해주세요.' } });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: '비밀번호는 6자 이상이어야 합니다.' } });
+    }
+
+    // 중복 확인
+    const existing = await prisma.user.findFirst({ where: { OR: [{ username }, { email }] } });
+    if (existing) {
+      const field = existing.username === username ? '사용자명' : '이메일';
+      return res.status(409).json({ success: false, error: { code: 'DUPLICATE', message: `이미 사용 중인 ${field}입니다.` } });
+    }
+
+    // 등록 코드 → 역할 결정
+    let role: 'USER' | 'ADMIN' | 'HQ_ENGINEER' = 'USER';
+    let isApproved = false;
+
+    const hqCode = process.env.HQ_REGISTRATION_CODE ?? '';
+    if (hqCode && registrationCode === hqCode) {
+      role = 'HQ_ENGINEER';
+      isApproved = true;
+    } else {
+      // DB에서 고객사 코드 조회
+      const adminCodeRow = await prisma.globalSetting.findUnique({ where: { key: 'registration.adminCode' } });
+      const opCodeRow    = await prisma.globalSetting.findUnique({ where: { key: 'registration.operatorCode' } });
+      const adminCode = (adminCodeRow?.value as string) ?? '';
+      const opCode    = (opCodeRow?.value as string) ?? '';
+
+      if (adminCode && registrationCode === adminCode) {
+        role = 'ADMIN';
+        isApproved = true;
+      } else if (opCode && registrationCode === opCode) {
+        role = 'USER';
+        isApproved = true;
+      }
+      // 코드 없음 or 틀림 → USER, 미승인
+    }
+
+    const passwordHash = await hashPassword(password);
+    const user = await prisma.user.create({
+      data: { username, email, passwordHash, role: role as import('@prisma/client').UserRole, isActive: true, isApproved },
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: { id: user.id, username: user.username, email: user.email, role: user.role, isApproved: user.isApproved },
+    });
+  } catch (error) {
+    console.error('Register error:', error);
+    return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: '회원가입 처리 중 오류가 발생했습니다.' } });
+  }
+});
+
+/**
  * POST /auth/login
  * User login with username/password
  */

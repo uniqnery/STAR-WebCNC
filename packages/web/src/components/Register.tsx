@@ -12,6 +12,7 @@ export function Register() {
     email: '',
     password: '',
     passwordConfirm: '',
+    registrationCode: '',
   });
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -42,7 +43,8 @@ export function Register() {
       const response = await authApi.register(
         formData.username,
         formData.email,
-        formData.password
+        formData.password,
+        formData.registrationCode
       );
 
       if (response.success) {
@@ -57,6 +59,11 @@ export function Register() {
       setIsLoading(false);
     }
   };
+
+  const inputCls =
+    'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg ' +
+    'bg-white dark:bg-gray-700 text-gray-900 dark:text-white ' +
+    'focus:outline-none focus:ring-2 focus:ring-blue-500';
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
@@ -95,9 +102,7 @@ export function Register() {
                 type="text"
                 value={formData.username}
                 onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
-                         bg-white dark:bg-gray-700 text-gray-900 dark:text-white
-                         focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={inputCls}
                 placeholder="사용자명 입력"
                 required
                 autoComplete="username"
@@ -117,9 +122,7 @@ export function Register() {
                 type="email"
                 value={formData.email}
                 onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
-                         bg-white dark:bg-gray-700 text-gray-900 dark:text-white
-                         focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={inputCls}
                 placeholder="이메일 입력"
                 required
                 autoComplete="email"
@@ -139,9 +142,7 @@ export function Register() {
                 type="password"
                 value={formData.password}
                 onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
-                         bg-white dark:bg-gray-700 text-gray-900 dark:text-white
-                         focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={inputCls}
                 placeholder="비밀번호 입력 (6자 이상)"
                 required
                 autoComplete="new-password"
@@ -161,13 +162,35 @@ export function Register() {
                 type="password"
                 value={formData.passwordConfirm}
                 onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
-                         bg-white dark:bg-gray-700 text-gray-900 dark:text-white
-                         focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={inputCls}
                 placeholder="비밀번호 다시 입력"
                 required
                 autoComplete="new-password"
               />
+            </div>
+
+            {/* Registration Code */}
+            <div>
+              <label
+                htmlFor="registrationCode"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+              >
+                등록 코드{' '}
+                <span className="text-gray-400 font-normal">(없으면 일반 사용자로 가입)</span>
+              </label>
+              <input
+                id="registrationCode"
+                name="registrationCode"
+                type="text"
+                value={formData.registrationCode}
+                onChange={handleChange}
+                className={inputCls}
+                placeholder="관리자 코드 또는 HQ 엔지니어 코드 입력"
+                autoComplete="off"
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                코드 없음 → 일반 사용자 · 관리자 코드 → 고객사 관리자 · HQ 코드 → 본사 엔지니어
+              </p>
             </div>
 
             <button

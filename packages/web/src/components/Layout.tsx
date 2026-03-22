@@ -3,7 +3,8 @@
 import { ReactNode, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
-import { authApi } from '../lib/api';
+import { authApi, machineApi } from '../lib/api';
+import { useMachineStore } from '../stores/machineStore';
 
 interface LayoutProps {
   children: ReactNode;
@@ -14,9 +15,20 @@ export function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
+  const controlLockMap = useMachineStore((s) => s.controlLockMap);
+  const releaseControlLock = useMachineStore((s) => s.releaseControlLock);
 
   const handleLogout = async () => {
-    await authApi.logout();
+    // 보유 중인 제어권 모두 해제
+    const ownedMachines = Object.entries(controlLockMap)
+      .filter(([, entry]) => entry.isOwner)
+      .map(([machineId]) => machineId);
+    await Promise.allSettled(
+      ownedMachines.map((machineId) =>
+        machineApi.releaseControl(machineId).then(() => releaseControlLock(machineId)).catch(() => null)
+      )
+    );
+    await authApi.logout().catch(() => null);
     logout();
     navigate('/login');
   };
@@ -26,8 +38,10 @@ export function Layout({ children }: LayoutProps) {
     setSidebarOpen(false);
   };
 
+  const isHqEngineer = user?.role === 'HQ_ENGINEER';
+
   // 하위 메뉴 펼침 상태 (기본 접힘)
-  const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({ machines: false });
+  const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({ machines: false, admin: false });
 
   const toggleMenu = (key: string) => {
     setExpandedMenus((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -71,9 +85,13 @@ export function Layout({ children }: LayoutProps) {
       >
         {/* Logo */}
         <div className="p-4 border-b border-gray-700 flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold">Star-WebCNC</h1>
-            <p className="text-xs text-gray-400 mt-1">CNC 스마트팩토리</p>
+          <div className="flex items-center gap-3">
+            <img src="https://sktasdb.web.app/star.png" alt="Star" className="h-12 w-auto object-contain brightness-0 invert cursor-pointer" onClick={() => window.location.reload()} />
+            <div className="flex flex-col justify-center leading-none gap-[5px]">
+              <p className="text-[14px] font-medium text-gray-300"><span className="text-white font-bold text-[16px]">S</span>mart</p>
+              <p className="text-[14px] font-medium text-gray-300"><span className="text-white font-bold text-[16px]">T</span>hinking</p>
+              <p className="text-[14px] font-medium text-gray-300"><span className="text-white font-bold text-[16px]">P</span>ro</p>
+            </div>
           </div>
           {/* 모바일 닫기 버튼 */}
           <button
@@ -162,6 +180,89 @@ export function Layout({ children }: LayoutProps) {
                 </li>
               );
             })}
+
+            {/* HQ_ENGINEER 전용 관리자 메뉴 */}
+            {isHqEngineer && (
+              <>
+                <li className="mt-4 mb-1">
+                  <span className="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    관리자
+                  </span>
+                </li>
+                <li>
+                  <button
+                    onClick={() => toggleMenu('admin')}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-gray-300 hover:bg-gray-700 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <AdminIcon className="w-5 h-5" />
+                      <span>Admin</span>
+                    </div>
+                    <ChevronIcon className={`w-4 h-4 transition-transform ${expandedMenus.admin ? 'rotate-90' : ''}`} />
+                  </button>
+                  {expandedMenus.admin && (
+                    <ul className="mt-1 ml-4 space-y-1 border-l border-gray-700 pl-3">
+                      <li>
+                        <Link
+                          to="/admin/machines"
+                          onClick={handleNavClick}
+                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                            location.pathname === '/admin/machines'
+                              ? 'bg-blue-600 text-white'
+                              : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                          }`}
+                        >
+                          <MachineAdminIcon className="w-4 h-4" />
+                          <span>설비 관리</span>
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          to="/admin/templates"
+                          onClick={handleNavClick}
+                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                            location.pathname === '/admin/templates'
+                              ? 'bg-blue-600 text-white'
+                              : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                          }`}
+                        >
+                          <TemplateIcon className="w-4 h-4" />
+                          <span>템플릿 편집</span>
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          to="/admin/panel-editor"
+                          onClick={handleNavClick}
+                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                            location.pathname === '/admin/panel-editor'
+                              ? 'bg-blue-600 text-white'
+                              : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                          }`}
+                        >
+                          <PanelEditorIcon className="w-4 h-4" />
+                          <span>패널 디자인</span>
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          to="/admin/interlocks"
+                          onClick={handleNavClick}
+                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                            location.pathname === '/admin/interlocks'
+                              ? 'bg-blue-600 text-white'
+                              : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                          }`}
+                        >
+                          <InterlockIcon className="w-4 h-4" />
+                          <span>인터록 편집</span>
+                        </Link>
+                      </li>
+                    </ul>
+                  )}
+                </li>
+              </>
+            )}
           </ul>
         </nav>
 
@@ -196,7 +297,7 @@ export function Layout({ children }: LayoutProps) {
           >
             <HamburgerIcon className="w-6 h-6" />
           </button>
-          <h1 className="text-lg font-bold">Star-WebCNC</h1>
+          <h1 className="text-lg font-bold"><span className="text-blue-400">S</span>mart <span className="text-blue-400">T</span>hinking <span className="text-blue-400">P</span>ro</h1>
         </header>
 
         {/* Page Content */}
@@ -318,6 +419,46 @@ function RemotePanelIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+    </svg>
+  );
+}
+
+function AdminIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+    </svg>
+  );
+}
+
+function MachineAdminIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  );
+}
+
+function TemplateIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+    </svg>
+  );
+}
+
+function PanelEditorIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+    </svg>
+  );
+}
+
+function InterlockIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
     </svg>
   );
 }

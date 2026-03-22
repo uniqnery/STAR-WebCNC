@@ -28,69 +28,103 @@ export interface TowerLightConfig {
 const DEFAULT_TIMING = { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 };
 
 export const DEFAULT_PMC_TEMPLATE: PmcButtonDef[] = [
-  // HEAD
+  // HEAD (PATH1/PATH2 참조, SB-20R2 확정 주소)
   { id: 'HEAD1', label: 'HEAD 1', category: 'HEAD', hasLamp: true,
-    reqAddr: 'Y0010.0', lampAddr: 'R0010.0', enabled: true, timing: { ...DEFAULT_TIMING } },
+    reqAddr: 'R6104.0', lampAddr: 'R6004.0', enabled: true, timing: { ...DEFAULT_TIMING } },
   { id: 'HEAD2', label: 'HEAD 2', category: 'HEAD', hasLamp: true,
-    reqAddr: 'Y0010.1', lampAddr: 'R0010.1', enabled: true, timing: { ...DEFAULT_TIMING } },
-  { id: 'HEAD3', label: 'HEAD 3', category: 'HEAD', hasLamp: true,
-    reqAddr: 'Y0010.2', lampAddr: 'R0010.2', enabled: false, timing: { ...DEFAULT_TIMING } },
+    reqAddr: 'R6104.1', lampAddr: 'R6004.1', enabled: true, timing: { ...DEFAULT_TIMING } },
   { id: 'HEAD_CHANGE', label: 'HEAD CHANGE', category: 'HEAD', hasLamp: false,
-    reqAddr: 'Y0010.3', lampAddr: '', enabled: true, timing: { longPressMs: 1500, holdMs: 300, timeoutMs: 2000 } },
+    reqAddr: 'R6103.7', lampAddr: '', enabled: true, timing: { longPressMs: 1500, holdMs: 300, timeoutMs: 2000 } },
 
-  // CHUCKING
+  // CHUCKING (메인/서브 콜렛 참조)
   { id: 'MAIN_CHUCKING', label: 'MAIN CHUCKING', category: 'CHUCKING', hasLamp: true,
-    reqAddr: 'Y0011.0', lampAddr: 'R0011.0', enabled: true, timing: { ...DEFAULT_TIMING } },
+    reqAddr: 'R6100.1', lampAddr: 'R6000.1', enabled: true, timing: { ...DEFAULT_TIMING } },
   { id: 'SUB_CHUCKING', label: 'SUB CHUCKING', category: 'CHUCKING', hasLamp: true,
-    reqAddr: 'Y0011.1', lampAddr: 'R0011.1', enabled: true, timing: { ...DEFAULT_TIMING } },
+    reqAddr: 'R6100.3', lampAddr: 'R6000.3', enabled: true, timing: { ...DEFAULT_TIMING } },
 
   // MODE
   { id: 'EDIT', label: 'EDIT', category: 'MODE', hasLamp: true,
-    reqAddr: 'Y0020.0', lampAddr: 'R0020.0', enabled: true, timing: { ...DEFAULT_TIMING }, color: 'gray' },
+    reqAddr: 'R6104.4', lampAddr: 'R6004.4', enabled: true, timing: { ...DEFAULT_TIMING }, color: 'gray' },
   { id: 'MEMORY', label: 'MEMORY', category: 'MODE', hasLamp: true,
-    reqAddr: 'Y0020.1', lampAddr: 'R0020.1', enabled: true, timing: { ...DEFAULT_TIMING }, color: 'gray' },
+    reqAddr: 'R6104.5', lampAddr: 'R6004.5', enabled: true, timing: { ...DEFAULT_TIMING }, color: 'gray' },
   { id: 'MDI', label: 'MDI', category: 'MODE', hasLamp: true,
-    reqAddr: 'Y0020.2', lampAddr: 'R0020.2', enabled: true, timing: { ...DEFAULT_TIMING }, color: 'gray' },
-  { id: 'JOG', label: 'JOG', category: 'MODE', hasLamp: true,
-    reqAddr: 'Y0020.3', lampAddr: 'R0020.3', enabled: true, timing: { ...DEFAULT_TIMING }, color: 'gray' },
+    reqAddr: 'R6104.6', lampAddr: 'R6004.6', enabled: true, timing: { ...DEFAULT_TIMING }, color: 'gray' },
+  { id: 'HANDLE', label: 'HANDLE', category: 'MODE', hasLamp: true,
+    reqAddr: 'R6105.0', lampAddr: 'R6005.0', enabled: true, timing: { ...DEFAULT_TIMING }, color: 'gray' },
   { id: 'DNC', label: 'DNC', category: 'MODE', hasLamp: true,
-    reqAddr: 'Y0020.4', lampAddr: 'R0020.4', enabled: true, timing: { ...DEFAULT_TIMING }, color: 'gray' },
+    reqAddr: 'R6105.1', lampAddr: 'R6005.1', enabled: true, timing: { ...DEFAULT_TIMING }, color: 'gray' },
 
   // OPERATION
   { id: 'SINGLE_BLOCK', label: 'SINGLE BLOCK', category: 'OPERATION', hasLamp: true,
-    reqAddr: 'Y0021.0', lampAddr: 'R0021.0', enabled: true, timing: { ...DEFAULT_TIMING } },
+    reqAddr: 'R6106.1', lampAddr: 'R6006.1', enabled: true, timing: { ...DEFAULT_TIMING } },
   { id: 'OPTIONAL_STOP', label: 'OPTIONAL STOP', category: 'OPERATION', hasLamp: true,
-    reqAddr: 'Y0021.1', lampAddr: 'R0021.1', enabled: true, timing: { ...DEFAULT_TIMING } },
+    reqAddr: 'R6105.7', lampAddr: 'R6005.7', enabled: true, timing: { ...DEFAULT_TIMING } },
   { id: 'ONE_CYCLE', label: 'ONE CYCLE', category: 'OPERATION', hasLamp: true,
-    reqAddr: 'Y0021.2', lampAddr: 'R0021.2', enabled: true, timing: { ...DEFAULT_TIMING } },
+    reqAddr: 'R6106.0', lampAddr: 'R6006.0', enabled: true, timing: { ...DEFAULT_TIMING } },
   { id: 'AIR_CUT', label: 'AIR CUT', category: 'OPERATION', hasLamp: true,
-    reqAddr: 'Y0021.3', lampAddr: 'R0021.3', enabled: true, timing: { ...DEFAULT_TIMING } },
+    reqAddr: 'R6105.6', lampAddr: 'R6005.6', enabled: true, timing: { ...DEFAULT_TIMING } },
   { id: 'AUTO_POWER_OFF', label: 'AUTO POWER OFF', category: 'OPERATION', hasLamp: true,
-    reqAddr: 'Y0021.4', lampAddr: 'R0021.4', enabled: true, timing: { ...DEFAULT_TIMING } },
+    reqAddr: 'R6105.5', lampAddr: 'R6005.5', enabled: true, timing: { ...DEFAULT_TIMING } },
   { id: 'WORK_LIGHT', label: 'WORK LIGHT', category: 'OPERATION', hasLamp: true,
-    reqAddr: 'Y0021.5', lampAddr: 'R0021.5', enabled: true, timing: { ...DEFAULT_TIMING } },
+    reqAddr: 'R6106.2', lampAddr: 'R6006.2', enabled: true, timing: { ...DEFAULT_TIMING } },
 
   // CYCLE
   { id: 'CYCLE_START', label: 'CYCLE START', category: 'CYCLE', hasLamp: true,
-    reqAddr: 'Y0030.0', lampAddr: 'R0030.0', enabled: true,
+    reqAddr: 'R6105.4', lampAddr: 'R6005.4', enabled: true,
     timing: { longPressMs: 2000, holdMs: 500, timeoutMs: 3000 }, color: 'green' },
   { id: 'FEED_HOLD', label: 'FEED HOLD', category: 'CYCLE', hasLamp: true,
-    reqAddr: 'Y0030.1', lampAddr: 'R0030.1', enabled: true,
+    reqAddr: 'R6105.3', lampAddr: 'R6005.3', enabled: true,
     timing: { longPressMs: 1000, holdMs: 300, timeoutMs: 2000 }, color: 'yellow' },
   { id: 'EMERGENCY_STOP', label: 'EMERGENCY STOP', category: 'CYCLE', hasLamp: false,
-    reqAddr: 'Y0030.2', lampAddr: '', enabled: true,
+    reqAddr: '', lampAddr: '', enabled: true,
     timing: { longPressMs: 3000, holdMs: 1000, timeoutMs: 5000 }, color: 'red' },
   { id: 'RESET', label: 'RESET', category: 'CYCLE', hasLamp: false,
-    reqAddr: 'Y0030.3', lampAddr: '', enabled: true,
+    reqAddr: 'R6103.0', lampAddr: '', enabled: true,
     timing: { longPressMs: 1500, holdMs: 500, timeoutMs: 3000 }, color: 'gray' },
 ];
 
 export const DEFAULT_TOWER_LIGHT: TowerLightConfig = {
-  redAddr: 'R0100.0',
-  yellowAddr: 'R0100.1',
-  greenAddr: 'R0100.2',
+  redAddr: 'R6009.0',    // MACHINE READY (경광등 연결 주소 — 실기기 확인 후 수정)
+  yellowAddr: 'R6006.3', // POWER DRIVEN TOOLS
+  greenAddr: 'R6003.0',  // CYCLE RUNNING
 };
 
 export function getButtonsByCategory(template: PmcButtonDef[], category: ButtonCategory): PmcButtonDef[] {
   return template.filter((btn) => btn.category === category);
 }
+
+// PanelGroup/PanelKey types for import (avoid circular dep)
+import type { PanelGroup, PanelKey } from '../stores/templateStore';
+
+const CATEGORY_NAMES: Record<ButtonCategory, string> = {
+  HEAD: 'HEAD', CHUCKING: 'CHUCKING', MODE: 'MODE', OPERATION: 'OPERATION', CYCLE: 'CYCLE',
+};
+
+/** Convert legacy PmcButtonDef[] to PanelGroup[] (fallback when template has no panelLayout) */
+export function toPanelGroups(buttons: PmcButtonDef[]): PanelGroup[] {
+  const categories: ButtonCategory[] = ['HEAD', 'CHUCKING', 'MODE', 'OPERATION', 'CYCLE'];
+  const result: PanelGroup[] = [];
+  for (const cat of categories) {
+    const filtered = buttons.filter((b) => b.category === cat && b.enabled);
+    if (filtered.length === 0) continue;
+    result.push({
+      id: `grp-${cat.toLowerCase()}`,
+      name: CATEGORY_NAMES[cat],
+      sameRowAsPrev: cat === 'CHUCKING',  // CHUCKING은 HEAD와 같은 줄
+      keys: filtered.map((b): PanelKey => ({
+        id: b.id,
+        label: b.label,
+        hasLamp: b.hasLamp,
+        color: b.color || 'gray',
+        size: cat === 'CYCLE' ? 'large' : 'normal',
+        reqAddr: b.reqAddr,
+        lampAddr: b.lampAddr,
+        timing: { ...b.timing },
+      })),
+    });
+  }
+  return result;
+}
+
+/** Default panel groups (converted from DEFAULT_PMC_TEMPLATE) */
+export const DEFAULT_PANEL_GROUPS: PanelGroup[] = toPanelGroups(DEFAULT_PMC_TEMPLATE);
