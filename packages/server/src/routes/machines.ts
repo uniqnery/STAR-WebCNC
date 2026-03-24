@@ -873,14 +873,28 @@ router.put('/:id/dnc-config',
   authorize(UserRole.ADMIN, UserRole.HQ_ENGINEER),
   asyncHandler(async (req: Request, res: Response<ApiResponse>) => {
     const { id } = req.params;
-    const { path1, path2, path3 } = req.body as { path1: string; path2: string; path3?: string };
+    const { path1, path2, path3, mainMode, subMode } = req.body as {
+      path1: string;
+      path2: string;
+      path3?: string;
+      mainMode?: 'memory' | 'dnc';
+      subMode?: 'memory' | 'dnc';
+    };
 
     const machine = await prisma.machine.findFirst({
       where: { OR: [{ id }, { machineId: id }] },
     });
     if (!machine) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '장비를 찾을 수 없습니다.' } });
 
-    const dncConfig = { path1: path1 || '', path2: path2 || '', ...(path3 !== undefined && { path3 }) };
+    const existing = (machine.dncConfig ?? {}) as Record<string, unknown>;
+    const dncConfig = {
+      ...existing,
+      path1: path1 || '',
+      path2: path2 || '',
+      ...(path3 !== undefined && { path3 }),
+      mainMode: mainMode ?? (existing.mainMode as string) ?? (existing.executionMode as string) ?? 'memory',
+      subMode:  subMode  ?? (existing.subMode  as string) ?? 'memory',
+    };
 
     const updated = await prisma.machine.update({
       where: { id: machine.id },

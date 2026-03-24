@@ -235,31 +235,40 @@ export const commandApi = {
 
 // Scheduler API
 export const schedulerApi = {
-  getJobs: (page = 1, limit = 50) =>
-    api.get(`/api/scheduler/jobs?page=${page}&limit=${limit}`),
+  // ── 큐 CRUD ──────────────────────────────────────────────────
+  getRows: (machineId: string) =>
+    api.get<{ rows: unknown[]; state: string }>(`/api/scheduler/rows?machineId=${machineId}`),
 
-  getJob: (jobId: string) =>
-    api.get(`/api/scheduler/jobs/${jobId}`),
+  addRow: (data: { machineId: string; mainProgramNo: string; subProgramNo?: string; preset: number }) =>
+    api.post('/api/scheduler/rows', data),
 
-  createJob: (data: {
-    machineId: string;
-    programNo: string;
-    targetCount: number;
-    oneCycleStop: boolean;
-  }) =>
-    api.post('/api/scheduler/jobs', data),
+  updateRow: (rowId: string, data: { mainProgramNo?: string; subProgramNo?: string | null; preset?: number; count?: number }) =>
+    api.put(`/api/scheduler/rows/${rowId}`, data),
 
-  startJob: (jobId: string) =>
-    api.post(`/api/scheduler/jobs/${jobId}/start`),
+  deleteRow: (rowId: string) =>
+    api.delete(`/api/scheduler/rows/${rowId}`),
 
-  pauseJob: (jobId: string) =>
-    api.post(`/api/scheduler/jobs/${jobId}/pause`),
+  reorderRows: (machineId: string, orderedIds: string[]) =>
+    api.post('/api/scheduler/rows/reorder', { machineId, orderedIds }),
 
-  cancelJob: (jobId: string) =>
-    api.post(`/api/scheduler/jobs/${jobId}/cancel`),
+  // ── 실행 제어 ─────────────────────────────────────────────────
+  start: (machineId: string) =>
+    api.post(`/api/scheduler/start?machineId=${machineId}`),
 
-  setOneCycleStop: (jobId: string, enabled: boolean) =>
-    api.post(`/api/scheduler/jobs/${jobId}/one-cycle-stop`, { enabled }),
+  resume: (machineId: string) =>
+    api.post(`/api/scheduler/resume?machineId=${machineId}`),
+
+  pause: (machineId: string) =>
+    api.post(`/api/scheduler/pause?machineId=${machineId}`),
+
+  cancel: (machineId: string) =>
+    api.post(`/api/scheduler/cancel?machineId=${machineId}`),
+
+  reset: (machineId: string) =>
+    api.post(`/api/scheduler/reset?machineId=${machineId}`),
+
+  clearAll: (machineId: string) =>
+    api.delete(`/api/scheduler/rows?machineId=${machineId}`),
 };
 
 // Alarm API
@@ -440,7 +449,7 @@ export const dncApi = {
     api.get(`/api/machines/${machineId}/dnc-config`),
 
   // 장비 DNC 경로 설정 저장 (관리자 전용)
-  saveConfig: (machineId: string, config: { path1: string; path2: string; path3?: string }) =>
+  saveConfig: (machineId: string, config: { path1: string; path2: string; path3?: string; mainMode?: 'memory' | 'dnc'; subMode?: 'memory' | 'dnc' }) =>
     api.put(`/api/machines/${machineId}/dnc-config`, config),
 };
 

@@ -30,7 +30,6 @@ model User {
   refreshTokens      RefreshToken[]
   auditLogs          AuditLog[]
   controlLocks       ControlLockLog[]
-  schedulerJobs      SchedulerJob[]
   acknowledgedAlarms Alarm[]   @relation("AcknowledgedAlarms")
 
   @@map("users")
@@ -75,10 +74,6 @@ model Machine {
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
 
-  // Scheduler settings
-  schedulerMode    SchedulerMode @default(MANUAL) @map("scheduler_mode")
-  maxQueueSize     Int           @default(15) @map("max_queue_size")
-
   // Machine identity
   serialNumber     String?       @map("serial_number")   // CNC 시리얼번호
   location         String?                               // 설비 위치/라인명
@@ -95,16 +90,10 @@ model Machine {
   template         Template      @relation(fields: [templateId], references: [id])
   alarms           Alarm[]
   commandLogs      CommandLog[]
-  schedulerItems   SchedulerItem[]
-  schedulerJobs    SchedulerJob[]
+  schedulerRows    SchedulerRow[]
   productionLogs   ProductionLog[]
 
   @@map("machines")
-}
-
-enum SchedulerMode {
-  MANUAL
-  AUTO
 }
 
 model Template {
@@ -174,61 +163,37 @@ model Template {
 // Scheduler
 // ============================================
 
-model SchedulerItem {
-  id          String          @id @default(uuid())
-  machineId   String          @map("machine_id")
-  order       Int                                   // 실행 순서
-  mainProgram String          @map("main_program")  // 메인 프로그램 번호
-  subProgram  String?         @map("sub_program")   // 서브 프로그램 번호
-  preset      Int                                   // 목표 수량
-  count       Int             @default(0)           // 현재 완료 수량
-  status      SchedulerStatus @default(READY)
-  startedAt   DateTime?       @map("started_at")
-  completedAt DateTime?       @map("completed_at")
-  createdAt   DateTime        @default(now()) @map("created_at")
-  updatedAt   DateTime        @updatedAt @map("updated_at")
+model SchedulerRow {
+  id            String             @id @default(uuid())
+  machineDbId   String             @map("machine_id")        // Machine.id (FK)
+  order         Int                                           // 실행 순서 (1부터, 큐 내 위치)
+  mainProgramNo String             @map("main_program_no")   // 예: "O0001"
+  subProgramNo  String?            @map("sub_program_no")    // 예: "O9001" (2-Path, null 가능)
+  preset        Int                                           // 목표 수량
+  count         Int                @default(0)               // 현재 완료 수량 (Agent authority)
+  status        SchedulerRowStatus @default(PENDING)
+  lastError     String?            @map("last_error")        // 마지막 오류 메시지
+  lastErrorCode String?            @map("last_error_code")   // 오류 코드 (예: INTERLOCK_FAIL)
+  lastErrorAt   DateTime?          @map("last_error_at")     // 오류 발생 시각
+  createdBy     String             @map("created_by")        // username
+  startedAt     DateTime?          @map("started_at")
+  completedAt   DateTime?          @map("completed_at")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
 
-  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  machine Machine @relation(fields: [machineDbId], references: [id], onDelete: Cascade)
 
-  @@index([machineId, order])
-  @@map("scheduler_items")
-}
-
-model SchedulerJob {
-  id             String            @id @default(uuid())
-  machineDbId    String            @map("machine_id")
-  programNo      String            @map("program_no")
-  targetCount    Int               @map("target_count")
-  completedCount Int               @default(0) @map("completed_count")
-  status         SchedulerJobStatus @default(PENDING)
-  oneCycleStop   Boolean           @default(false) @map("one_cycle_stop")
-  createdById    String            @map("created_by_id")
-  startedAt      DateTime?         @map("started_at")
-  completedAt    DateTime?         @map("completed_at")
-  createdAt      DateTime          @default(now()) @map("created_at")
-  updatedAt      DateTime          @updatedAt @map("updated_at")
-
-  machine         Machine @relation(fields: [machineDbId], references: [id], onDelete: Cascade)
-  createdByUser   User    @relation(fields: [createdById], references: [id])
-
+  @@index([machineDbId, order])
   @@index([machineDbId, status])
-  @@map("scheduler_jobs")
+  @@map("scheduler_rows")
 }
 
-enum SchedulerJobStatus {
-  PENDING
-  RUNNING
-  PAUSED
-  COMPLETED
-  CANCELLED
-}
-
-enum SchedulerStatus {
-  READY
-  RUNNING
-  COMPLETED
-  ERROR
-  PAUSED
+enum SchedulerRowStatus {
+  PENDING      // 대기 (미실행)
+  RUNNING      // 실행 중
+  PAUSED       // 정상 원사이클 스톱 후 재개 대기
+  COMPLETED    // 목표 수량 완료
+  CANCELLED    // 취소 또는 에러 정지
 }
 
 // ============================================

@@ -38,7 +38,8 @@ export function Layout({ children }: LayoutProps) {
     setSidebarOpen(false);
   };
 
-  const isHqEngineer = user?.role === 'HQ_ENGINEER';
+  const isHqEngineer = user?.role === 'HQ_ENGINEER' || user?.role === 'ADMIN';
+  const isHqEngineerOnly = user?.role === 'HQ_ENGINEER';
 
   // 하위 메뉴 펼침 상태 (기본 접힘)
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({ machines: false, admin: false });
@@ -216,6 +217,7 @@ export function Layout({ children }: LayoutProps) {
                           <span>설비 관리</span>
                         </Link>
                       </li>
+                      {isHqEngineerOnly && (
                       <li>
                         <Link
                           to="/admin/templates"
@@ -230,6 +232,7 @@ export function Layout({ children }: LayoutProps) {
                           <span>템플릿 편집</span>
                         </Link>
                       </li>
+                      )}
                       <li>
                         <Link
                           to="/admin/panel-editor"
@@ -256,6 +259,20 @@ export function Layout({ children }: LayoutProps) {
                         >
                           <InterlockIcon className="w-4 h-4" />
                           <span>인터록 편집</span>
+                        </Link>
+                      </li>
+                      <li>
+                        <Link
+                          to="/admin/scheduler-config"
+                          onClick={handleNavClick}
+                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                            location.pathname === '/admin/scheduler-config'
+                              ? 'bg-blue-600 text-white'
+                              : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                          }`}
+                        >
+                          <SchedulerConfigIcon className="w-4 h-4" />
+                          <span>스케줄러 설정</span>
                         </Link>
                       </li>
                     </ul>
@@ -459,6 +476,16 @@ function InterlockIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+    </svg>
+  );
+}
+
+function SchedulerConfigIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h10M4 18h6" />
+      <circle cx="19" cy="17" r="3" strokeWidth={2} />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 15v2l1 1" />
     </svg>
   );
 }

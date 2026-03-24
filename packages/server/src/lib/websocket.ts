@@ -368,16 +368,46 @@ class WebSocketService {
   }
 
   /**
-   * Send scheduler update
+   * Send full scheduler queue update (rows)
    */
-  sendSchedulerUpdate(machineId: string, data: unknown): void {
+  sendSchedulerUpdate(machineId: string, rows: unknown[]): void {
     this.broadcastToMachine(machineId, {
-      type: 'scheduler',
+      type: 'scheduler_update',
       timestamp: new Date().toISOString(),
-      payload: {
-        machineId,
-        data,
-      },
+      payload: { machineId, rows },
+    });
+  }
+
+  /**
+   * Send scheduler count update (M20 단건)
+   */
+  sendSchedulerCount(machineId: string, rowId: string, count: number): void {
+    this.broadcastToMachine(machineId, {
+      type: 'scheduler_count',
+      timestamp: new Date().toISOString(),
+      payload: { machineId, rowId, count },
+    });
+  }
+
+  /**
+   * Send scheduler state change
+   */
+  sendSchedulerState(machineId: string, state: 'IDLE' | 'RUNNING' | 'PAUSED' | 'ERROR'): void {
+    this.broadcastToMachine(machineId, {
+      type: 'scheduler_state',
+      timestamp: new Date().toISOString(),
+      payload: { machineId, state },
+    });
+  }
+
+  /**
+   * Send scheduler error
+   */
+  sendSchedulerError(machineId: string, code: string, message: string, rowId?: string): void {
+    this.broadcastToMachine(machineId, {
+      type: 'scheduler_error',
+      timestamp: new Date().toISOString(),
+      payload: { machineId, rowId, code, message },
     });
   }
 

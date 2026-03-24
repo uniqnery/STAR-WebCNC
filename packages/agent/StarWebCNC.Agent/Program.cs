@@ -38,6 +38,9 @@ builder.Services.AddSingleton<TemplateLoader>();
 // Command Handler
 builder.Services.AddSingleton<CommandHandler>();
 
+// Scheduler Manager
+builder.Services.AddSingleton<SchedulerManager>();
+
 // Background Service
 builder.Services.AddHostedService<DataCollectorService>();
 

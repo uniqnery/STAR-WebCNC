@@ -33,12 +33,14 @@ public class MqttService : IAsyncDisposable
         // Server → Agent
         public static string Command(string machineId) => $"star-webcnc/server/command/{machineId}";
         public const string CommandBroadcast = "star-webcnc/server/command";
+        public static string ServerScheduler(string machineId) => $"star-webcnc/server/scheduler/{machineId}";
     }
 
     public bool IsConnected => _client.IsConnected;
 
     // 이벤트
     public event Func<CommandMessage, Task>? OnCommandReceived;
+    public event Func<SchedulerMessage, Task>? OnSchedulerCommandReceived;
     public event Func<Task>? OnConnected;
     public event Func<Task>? OnDisconnected;
 
@@ -211,6 +213,15 @@ public class MqttService : IAsyncDisposable
 
         _logger.LogInformation("Subscribed to broadcast command topic");
 
+        // 스케줄러 명령 토픽 구독
+        var schedulerTopic = Topics.ServerScheduler(_settings.MachineId);
+        await _client.SubscribeAsync(new MqttTopicFilterBuilder()
+            .WithTopic(schedulerTopic)
+            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+            .Build());
+
+        _logger.LogInformation("Subscribed to scheduler topic: {Topic}", schedulerTopic);
+
         if (OnConnected != null)
             await OnConnected.Invoke();
     }
@@ -256,6 +267,15 @@ public class MqttService : IAsyncDisposable
                 if (command != null && OnCommandReceived != null)
                 {
                     await OnCommandReceived.Invoke(command);
+                }
+            }
+            // 스케줄러 명령 처리
+            else if (topic.Contains("/scheduler/"))
+            {
+                var schedMsg = JsonConvert.DeserializeObject<SchedulerMessage>(payload);
+                if (schedMsg != null && OnSchedulerCommandReceived != null)
+                {
+                    await OnSchedulerCommandReceived.Invoke(schedMsg);
                 }
             }
         }
@@ -420,7 +440,50 @@ public class EventMessage : MqttMessage
 {
     public string EventType { get; set; } = "M20_COMPLETE";
     public string? ProgramNo { get; set; }
+    /// <summary>스케줄러 행 ID (M20_COMPLETE, SCHEDULER_ROW_COMPLETED, SCHEDULER_PAUSED, SCHEDULER_ERROR)</summary>
+    public string? RowId { get; set; }
+    /// <summary>M20 카운트 값 (Agent authority)</summary>
+    public int? Count { get; set; }
+    /// <summary>에러/상태 코드 (SCHEDULER_ERROR, SCHEDULER_PAUSED)</summary>
+    public string? Code { get; set; }
+    /// <summary>에러 메시지 (SCHEDULER_ERROR, SCHEDULER_PAUSED)</summary>
+    public string? Message { get; set; }
     public Dictionary<string, object>? Data { get; set; }
+}
+
+/// <summary>
+/// 서버 → Agent 스케줄러 제어 메시지 (star-webcnc/server/scheduler/{machineId})
+/// </summary>
+public class SchedulerMessage : MqttMessage
+{
+    /// <summary>START | RESUME | PAUSE | CANCEL</summary>
+    public string Type { get; set; } = "";
+    /// <summary>START 시 큐 행 목록</summary>
+    public List<SchedulerRowPayload>? Rows { get; set; }
+    /// <summary>메인(Path1) 실행 모드 — "memory" | "dnc"</summary>
+    public string MainMode { get; set; } = "memory";
+    /// <summary>서브(Path2) 실행 모드 — "memory" | "dnc"</summary>
+    public string SubMode { get; set; } = "memory";
+    /// <summary>DNC 경로 설정 (mainMode 또는 subMode == "dnc" 시 사용)</summary>
+    public DncPathsPayload? DncPaths { get; set; }
+}
+
+public class DncPathsPayload
+{
+    public string Path1 { get; set; } = "";
+    public string Path2 { get; set; } = "";
+    public string? Path3 { get; set; }
+}
+
+public class SchedulerRowPayload
+{
+    public string Id { get; set; } = "";
+    public int Order { get; set; }
+    public string MainProgramNo { get; set; } = "";
+    public string? SubProgramNo { get; set; }
+    public int Preset { get; set; }
+    public int Count { get; set; }
+    public string Status { get; set; } = "PENDING";
 }
 
 /// <summary>

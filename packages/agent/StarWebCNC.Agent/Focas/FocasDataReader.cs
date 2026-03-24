@@ -918,6 +918,47 @@ public class FocasDataReader
     }
 
     /// <summary>
+    /// P-code 매크로 변수 쓰기 (cnc_wrpmacro — int varNo, #10000+ 지원)
+    /// </summary>
+    public bool WritePcodeMacroVariable(int variableNo, double value)
+    {
+        if (!_connection.IsConnected)
+            return false;
+
+        try
+        {
+            int decimalPlaces = 0;
+            double temp = value;
+            while (temp != Math.Floor(temp) && decimalPlaces < 9)
+            {
+                temp *= 10;
+                decimalPlaces++;
+            }
+
+            int intValue = (int)(value * Math.Pow(10, decimalPlaces));
+
+            short ret = Focas1.cnc_wrpmacro(
+                _connection.Handle,
+                variableNo,
+                intValue,
+                (short)decimalPlaces);
+
+            if (ret != Focas1.EW_OK)
+            {
+                _logger.LogWarning("cnc_wrpmacro failed: varNo={VarNo} error={ErrorCode}", variableNo, ret);
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error writing P-code macro variable {VariableNo}", variableNo);
+            return false;
+        }
+    }
+
+    /// <summary>
     /// 파츠 카운터 읽기 (설정된 매크로 변수에서)
     /// </summary>
     public int? ReadPartsCount(int macroVariableNo)
@@ -1034,6 +1075,120 @@ public class FocasDataReader
             result.Add(new CounterVarResult { Key = f.Key, VarNo = f.VarNo, Value = val });
         }
         return result;
+    }
+
+    // ── 프로그램 선택 / 선두 복귀 ────────────────────────────────
+
+    /// <summary>
+    /// 프로그램 번호로 활성 프로그램 변경 (cnc_search)
+    /// memory 모드 스케줄러 행 시작 시 호출
+    /// </summary>
+    public bool SearchProgram(int programNo, int pathNo = 1)
+    {
+        if (!_connection.IsConnected) return false;
+        try
+        {
+            if (pathNo > 1)
+                Focas1.cnc_setpath(_connection.Handle, (short)pathNo);
+
+            short ret = Focas1.cnc_search(_connection.Handle, (short)programNo);
+
+            if (pathNo > 1)
+                Focas1.cnc_setpath(_connection.Handle, 1);
+
+            if (ret != Focas1.EW_OK)
+            {
+                _logger.LogWarning("cnc_search O{No:D4} (path={Path}) failed: EW={Ret}", programNo, pathNo, ret);
+                return false;
+            }
+            _logger.LogInformation("cnc_search O{No:D4} (path={Path}) OK", programNo, pathNo);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "cnc_search O{No:D4} exception", programNo);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 프로그램 선두 복귀 (cnc_rewind) + 시퀀스 번호 0 확인
+    /// pathNo: 1=Path1(기본), 2=Path2
+    /// </summary>
+    public bool RewindProgram(int pathNo = 1)
+    {
+        if (!_connection.IsConnected) return false;
+        try
+        {
+            if (pathNo > 1)
+                Focas1.cnc_setpath(_connection.Handle, (short)pathNo);
+
+            short ret = Focas1.cnc_rewind(_connection.Handle);
+
+            // Path2인 경우: cnc_statinfo는 반드시 setpath(1) 복귀 전에 읽어야 Path2 상태를 얻음
+            int runVal = -1;
+            int seqAfter = -1;
+
+            var runState = new Focas1.ODBST();
+            if (Focas1.cnc_statinfo(_connection.Handle, runState) == Focas1.EW_OK)
+                runVal = runState.run;
+
+            var seqNum = new Focas1.ODBSEQ();
+            if (Focas1.cnc_rdseqnum(_connection.Handle, seqNum) == Focas1.EW_OK)
+                seqAfter = seqNum.data;
+
+            if (pathNo > 1)
+                Focas1.cnc_setpath(_connection.Handle, 1);
+
+            if (ret != Focas1.EW_OK)
+            {
+                _logger.LogWarning("cnc_rewind path={Path} failed: EW={Ret}", pathNo, ret);
+                return false;
+            }
+
+            // run 상태별 해석:
+            //   run=0(STOP)  → 정지 상태: cnc_rewind가 즉시 선두 복귀. seqNo는 마지막 실행 N번호 보존(무시)
+            //   run=1(HOLD)  → Feed Hold(일시정지): cnc_rewind EW_OK = 선두 복귀 예약됨.
+            //                   다음 사이클 스타트 시 선두부터 실행 → 성공으로 처리
+            //   run=2(START) → 실행 중: rewind 예약. seqNo=0이면 이미 선두, 아니면 미완료
+            if (runVal == 0)
+            {
+                // STOP 상태: 즉시 선두 복귀됨 (seqNo는 마지막 실행 위치이므로 무시)
+                _logger.LogInformation(
+                    "cnc_rewind path={Path} OK — run=STOP, seqNo={Seq} (선두 복귀 완료)",
+                    pathNo, seqAfter);
+            }
+            else if (runVal == 1)
+            {
+                // HOLD(Feed Hold) 상태: EW_OK = 선두 복귀 예약 완료. 사이클 스타트 시 선두부터 실행됨
+                _logger.LogInformation(
+                    "cnc_rewind path={Path} OK — run=HOLD, seqNo={Seq} (HOLD=사이클스타트 시 선두부터 실행됨)",
+                    pathNo, seqAfter);
+            }
+            else if (seqAfter == 0)
+            {
+                // 실행 중이지만 seqNo=0 → 이미 선두
+                _logger.LogInformation(
+                    "cnc_rewind path={Path} OK — run={Run}, seqNo=0 (선두 확인됨)",
+                    pathNo, runVal);
+            }
+            else
+            {
+                // 실행 중(run=2)이고 seqNo!=0 → 아직 이전 사이클 실행 중, 선두 복귀 불가
+                _logger.LogWarning(
+                    "cnc_rewind path={Path} EW_OK but run={Run}, seqNo={Seq} → 실행 중 선두 복귀 미완료",
+                    pathNo, runVal, seqAfter);
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "cnc_rewind path={Path} exception", pathNo);
+            try { if (pathNo > 1) Focas1.cnc_setpath(_connection.Handle, 1); } catch { }
+            return false;
+        }
     }
 
     // ── 프로그램 파일 관리 ──────────────────────────────────────

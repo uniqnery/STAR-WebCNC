@@ -944,19 +944,36 @@
     ]
   },
   "schedulerConfig": {
+    "m20Addr": "r6002.4",
     "countMode": "M20_EDGE",
+    "resetAddr": "r6103.0",
     "countSignal": "scheduler.m20Complete",
+    "subHeadAddr": "r6104.1",
     "countDisplay": {
-      "macroNo": 500
+      "macroNo": 500,
+      "countMacroNo": 900,
+      "countVarType": "macro",
+      "presetMacroNo": 10000,
+      "presetVarType": "pcode"
     },
+    "mainHeadAddr": "r6104.0",
     "maxQueueSize": 15,
+    "oneCycleStopAddr": "r6106.0",
+    "subHeadStatusAddr": "r6004.1",
+    "mainHeadStatusAddr": "r6004.0",
+    "path2OnlyTimeoutMs": 4000,
+    "path2OnlyConfirmAddr": "A209.7",
     "oneCycleStopSupported": true,
     "oneCycleStopPmcAddress": {
       "bit": 0,
       "type": "R",
       "address": 6106,
       "dataType": "bit"
-    }
+    },
+    "oneCycleStopStatusAddr": "r6006.0",
+    "path2OnlyTimeoutAction": "error",
+    "path2OnlyConfirmDelayMs": 500,
+    "cycleRunningAddr": "R6003.0"
   },
   "capabilities": {
     "hasCAxis": true,

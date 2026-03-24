@@ -93,6 +93,7 @@ public class CommandHandler
                 "READ_TOOL_LIFE"         => await ExecuteReadToolLifeAsync(command),
                 "WRITE_TOOL_LIFE_PRESET" => await ExecuteWriteToolLifePresetAsync(command),
                 "PMC_WRITE"              => await ExecutePmcWriteAsync(command),
+                "REWIND"                 => ExecuteRewind(command),
                 "CREATE_BACKUP"          => await ExecuteCreateBackupAsync(command),
                 "PING"                   => ExecutePing(command),
                 _ => CreateFailureResult(command, "UNKNOWN_COMMAND", $"알 수 없는 명령: {command.Command}")
@@ -762,6 +763,49 @@ public class CommandHandler
             CorrelationId = command.CorrelationId,
             Status        = "success",
             Result        = new { address = addrStr, value = bitValue, holdMs }
+        };
+    }
+
+    /// <summary>
+    /// REWIND: 프로그램 선두 복귀 테스트 명령
+    /// params: { path?: 1|2|"both" }
+    ///   path=1    → Path1만
+    ///   path=2    → Path2만
+    ///   path=both → Path1 + Path2 순서대로 (기본값)
+    /// </summary>
+    private CommandResultMessage ExecuteRewind(CommandMessage command)
+    {
+        string pathParam = "both";
+        if (command.Params?.TryGetValue("path", out var pObj) == true && pObj != null)
+            pathParam = pObj.ToString()!.ToLower();
+
+        var results = new System.Collections.Generic.Dictionary<string, object>();
+
+        if (pathParam == "1" || pathParam == "both")
+        {
+            bool ok = _dataReader.RewindProgram(1);
+            results["path1"] = ok ? "OK" : "FAILED";
+            _logger.LogInformation("[REWIND] Path1 → {R}", results["path1"]);
+        }
+
+        if (pathParam == "2" || pathParam == "both")
+        {
+            bool ok = _dataReader.RewindProgram(2);
+            results["path2"] = ok ? "OK" : "FAILED";
+            _logger.LogInformation("[REWIND] Path2 → {R}", results["path2"]);
+        }
+
+        bool allOk = results.Values.All(v => v.ToString() == "OK");
+        if (!allOk)
+            return CreateFailureResult(command, "REWIND_FAILED",
+                $"선두 복귀 실패: {string.Join(", ", results.Select(kv => $"{kv.Key}={kv.Value}"))}");
+
+        return new CommandResultMessage
+        {
+            MachineId     = _settings.MachineId,
+            CorrelationId = command.CorrelationId,
+            Status        = "success",
+            Result        = results,
         };
     }
 

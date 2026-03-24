@@ -374,17 +374,18 @@ function SectionSchedulerConfig({ data, update }: { data: CncTemplate; update: (
   const sc = data.schedulerConfig;
   return (
     <div className="grid grid-cols-2 gap-4 pt-3">
+      <TextInput label="M20 감지 주소" value={sc.m20Addr} onChange={v => update('schedulerConfig.m20Addr', v)} placeholder="R6002.4" mono />
+      <NumberInput label="카운트 변수 번호" value={sc.countDisplay.countMacroNo} onChange={v => update('schedulerConfig.countDisplay.countMacroNo', v)} />
+      <NumberInput label="프리셋 변수 번호" value={sc.countDisplay.presetMacroNo} onChange={v => update('schedulerConfig.countDisplay.presetMacroNo', v)} />
+      <TextInput label="RESET 신호 주소" value={sc.resetAddr} onChange={v => update('schedulerConfig.resetAddr', v)} placeholder="R6103.0" mono />
+      <TextInput label="원사이클 스톱 출력" value={sc.oneCycleStopAddr} onChange={v => update('schedulerConfig.oneCycleStopAddr', v)} placeholder="R0000.0" mono />
+      <TextInput label="원사이클 스톱 상태" value={sc.oneCycleStopStatusAddr} onChange={v => update('schedulerConfig.oneCycleStopStatusAddr', v)} placeholder="R0000.0" mono />
+      <TextInput label="MAIN HEAD 출력" value={sc.mainHeadAddr} onChange={v => update('schedulerConfig.mainHeadAddr', v)} placeholder="R0000.0" mono />
+      <TextInput label="MAIN HEAD 상태" value={sc.mainHeadStatusAddr} onChange={v => update('schedulerConfig.mainHeadStatusAddr', v)} placeholder="R0000.0" mono />
+      <TextInput label="SUB HEAD 출력" value={sc.subHeadAddr} onChange={v => update('schedulerConfig.subHeadAddr', v)} placeholder="R0000.0" mono />
+      <TextInput label="SUB HEAD 상태" value={sc.subHeadStatusAddr} onChange={v => update('schedulerConfig.subHeadStatusAddr', v)} placeholder="R0000.0" mono />
+      <TextInput label="path2 only 확인 주소" value={sc.path2OnlyConfirmAddr} onChange={v => update('schedulerConfig.path2OnlyConfirmAddr', v)} placeholder="R0000.0" mono />
       <NumberInput label="큐 최대 크기" value={sc.maxQueueSize} onChange={v => update('schedulerConfig.maxQueueSize', v)} min={1} max={100} />
-      <TextInput label="카운트 신호" value={sc.countSignal} onChange={v => update('schedulerConfig.countSignal', v)} placeholder="scheduler.m20Complete" mono />
-      <TextInput label="카운트 모드" value={sc.countMode} onChange={v => update('schedulerConfig.countMode', v)} placeholder="M20_EDGE" mono />
-      <NumberInput label="매크로 변수 번호" value={sc.countDisplay.macroNo} onChange={v => update('schedulerConfig.countDisplay.macroNo', v)} />
-      <div className="col-span-2 space-y-2">
-        <Toggle label="One Cycle Stop 지원" value={sc.oneCycleStopSupported} onChange={v => update('schedulerConfig.oneCycleStopSupported', v)} />
-        {sc.oneCycleStopSupported && (
-          <PmcAddressField label="oneCycleStop PMC" description="One Cycle Stop 출력 주소"
-            value={sc.oneCycleStopPmcAddress} onChange={v => update('schedulerConfig.oneCycleStopPmcAddress', v)} />
-        )}
-      </div>
     </div>
   );
 }

@@ -18,7 +18,9 @@ export const REDIS_KEYS = {
   CONTROL_LOCK: (machineId: string) => `control:lock:${machineId}`,
 
   // Scheduler
-  SCHEDULER_JOB: (machineId: string) => `scheduler:job:${machineId}`,
+  SCHEDULER_ROWS: (machineId: string) => `scheduler:${machineId}:rows`,
+  SCHEDULER_RUNNING: (machineId: string) => `scheduler:${machineId}:running`,
+  SCHEDULER_STATE: (machineId: string) => `scheduler:${machineId}:state`,
 
   // Pub/Sub channels
   CHANNEL_TELEMETRY: 'channel:telemetry',

@@ -215,22 +215,77 @@ public class PmcMap
 
 // ─── Scheduler Config ────────────────────────────────────
 
+/// <summary>
+/// Scheduler 설정 — 모든 PMC 주소는 템플릿 편집 화면에서 입력받는 항목이므로 코드에 하드코딩하지 않는다.
+/// </summary>
 public class SchedulerConfig
 {
-    public int MaxQueueSize { get; set; } = 15;
-    public string CountSignal { get; set; } = "scheduler.m20Complete";
-    public string CountMode { get; set; } = "M20_EDGE";
-    public bool OneCycleStopSupported { get; set; } = false;
-    public PmcAddress? OneCycleStopPmcAddress { get; set; }
+    // ── M20 감지 (PMC bit polling) ──────────────────────────
+    /// <summary>M20 완료 신호 PMC 주소 (예: "R6002.4"). 빈값이면 Scheduler 실행 불가.</summary>
+    public string M20Addr { get; set; } = "";
+
+    // ── 카운트 동기화 ────────────────────────────────────────
     public CountDisplay CountDisplay { get; set; } = new();
-    /// <summary>서브 스핀들 M20 신호 주소 (SB-20R2: R6002.5). null이면 서브 M20 미사용.</summary>
-    public PmcAddress? SubM20Signal { get; set; }
+
+    // ── 프로그램 선두 복귀 ───────────────────────────────────
+    /// <summary>2차 fallback RESET 신호 PMC 주소. 빈값이면 2차 스킵.</summary>
+    public string ResetAddr { get; set; } = "";
+
+    // ── 원사이클 스톱 ────────────────────────────────────────
+    /// <summary>원사이클 스톱 ON/OFF PMC 주소. 빈값이면 제어 스킵.</summary>
+    public string OneCycleStopAddr { get; set; } = "";
+
+    // ── 원사이클 스톱 상태 (읽기) ────────────────────────────
+    /// <summary>원사이클 스톱 현재 상태 확인 PMC 주소 (읽기). 빈값이면 상태 확인 스킵.</summary>
+    public string OneCycleStopStatusAddr { get; set; } = "";
+
+    // ── HEAD 제어 (출력/상태 분리) ───────────────────────────
+    /// <summary>MAIN HEAD ON/OFF 출력 PMC 주소 (쓰기). 빈값이면 스킵.</summary>
+    public string MainHeadAddr { get; set; } = "";
+
+    /// <summary>MAIN HEAD 현재 상태 확인 PMC 주소 (읽기). 빈값이면 상태 확인 스킵.</summary>
+    public string MainHeadStatusAddr { get; set; } = "";
+
+    /// <summary>SUB HEAD ON/OFF 출력 PMC 주소 (쓰기). 빈값이면 스킵.</summary>
+    public string SubHeadAddr { get; set; } = "";
+
+    /// <summary>SUB HEAD 현재 상태 확인 PMC 주소 (읽기). 빈값이면 상태 확인 스킵.</summary>
+    public string SubHeadStatusAddr { get; set; } = "";
+
+    // ── path2 only 확인 메시지 ───────────────────────────────
+    /// <summary>확인 메시지 활성 PMC 주소 (읽기 전용). 빈값이면 path2 only 전체 스킵.</summary>
+    public string Path2OnlyConfirmAddr { get; set; } = "";
+
+    /// <summary>감지 후 사이클 스타트까지 대기 (기본 500ms)</summary>
+    public int Path2OnlyConfirmDelayMs { get; set; } = 500;
+
+    /// <summary>확인 메시지 감지 대기 timeout (기본 4000ms)</summary>
+    public int Path2OnlyTimeoutMs { get; set; } = 4000;
+
+    /// <summary>timeout 시 동작: "error" | "skip" (기본 "error")</summary>
+    public string Path2OnlyTimeoutAction { get; set; } = "error";
+
+    // ── 사이클 동작 상태 (읽기) ──────────────────────────────
+    /// <summary>사이클 실행 중 상태 PMC 주소 (읽기). Path2Only 완료 후 기계 정지 확인용. 빈값이면 대기 스킵.</summary>
+    public string CycleRunningAddr { get; set; } = "";
+
+    // ── 큐 설정 ─────────────────────────────────────────────
+    public int MaxQueueSize { get; set; } = 15;
 }
 
 public class CountDisplay
 {
-    /// <summary>CNC 표시용 매크로 변수 번호</summary>
-    public int MacroNo { get; set; } = 500;
+    // ── 카운트 (현재 생산 수량을 NC에 쓰는 변수) ──────────────
+    /// <summary>카운트 변수 번호 (기본 #500)</summary>
+    public int CountMacroNo { get; set; } = 500;
+    /// <summary>카운트 변수 타입: "macro" = 커스텀 매크로(#xxx), "pcode" = P코드(Pxxx)</summary>
+    public string CountVarType { get; set; } = "macro";
+
+    // ── 프리셋 (목표 수량) ────────────────────────────────────
+    /// <summary>프리셋 변수 번호 (기본 #501)</summary>
+    public int PresetMacroNo { get; set; } = 501;
+    /// <summary>프리셋 변수 타입: "macro" | "pcode"</summary>
+    public string PresetVarType { get; set; } = "macro";
 }
 
 // ─── Capabilities ────────────────────────────────────────

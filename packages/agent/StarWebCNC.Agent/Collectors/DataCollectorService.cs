@@ -23,6 +23,7 @@ public class DataCollectorService : BackgroundService
     private readonly MqttService _mqttService;
     private readonly TemplateLoader _templateLoader;
     private readonly CommandHandler _commandHandler;
+    private readonly SchedulerManager _schedulerManager;
 
     // FOCAS 스레드에서만 처리하도록 명령 큐
     private readonly Channel<CommandMessage> _commandChannel =
@@ -34,7 +35,6 @@ public class DataCollectorService : BackgroundService
 
     private readonly DateTime _startTime = DateTime.UtcNow;
     private bool _lastM20State = false;
-    private bool _lastSubM20State = false;
     // alarmNo → AlarmInfo: raise 시 전체 정보를 보존, clear 시 category/typeCode 로그에 사용
     private readonly Dictionary<int, AlarmInfo> _activeAlarms = new();
 
@@ -55,7 +55,8 @@ public class DataCollectorService : BackgroundService
         FocasDataReader dataReader,
         MqttService mqttService,
         TemplateLoader templateLoader,
-        CommandHandler commandHandler)
+        CommandHandler commandHandler,
+        SchedulerManager schedulerManager)
     {
         _logger = logger;
         _settings = options.Value;
@@ -64,12 +65,20 @@ public class DataCollectorService : BackgroundService
         _mqttService = mqttService;
         _templateLoader = templateLoader;
         _commandHandler = commandHandler;
+        _schedulerManager = schedulerManager;
 
         // MQTT 명령을 FOCAS 스레드 큐로 전달 (스레드 친화성 보장)
         _mqttService.OnCommandReceived += cmd =>
         {
             bool written = _commandChannel.Writer.TryWrite(cmd);
             _logger.LogInformation("Command queued to FOCAS thread: {Cmd} (written={Written})", cmd.Command, written);
+            return Task.CompletedTask;
+        };
+
+        // 스케줄러 명령을 SchedulerManager에 전달
+        _mqttService.OnSchedulerCommandReceived += cmd =>
+        {
+            _schedulerManager.EnqueueCommand(cmd);
             return Task.CompletedTask;
         };
     }
@@ -206,6 +215,8 @@ public class DataCollectorService : BackgroundService
                 catch (Exception ex) { _logger.LogError(ex, "Error in PMC bits collection"); }
                 try { DetectM20EdgeSync(); }
                 catch (Exception ex) { _logger.LogError(ex, "Error in M20 edge detection"); }
+                try { _schedulerManager.Tick(stoppingToken); }
+                catch (Exception ex) { _logger.LogError(ex, "Error in scheduler tick"); }
             }
 
             // ── 전체 텔레메트리 발행 (1000ms 주기) ──
@@ -304,7 +315,7 @@ public class DataCollectorService : BackgroundService
         int partsCount = 0;
         if (_templateLoader.CurrentTemplate != null)
         {
-            var macroNo = _templateLoader.CurrentTemplate.SchedulerConfig.CountDisplay.MacroNo;
+            var macroNo = _templateLoader.CurrentTemplate.SchedulerConfig.CountDisplay.CountMacroNo;
             partsCount = _dataReader.ReadPartsCount(macroNo) ?? 0;
         }
 
@@ -536,7 +547,10 @@ public class DataCollectorService : BackgroundService
         var schedulerCfg = _templateLoader.CurrentTemplate?.SchedulerConfig;
 
         // ── 메인 M20 엣지 검출 ──
-        var m20Address = _templateLoader.GetPmcAddress("scheduler.m20Complete");
+        // M20 주소는 SchedulerConfig.M20Addr에서 읽음 (하드코딩 금지)
+        var m20AddrStr = schedulerCfg?.M20Addr;
+        var m20Address = PmcAddress.ParseString(m20AddrStr);
+
         if (m20Address != null)
         {
             var pmcData = _dataReader.ReadPmcR(m20Address.Address, 1);
@@ -546,58 +560,33 @@ public class DataCollectorService : BackgroundService
 
                 if (currentM20State && !_lastM20State)
                 {
-                    _logger.LogInformation("M20 edge detected - Main cycle complete");
+                    _logger.LogInformation("M20 edge detected");
 
                     var program = _dataReader.ReadProgramInfo();
-                    int count = 0;
-                    if (schedulerCfg != null)
-                        count = _dataReader.ReadPartsCount(schedulerCfg.CountDisplay.MacroNo) ?? 0;
+                    string? programNo = program != null ? $"O{program.CurrentProgram}" : null;
 
-                    var eventMsg = new EventMessage
+                    // 스케줄러 실행 중이면 SchedulerManager에서 처리 (count authority = Agent)
+                    bool schedulerConsumed = _schedulerManager.OnM20Edge(programNo);
+
+                    if (!schedulerConsumed)
                     {
-                        MachineId = _settings.MachineId,
-                        EventType = "M20_COMPLETE",
-                        ProgramNo = program != null ? $"O{program.CurrentProgram}" : null,
-                        Data = new Dictionary<string, object> { { "count", count } }
-                    };
+                        // 스케줄러 미실행 시 — 원시 M20_COMPLETE 이벤트 발행 (레거시 모니터링용)
+                        int count = schedulerCfg != null
+                            ? (_dataReader.ReadPartsCount(schedulerCfg.CountDisplay.CountMacroNo) ?? 0)
+                            : 0;
 
-                    _mqttService.PublishEventAsync(eventMsg).GetAwaiter().GetResult();
+                        var eventMsg = new EventMessage
+                        {
+                            MachineId = _settings.MachineId,
+                            EventType = "M20_COMPLETE",
+                            ProgramNo = programNo,
+                            Count     = count,
+                        };
+                        _mqttService.PublishEventAsync(eventMsg).GetAwaiter().GetResult();
+                    }
                 }
 
                 _lastM20State = currentM20State;
-            }
-        }
-
-        // ── 서브 M20 엣지 검출 (SB-20R2 서브 스핀들 R6002.5) ──
-        var subM20Address = schedulerCfg?.SubM20Signal;
-        if (subM20Address != null)
-        {
-            var subPmcData = _dataReader.ReadPmcR(subM20Address.Address, 1);
-            if (subPmcData != null && subPmcData.Length > 0)
-            {
-                bool currentSubM20State = (subPmcData[0] & (1 << subM20Address.Bit)) != 0;
-
-                if (currentSubM20State && !_lastSubM20State)
-                {
-                    _logger.LogInformation("M20 edge detected - Sub cycle complete");
-
-                    var program = _dataReader.ReadProgramInfo();
-                    int count = 0;
-                    if (schedulerCfg != null)
-                        count = _dataReader.ReadPartsCount(schedulerCfg.CountDisplay.MacroNo) ?? 0;
-
-                    var eventMsg = new EventMessage
-                    {
-                        MachineId = _settings.MachineId,
-                        EventType = "M20_SUB_COMPLETE",
-                        ProgramNo = program != null ? $"O{program.CurrentProgram}" : null,
-                        Data = new Dictionary<string, object> { { "count", count } }
-                    };
-
-                    _mqttService.PublishEventAsync(eventMsg).GetAwaiter().GetResult();
-                }
-
-                _lastSubM20State = currentSubM20State;
             }
         }
     }

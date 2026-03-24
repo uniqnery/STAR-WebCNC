@@ -76,8 +76,23 @@ export interface CommandResultMessage extends MqttMessage {
 
 export interface EventMessage extends MqttMessage {
   machineId: string;
-  eventType: 'M20_COMPLETE' | 'M20_SUB_COMPLETE' | 'PROGRAM_START' | 'PROGRAM_END';
+  eventType:
+    | 'M20_COMPLETE'
+    | 'M20_SUB_COMPLETE'
+    | 'PROGRAM_START'
+    | 'PROGRAM_END'
+    | 'SCHEDULER_ROW_COMPLETED'
+    | 'SCHEDULER_COMPLETED'
+    | 'SCHEDULER_PAUSED'
+    | 'SCHEDULER_ERROR';
   programNo?: string;
+  /** M20_COMPLETE: Agent-authoritative count value */
+  count?: number;
+  /** row id for row-level events */
+  rowId?: string;
+  /** SCHEDULER_ERROR / SCHEDULER_PAUSED error details */
+  code?: string;
+  message?: string;
   data?: Record<string, unknown>;
 }
 

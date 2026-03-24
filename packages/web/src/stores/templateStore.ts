@@ -109,12 +109,40 @@ export interface VirtualPanel {
 
 // ── Section 8: Scheduler Config ───────────────────────────
 export interface SchedulerConfig {
-  maxQueueSize: number;
-  countSignal: string;
-  countMode: string;
-  oneCycleStopSupported: boolean;
-  oneCycleStopPmcAddress: PmcAddress | null;
-  countDisplay: { macroNo: number };
+  // ── M20 감지 (필수) ──────────────────────────────────────
+  m20Addr: string;                   // PMC bit polling 주소 (예: "R6002.4"). 빈값 = 스케줄러 비활성화
+
+  // ── 카운트 동기화 ────────────────────────────────────────
+  countDisplay: {
+    // count: 현재 생산 수량을 NC에 쓰는 변수
+    countMacroNo: number;          // 카운트 변수 번호
+    countVarType: 'macro' | 'pcode'; // macro: 커스텀 매크로(#xxx), pcode: P코드(Pxxx)
+    // preset: 목표 수량을 NC에서 읽거나 쓰는 변수
+    presetMacroNo: number;         // 프리셋 변수 번호
+    presetVarType: 'macro' | 'pcode';
+  };
+
+  // ── 프로그램 선두 복귀 ───────────────────────────────────
+  resetAddr: string;                 // 2차 fallback RESET 신호 주소. 빈값 = 2차 스킵
+
+  // ── 원사이클 스톱 (출력/상태 분리) ──────────────────────
+  oneCycleStopAddr: string;          // 출력 (쓰기) — ON/OFF 토글 신호
+  oneCycleStopStatusAddr: string;    // 상태 (읽기) — 현재 ON/OFF 확인. 빈값 = 상태 확인 스킵
+
+  // ── HEAD 제어 (출력/상태 분리) ───────────────────────────
+  mainHeadAddr: string;              // MAIN HEAD 출력 (쓰기). 빈값 = 스킵
+  mainHeadStatusAddr: string;        // MAIN HEAD 상태 (읽기)
+  subHeadAddr: string;               // SUB HEAD 출력 (쓰기). 빈값 = 스킵
+  subHeadStatusAddr: string;         // SUB HEAD 상태 (읽기)
+
+  // ── path2 only 확인 메시지 ───────────────────────────────
+  path2OnlyConfirmAddr: string;      // 확인 메시지 PMC 주소. 빈값 = path2 only 전체 스킵
+  path2OnlyConfirmDelayMs: number;   // 감지 후 사이클 스타트까지 대기 (기본 500ms)
+  path2OnlyTimeoutMs: number;        // 확인 메시지 감지 timeout (기본 4000ms)
+  path2OnlyTimeoutAction: 'error' | 'skip'; // timeout 시 동작
+
+  // ── 큐 설정 ─────────────────────────────────────────────
+  maxQueueSize: number;              // 큐 최대 행 수 (기본 15)
 }
 
 // ── Panel Layout (조작반 커스텀 레이아웃) ────────────────
@@ -420,12 +448,20 @@ function createDefaultTemplate(): CncTemplate {
       overrides: { feedRate: null, spindleRate: null },
     },
     schedulerConfig: {
+      m20Addr: '',
+      countDisplay: { countMacroNo: 500, countVarType: 'macro' as const, presetMacroNo: 501, presetVarType: 'macro' as const },
+      resetAddr: '',
+      oneCycleStopAddr: '',
+      oneCycleStopStatusAddr: '',
+      mainHeadAddr: '',
+      mainHeadStatusAddr: '',
+      subHeadAddr: '',
+      subHeadStatusAddr: '',
+      path2OnlyConfirmAddr: '',
+      path2OnlyConfirmDelayMs: 500,
+      path2OnlyTimeoutMs: 4000,
+      path2OnlyTimeoutAction: 'error',
       maxQueueSize: 15,
-      countSignal: '',
-      countMode: '',
-      oneCycleStopSupported: false,
-      oneCycleStopPmcAddress: null,
-      countDisplay: { macroNo: 500 },
     },
     capabilities: {
       monitoring: true,
@@ -562,12 +598,20 @@ const _MOCK_SB20R2_STUB: Partial<CncTemplate> = {
     overrides: { feedRate: null, spindleRate: null },
   },
   schedulerConfig: {
+    m20Addr: 'R6002.4',            // M20 완료 신호 (실기기 확인값)
+    countDisplay: { countMacroNo: 500, countVarType: 'macro' as const, presetMacroNo: 501, presetVarType: 'macro' as const },
+    resetAddr: 'R6103.0',          // RESET 신호 (실기기 확인값)
+    oneCycleStopAddr: '',          // 원사이클 스톱 출력 (미확인)
+    oneCycleStopStatusAddr: '',    // 원사이클 스톱 상태 (미확인)
+    mainHeadAddr: '',              // MAIN HEAD 출력 (미확인)
+    mainHeadStatusAddr: '',        // MAIN HEAD 상태 (미확인)
+    subHeadAddr: '',               // SUB HEAD 출력 (미확인)
+    subHeadStatusAddr: '',         // SUB HEAD 상태 (미확인)
+    path2OnlyConfirmAddr: '',
+    path2OnlyConfirmDelayMs: 500,
+    path2OnlyTimeoutMs: 4000,
+    path2OnlyTimeoutAction: 'error',
     maxQueueSize: 15,
-    countSignal: 'scheduler.m20Complete',
-    countMode: 'M20_EDGE',
-    oneCycleStopSupported: true,
-    oneCycleStopPmcAddress: { type: 'R', address: 6106, bit: 0, dataType: 'bit' },  // ONE CYCLE
-    countDisplay: { macroNo: 500 },
   },
   capabilities: {
     monitoring: true, scheduler: true, fileTransfer: true, alarmHistory: true,

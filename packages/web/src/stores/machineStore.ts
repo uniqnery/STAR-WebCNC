@@ -48,20 +48,31 @@ export interface InterlockStatus {
 
 // FOCAS 이벤트 타입
 export type FocasEventType =
-  | 'PROGRAM_SELECT'      // 프로그램 선택
-  | 'CYCLE_START'         // 사이클 스타트
-  | 'CYCLE_START_ACK'     // 사이클 스타트 실행 확인
-  | 'FEED_HOLD'           // 피드 홀드
-  | 'RESET'               // 리셋
-  | 'ALARM_CLEAR'         // 알람 해제
-  | 'MODE_CHANGE'         // 모드 변경
-  | 'M20_COMPLETE'        // M20 카운트 완료
-  | 'OVERRIDE_CHANGE'     // 오버라이드 변경
-  | 'CONTROL_LOCK'        // 제어권 획득
-  | 'CONTROL_UNLOCK'      // 제어권 해제
-  | 'INTERLOCK_CHANGE'    // 인터록 상태 변경
-  | 'COMMAND_SENT'        // 명령 전송
-  | 'COMMAND_ACK';        // 명령 응답
+  | 'PROGRAM_SELECT'         // 프로그램 선택
+  | 'CYCLE_START'            // 사이클 스타트
+  | 'CYCLE_START_ACK'        // 사이클 스타트 실행 확인
+  | 'FEED_HOLD'              // 피드 홀드
+  | 'RESET'                  // 리셋
+  | 'ALARM_CLEAR'            // 알람 해제
+  | 'MODE_CHANGE'            // 모드 변경
+  | 'M20_COMPLETE'           // M20 카운트 완료
+  | 'OVERRIDE_CHANGE'        // 오버라이드 변경
+  | 'CONTROL_LOCK'           // 제어권 획득
+  | 'CONTROL_UNLOCK'         // 제어권 해제
+  | 'INTERLOCK_CHANGE'       // 인터록 상태 변경
+  | 'COMMAND_SENT'           // 명령 전송
+  | 'COMMAND_ACK'            // 명령 응답
+  | 'COMMAND_RESULT'         // 명령 결과
+  | 'SCHEDULER_STARTED'      // 스케줄러 시작
+  | 'SCHEDULER_STOPPED'      // 스케줄러 정지
+  | 'SCHEDULER_COMPLETED'    // 스케줄러 전체 완료
+  | 'SCHEDULER_ROW_COMPLETED'// 행 완료
+  | 'SCHEDULER_PAUSED'       // 스케줄러 일시정지
+  | 'SCHEDULER_ERROR'        // 스케줄러 오류
+  | 'INTERLOCK_FAIL'         // 인터락 불만족
+  | 'ONE_CYCLE_STOP_ON'      // 원사이클 스톱 ON
+  | 'ONE_CYCLE_STOP_OFF'     // 원사이클 스톱 OFF
+  | 'HEAD_ON';               // 헤드 ON
 
 // FOCAS 이벤트 로그
 export interface FocasEvent {
@@ -69,6 +80,7 @@ export interface FocasEvent {
   machineId: string;
   type: FocasEventType;
   message: string;
+  level?: 'error' | 'warn' | 'info';
   details?: Record<string, unknown>;
   timestamp: string;
 }
@@ -190,21 +202,44 @@ export interface DncPathConfig {
 // 장비별 DNC 설정
 export interface MachineDncConfig {
   machineId: string;
-  pathCount: number;       // 2 또는 3
+  pathCount: number;               // 2 또는 3
+  mainMode: 'memory' | 'dnc';     // Path1(메인) 실행 모드
+  subMode:  'memory' | 'dnc';     // Path2(서브) 실행 모드
   dncPaths: DncPathConfig;
+  // 행 추가 기본값 (localStorage only — 서버 미전송)
+  defaultMainPgm?: string;         // 기본 메인 프로그램 번호 (예: "O0001")
+  defaultSubPgm?: string;          // 기본 서브 프로그램 번호 (미설정 시 비어있음)
+  defaultPreset?: number;          // 기본 프리셋 수량
   updatedAt?: string;
   updatedBy?: string;
 }
 
-// 스케줄러 작업
-export interface SchedulerJob {
+// Scheduler 행 (SchedulerRow — Agent count authority)
+export interface SchedulerRow {
   id: string;
   machineId: string;
+  order: number;
   mainProgramNo: string;
-  subProgramNo: string;
+  subProgramNo?: string;
   preset: number;
-  count: number;
-  status: 'PENDING' | 'RUNNING' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
+  count: number;          // Agent authority — Server가 보고값으로 갱신
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED';
+  lastError?: string;
+  lastErrorCode?: string;
+  lastErrorAt?: string;
+  createdBy?: string;
+  startedAt?: string;
+  completedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type SchedulerState = 'IDLE' | 'RUNNING' | 'PAUSED' | 'ERROR';
+
+export interface SchedulerErrorPayload {
+  rowId?: string;
+  code: string;
+  message: string;
 }
 
 export interface Machine {
@@ -256,7 +291,9 @@ interface MachineState {
   telemetryMap: Record<string, TelemetryData>;
   activeAlarms: Record<string, Alarm[]>;
   focasEvents: Record<string, FocasEvent[]>;  // FOCAS 이벤트 로그
-  schedulerJobs: Record<string, SchedulerJob[]>;  // 스케줄러 작업 목록 (페이지 이동 시 유지)
+  schedulerRows: Record<string, SchedulerRow[]>;      // 스케줄러 큐 (장비별)
+  schedulerState: Record<string, SchedulerState>;     // 장비별 Scheduler 상태 머신
+  schedulerError: Record<string, SchedulerErrorPayload | null>;  // 최근 에러
   dncConfigs: Record<string, MachineDncConfig>;   // 장비별 DNC 경로 설정
   controlLockMap: Record<string, ControlLockEntry>;  // 장비별 제어권 상태
   controlLockDurationMin: number;  // 제어권 타이머 (분)
@@ -274,8 +311,11 @@ interface MachineState {
   clearAlarm: (machineId: string, alarmNo: number) => void;
   addFocasEvent: (machineId: string, event: FocasEvent) => void;
   clearFocasEvents: (machineId: string) => void;
-  setSchedulerJobs: (machineId: string, jobs: SchedulerJob[]) => void;
-  clearSchedulerJobs: (machineId: string) => void;
+  setSchedulerRows: (machineId: string, rows: SchedulerRow[]) => void;
+  setSchedulerState: (machineId: string, state: SchedulerState) => void;
+  updateSchedulerCount: (machineId: string, rowId: string, count: number) => void;
+  setSchedulerError: (machineId: string, err: SchedulerErrorPayload | null) => void;
+  clearSchedulerError: (machineId: string) => void;
   setDncConfig: (machineId: string, config: MachineDncConfig) => void;
   acquireControlLock: (machineId: string, username: string) => void;
   releaseControlLock: (machineId: string) => void;
@@ -299,21 +339,21 @@ interface MachineState {
 
 
 // localStorage 헬퍼
-const SCHEDULER_STORAGE_KEY = 'star-webcnc-scheduler-jobs';
+const SCHEDULER_ROWS_STORAGE_KEY = 'star-webcnc-scheduler-rows';
 const DNC_CONFIG_STORAGE_KEY = 'star-webcnc-dnc-config';
 
-function loadSchedulerJobs(): Record<string, SchedulerJob[]> {
+function loadSchedulerRows(): Record<string, SchedulerRow[]> {
   try {
-    const raw = localStorage.getItem(SCHEDULER_STORAGE_KEY);
+    const raw = localStorage.getItem(SCHEDULER_ROWS_STORAGE_KEY);
     return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
   }
 }
 
-function saveSchedulerJobs(jobs: Record<string, SchedulerJob[]>) {
+function saveSchedulerRows(rows: Record<string, SchedulerRow[]>) {
   try {
-    localStorage.setItem(SCHEDULER_STORAGE_KEY, JSON.stringify(jobs));
+    localStorage.setItem(SCHEDULER_ROWS_STORAGE_KEY, JSON.stringify(rows));
   } catch {
     // localStorage full or unavailable
   }
@@ -322,7 +362,16 @@ function saveSchedulerJobs(jobs: Record<string, SchedulerJob[]>) {
 function loadDncConfigs(): Record<string, MachineDncConfig> {
   try {
     const raw = localStorage.getItem(DNC_CONFIG_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, MachineDncConfig>;
+    // 기본값 보장 + 구버전 캐시 하위호환 (executionMode → mainMode/subMode)
+    for (const key of Object.keys(parsed)) {
+      const c = parsed[key] as MachineDncConfig & { executionMode?: string };
+      if (!c.mainMode) c.mainMode = (c.executionMode as 'memory' | 'dnc') ?? 'memory';
+      if (!c.subMode)  c.subMode  = 'memory';
+      delete c.executionMode;
+    }
+    return parsed;
   } catch {
     return {};
   }
@@ -385,7 +434,9 @@ export const useMachineStore = create<MachineState>((set, get) => ({
   telemetryMap: {},
   activeAlarms: {},
   focasEvents: {},
-  schedulerJobs: loadSchedulerJobs(),
+  schedulerRows: loadSchedulerRows(),
+  schedulerState: {},
+  schedulerError: {},
   dncConfigs: loadDncConfigs(),
   controlLockMap: {},
   controlLockDurationMin: loadControlLockDuration(),
@@ -502,19 +553,31 @@ export const useMachineStore = create<MachineState>((set, get) => ({
       },
     })),
 
-  setSchedulerJobs: (machineId, jobs) =>
+  setSchedulerRows: (machineId, rows) =>
     set((state) => {
-      const updated = { ...state.schedulerJobs, [machineId]: jobs };
-      saveSchedulerJobs(updated);
-      return { schedulerJobs: updated };
+      const updated = { ...state.schedulerRows, [machineId]: rows };
+      saveSchedulerRows(updated);
+      return { schedulerRows: updated };
     }),
 
-  clearSchedulerJobs: (machineId) =>
+  setSchedulerState: (machineId, state) =>
+    set((s) => ({ schedulerState: { ...s.schedulerState, [machineId]: state } })),
+
+  updateSchedulerCount: (machineId, rowId, count) =>
     set((state) => {
-      const updated = { ...state.schedulerJobs, [machineId]: [] };
-      saveSchedulerJobs(updated);
-      return { schedulerJobs: updated };
+      const rows = state.schedulerRows[machineId];
+      if (!rows) return state;
+      const updated = rows.map((r) => r.id === rowId ? { ...r, count } : r);
+      const updatedMap = { ...state.schedulerRows, [machineId]: updated };
+      saveSchedulerRows(updatedMap);
+      return { schedulerRows: updatedMap };
     }),
+
+  setSchedulerError: (machineId, err) =>
+    set((state) => ({ schedulerError: { ...state.schedulerError, [machineId]: err } })),
+
+  clearSchedulerError: (machineId) =>
+    set((state) => ({ schedulerError: { ...state.schedulerError, [machineId]: null } })),
 
   setDncConfig: (machineId, config) =>
     set((state) => {
@@ -647,7 +710,7 @@ export const useMachineStore = create<MachineState>((set, get) => ({
               // Estimate expiry: acquiredAt + lock duration (server resets TTL on each extend)
               const acquiredMs = new Date(lock.acquiredAt).getTime();
               controlLockMap[m.machineId] = {
-                isOwner: lock.ownerId === currentUserId,
+                isOwner: String(lock.ownerId) === String(currentUserId),
                 ownerUsername: lock.ownerUsername,
                 expiresAt: acquiredMs + controlLockDurationMin * 60 * 1000,
               };
@@ -744,11 +807,15 @@ export const useMachineStore = create<MachineState>((set, get) => ({
           case 'event': {
             const p = msg.payload as { machineId: string; eventType: string } & Record<string, unknown>;
             if (!p?.machineId) break;
+            const evtType = (p.eventType ?? '') as string;
+            const evtMsg = formatSchedulerEventMessage(evtType, p);
+            const evtLevel = getSchedulerEventLevel(evtType);
             store.addFocasEvent(p.machineId, {
               id: `evt-ws-${Date.now()}`,
               machineId: p.machineId,
-              type: p.eventType as FocasEventType,
-              message: `${p.eventType} 이벤트`,
+              type: evtType as FocasEventType,
+              message: evtMsg,
+              level: evtLevel,
               details: p,
               timestamp: msg.timestamp,
             });
@@ -787,6 +854,56 @@ export const useMachineStore = create<MachineState>((set, get) => ({
                   return jBase === eBase ? { ...j, status: 'ERROR' as const, error: errMsg } : j;
                 }),
               }));
+            }
+            break;
+          }
+          case 'scheduler_update': {
+            const p = msg.payload as { machineId: string; rows: SchedulerRow[] };
+            if (p?.machineId) store.setSchedulerRows(p.machineId, p.rows ?? []);
+            break;
+          }
+          case 'scheduler_count': {
+            const p = msg.payload as { machineId: string; rowId: string; count: number };
+            if (p?.machineId && p?.rowId && p?.count !== undefined) {
+              store.updateSchedulerCount(p.machineId, p.rowId, p.count);
+            }
+            break;
+          }
+          case 'scheduler_state': {
+            const p = msg.payload as { machineId: string; state: SchedulerState };
+            if (p?.machineId && p?.state) {
+              store.setSchedulerState(p.machineId, p.state);
+              const stateMsg: Record<string, string> = {
+                RUNNING: '스케줄러 실행 중',
+                IDLE: '스케줄러 정지',
+                PAUSED: '스케줄러 일시정지',
+                ERROR: '스케줄러 오류 상태',
+              };
+              store.addFocasEvent(p.machineId, {
+                id: `sched-state-${Date.now()}`,
+                machineId: p.machineId,
+                type: p.state === 'RUNNING' ? 'SCHEDULER_STARTED' : p.state === 'PAUSED' ? 'SCHEDULER_PAUSED' : 'SCHEDULER_STOPPED',
+                message: stateMsg[p.state] ?? `스케줄러 상태: ${p.state}`,
+                level: p.state === 'ERROR' ? 'error' : p.state === 'PAUSED' ? 'warn' : 'info',
+                timestamp: msg.timestamp,
+              });
+            }
+            break;
+          }
+          case 'scheduler_error': {
+            const p = msg.payload as { machineId: string; rowId?: string; code: string; message: string };
+            if (p?.machineId) {
+              store.setSchedulerError(p.machineId, { rowId: p.rowId, code: p.code, message: p.message });
+              // 이벤트 로그에도 추가 (에러/경고 색상)
+              const isWarning = ['HEAD_TIMEOUT', 'ONE_CYCLE_STOP_TIMEOUT', 'COUNT_EXCEEDS_PRESET', 'INTERLOCK_FAIL'].includes(p.code);
+              store.addFocasEvent(p.machineId, {
+                id: `sched-err-${Date.now()}`,
+                machineId: p.machineId,
+                type: isWarning ? 'SCHEDULER_PAUSED' : 'SCHEDULER_ERROR',
+                message: `[${p.code}] ${p.message}`,
+                level: isWarning ? 'warn' : 'error',
+                timestamp: msg.timestamp,
+              });
             }
             break;
           }
@@ -845,8 +962,16 @@ export const useFocasEvents = (machineId: string) => {
   return useMachineStore((state) => state.focasEvents[machineId] || []);
 };
 
-export const useSchedulerJobs = (machineId: string) => {
-  return useMachineStore((state) => state.schedulerJobs[machineId] || []);
+export const useSchedulerRows = (machineId: string) => {
+  return useMachineStore((state) => state.schedulerRows[machineId] || []);
+};
+
+export const useSchedulerState = (machineId: string): SchedulerState => {
+  return useMachineStore((state) => state.schedulerState[machineId] ?? 'IDLE');
+};
+
+export const useSchedulerError = (machineId: string) => {
+  return useMachineStore((state) => state.schedulerError[machineId] ?? null);
 };
 
 export const useDncConfig = (machineId: string) => {
@@ -860,3 +985,31 @@ export const useControlLock = (machineId: string) => {
 export const useControlLockDuration = () => {
   return useMachineStore((state) => state.controlLockDurationMin);
 };
+
+// ── 스케줄러 이벤트 메시지 포맷 헬퍼 ───────────────────────────────────────────
+
+export function formatSchedulerEventMessage(eventType: string, p: Record<string, unknown>): string {
+  switch (eventType) {
+    case 'M20_COMPLETE':
+      return `M20 완료 — ${p.programNo ?? ''} COUNT: ${p.count ?? ''}`;
+    case 'SCHEDULER_STARTED':  return '스케줄러 시작';
+    case 'SCHEDULER_STOPPED':  return '스케줄러 정지';
+    case 'SCHEDULER_COMPLETED': return '스케줄러 전체 완료';
+    case 'SCHEDULER_ROW_COMPLETED': return `행 완료 (rowId: ${(p.rowId as string)?.slice(0, 8) ?? ''})`;
+    case 'SCHEDULER_PAUSED':
+      return p.code ? `일시정지 [${p.code}]: ${p.message ?? ''}` : '스케줄러 일시정지';
+    case 'SCHEDULER_ERROR':
+      return `오류 [${p.code ?? ''}]: ${p.message ?? ''}`;
+    case 'INTERLOCK_FAIL':    return '인터락 불만족 — 원사이클 스톱 ON';
+    case 'ONE_CYCLE_STOP_ON': return '원사이클 스톱 ON';
+    case 'ONE_CYCLE_STOP_OFF': return '원사이클 스톱 OFF';
+    case 'HEAD_ON':           return `헤드 ON (${p.label ?? ''})`;
+    default:                  return `${eventType}${p.message ? ` — ${p.message}` : ''}`;
+  }
+}
+
+export function getSchedulerEventLevel(eventType: string): 'error' | 'warn' | 'info' {
+  if (['SCHEDULER_ERROR', 'INTERLOCK_FAIL'].includes(eventType)) return 'error';
+  if (['SCHEDULER_PAUSED', 'ONE_CYCLE_STOP_ON'].includes(eventType)) return 'warn';
+  return 'info';
+}

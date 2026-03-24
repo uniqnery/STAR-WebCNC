@@ -42,6 +42,7 @@ router.get('/', asyncHandler(async (
       counterConfig: true,
       toolLifeConfig: true,
       schedulerConfig: true,
+      pmcMessages: true,
       capabilities: true,
       isActive: true,
       createdAt: true,
@@ -131,6 +132,7 @@ router.post('/',
         panelLayout:           (body.panelLayout ?? []) as Prisma.InputJsonValue,
         topBarInterlock:       (body.topBarInterlock ?? {}) as Prisma.InputJsonValue,
         schedulerConfig:       (body.schedulerConfig ?? {}) as Prisma.InputJsonValue,
+        pmcMessages:           (body.pmcMessages ?? []) as Prisma.InputJsonValue,
         capabilities:          (body.capabilities ?? {}) as Prisma.InputJsonValue,
         createdBy:             req.user?.username || '',
       },
@@ -179,6 +181,10 @@ router.put('/:id',
       panelLayout?: unknown[];
       topBarInterlock?: object;
       schedulerConfig?: object;
+      offsetConfig?: object;
+      counterConfig?: object;
+      toolLifeConfig?: object;
+      pmcMessages?: unknown[];
       capabilities?: object;
     };
 
@@ -186,7 +192,9 @@ router.put('/:id',
     const jsonFields = [
       'systemInfo', 'axisConfig', 'pmcMap', 'interlockConfig',
       'interlockModules', 'remoteControlInterlock', 'virtualPanel',
-      'panelLayout', 'topBarInterlock', 'schedulerConfig', 'capabilities',
+      'panelLayout', 'topBarInterlock', 'schedulerConfig',
+      'offsetConfig', 'counterConfig', 'toolLifeConfig',
+      'pmcMessages', 'capabilities',
     ] as const;
     const strFields = ['version', 'name', 'description', 'cncType', 'seriesName'] as const;
 

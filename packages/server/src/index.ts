@@ -10,7 +10,14 @@ import { config } from './config';
 import authRoutes from './routes/auth';
 import machineRoutes from './routes/machines';
 import commandRoutes from './routes/commands';
-import schedulerRoutes, { handleM20Event } from './routes/scheduler';
+import schedulerRoutes, {
+  handleSchedulerM20,
+  handleSchedulerRowCompleted,
+  handleSchedulerCompleted,
+  handleSchedulerPaused,
+  handleSchedulerError,
+  handleSchedulerControlDenied,
+} from './routes/scheduler';
 import alarmRoutes, { storeAlarm } from './routes/alarms';
 import transferRoutes from './routes/transfer';
 import backupRoutes from './routes/backup';
@@ -258,36 +265,49 @@ function setupMqttHandlers(): void {
     });
   });
 
-  // Handle M20 events from agents
+  // Handle events from agents (M20, Scheduler state changes)
   mqttService.on<EventMessage>(TOPICS.AGENT_EVENT, async (_topic, message) => {
-    if (message.eventType === 'M20_COMPLETE') {
-      const { machineId, programNo, data } = message;
+    const { machineId, eventType, programNo, count, rowId, code, message: errMsg } = message;
 
-      // Forward to WebSocket clients
-      wsService.sendM20Event(machineId, {
-        programNo: programNo || '',
-        count: (data?.count as number) || 0,
-      });
+    switch (eventType) {
+      case 'M20_COMPLETE':
+        // WS 브로드캐스트 (레거시 M20 이벤트)
+        wsService.sendM20Event(machineId, { programNo: programNo || '', count: count ?? 0 });
+        // Scheduler count 동기화 (Agent authority)
+        if (rowId && count !== undefined) {
+          await handleSchedulerM20(machineId, rowId, count);
+        }
+        await redisService.publish(REDIS_KEYS.CHANNEL_EVENT, message);
+        break;
 
-      // Handle scheduler job count update
-      await handleM20Event(machineId, programNo || '');
+      case 'M20_SUB_COMPLETE':
+        wsService.broadcastToMachine(machineId, {
+          type: 'M20_SUB_COMPLETE',
+          timestamp: new Date().toISOString(),
+          payload: { machineId, programNo: programNo || '', count: count ?? 0 },
+        });
+        await redisService.publish(REDIS_KEYS.CHANNEL_EVENT, message);
+        break;
 
-      // Publish to Redis for scheduler processing
-      await redisService.publish(REDIS_KEYS.CHANNEL_EVENT, message);
-    }
+      case 'SCHEDULER_ROW_COMPLETED':
+        if (rowId) await handleSchedulerRowCompleted(machineId, rowId);
+        break;
 
-    if (message.eventType === 'M20_SUB_COMPLETE') {
-      const { machineId, programNo, data } = message;
+      case 'SCHEDULER_COMPLETED':
+        await handleSchedulerCompleted(machineId);
+        break;
 
-      // Forward to WebSocket so frontend can track sub-spindle completion
-      wsService.broadcastToMachine(machineId, {
-        type: 'M20_SUB_COMPLETE',
-        timestamp: new Date().toISOString(),
-        payload: { machineId, programNo: programNo || '', count: (data?.count as number) || 0 },
-      });
+      case 'SCHEDULER_PAUSED':
+        await handleSchedulerPaused(machineId, rowId, code, errMsg);
+        break;
 
-      // Publish to Redis (scheduler may use this for last-piece sub-spindle sequence)
-      await redisService.publish(REDIS_KEYS.CHANNEL_EVENT, message);
+      case 'SCHEDULER_ERROR':
+        await handleSchedulerError(machineId, code ?? 'UNKNOWN', errMsg ?? 'Unknown error', rowId);
+        break;
+
+      case 'SCHEDULER_CONTROL_DENIED':
+        await handleSchedulerControlDenied(machineId, code ?? 'CONTROL_DENIED', errMsg ?? '');
+        break;
     }
   });
 

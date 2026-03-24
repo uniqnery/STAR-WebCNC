@@ -18,6 +18,7 @@ import { TemplateEditor } from './pages/TemplateEditor';
 import { PanelEditor } from './pages/PanelEditor';
 import { MachineAdmin } from './pages/MachineAdmin';
 import { InterlockEditor } from './pages/InterlockEditor';
+import { SchedulerConfig } from './pages/SchedulerConfig';
 
 // ── Copy Button ───────────────────────────────────────────
 function CopyButton({ text }: { text: string }) {
@@ -312,6 +313,15 @@ function App() {
         element={
           <ProtectedRoute>
             <InterlockEditor />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/admin/scheduler-config"
+        element={
+          <ProtectedRoute>
+            <SchedulerConfig />
           </ProtectedRoute>
         }
       />
