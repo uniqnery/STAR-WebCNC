@@ -3,11 +3,19 @@
 //
 // 서버 시작 시: 파일 → DB upsert (파일이 원본)
 // 웹 저장 시:   DB → 파일 덮어쓰기 (양방향 유지)
+//
+// 새 필드 추가 체크리스트:
+//   1. templates/*.json
+//   2. types/template.ts (TemplateDefinition + REQUIRED_TEMPLATE_FIELDS)
+//   3. prisma/schema.prisma + migrate dev + generate
+//   4. routes/templates.ts (GET select, PUT jsonFields)
+//   5. Agent TemplateModel.cs
 
 import { promises as fs } from 'fs';
 import path from 'path';
 import { prisma } from './prisma';
 import { Prisma } from '@prisma/client';
+import { validateTemplateFields } from '../types/template';
 
 const TEMPLATES_DIR = path.resolve(process.cwd(), '../../templates');
 
@@ -38,6 +46,7 @@ type TemplateFileData = {
   toolLifeConfig: unknown;
   schedulerConfig: unknown;
   capabilities: unknown;
+  extraPmcAddrs?: unknown;
 };
 
 /**
@@ -58,6 +67,7 @@ export async function syncTemplatesFromFiles(): Promise<void> {
     }
 
     let synced = 0;
+    let failed = 0;
     for (const file of jsonFiles) {
       try {
         const content = await fs.readFile(path.join(TEMPLATES_DIR, file), 'utf-8');
@@ -67,6 +77,9 @@ export async function syncTemplatesFromFiles(): Promise<void> {
           console.warn(`[TemplateSync] Skipping ${file}: missing templateId`);
           continue;
         }
+
+        // 필수 필드 + extraPmcAddrs 형식 검증
+        validateTemplateFields(data as Record<string, unknown>, file);
 
         await prisma.template.upsert({
           where: { templateId: data.templateId },
@@ -90,6 +103,7 @@ export async function syncTemplatesFromFiles(): Promise<void> {
             toolLifeConfig:        (data.toolLifeConfig ?? Prisma.JsonNull) as Prisma.InputJsonValue,
             schedulerConfig:       (data.schedulerConfig ?? {}) as Prisma.InputJsonValue,
             capabilities:          (data.capabilities ?? {}) as Prisma.InputJsonValue,
+            extraPmcAddrs:         (data.extraPmcAddrs ?? []) as Prisma.InputJsonValue,
             isActive:              true,
           },
           create: {
@@ -113,6 +127,7 @@ export async function syncTemplatesFromFiles(): Promise<void> {
             toolLifeConfig:        (data.toolLifeConfig ?? Prisma.JsonNull) as Prisma.InputJsonValue,
             schedulerConfig:       (data.schedulerConfig ?? {}) as Prisma.InputJsonValue,
             capabilities:          (data.capabilities ?? {}) as Prisma.InputJsonValue,
+            extraPmcAddrs:         (data.extraPmcAddrs ?? []) as Prisma.InputJsonValue,
             isActive:              true,
             createdBy:             'file-sync',
           },
@@ -120,11 +135,12 @@ export async function syncTemplatesFromFiles(): Promise<void> {
         synced++;
         console.log(`[TemplateSync] Synced: ${data.templateId}`);
       } catch (err) {
+        failed++;
         console.error(`[TemplateSync] Failed to sync ${file}:`, err);
       }
     }
 
-    console.log(`[TemplateSync] ${synced}/${jsonFiles.length} templates synced from files`);
+    console.log(`[TemplateSync] ${synced}/${jsonFiles.length} templates synced from files${failed > 0 ? ` (${failed} failed)` : ''}`);
   } catch (err) {
     console.error('[TemplateSync] Sync failed:', err);
   }
@@ -162,6 +178,7 @@ export async function exportTemplateToFile(template: Record<string, unknown>): P
       toolLifeConfig:         template.toolLifeConfig,
       schedulerConfig:        template.schedulerConfig,
       capabilities:           template.capabilities,
+      extraPmcAddrs:          template.extraPmcAddrs,
     };
 
     const filePath = path.join(TEMPLATES_DIR, safeFilename(templateId));

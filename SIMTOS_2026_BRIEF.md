@@ -1,7 +1,8 @@
 # 2026 SIMTOS 전시 메뉴 — 개발 브리핑
 
-> 작성일: 2026-03-24
+> 최초 작성: 2026-03-24 / 최종 수정: 2026-04-04
 > 성격: 2026 SIMTOS 전시 전용 1회성 메뉴 (범용 설정 불필요, 고정 사양 기반)
+> 구현 상태: **완료** (git 커밋 완료, 커밋 해시: 별도 기록)
 
 ---
 
@@ -11,7 +12,7 @@
 |------|------|
 | 라우트 | `/simtos` |
 | 파일 | `packages/web/src/pages/Simtos.tsx` |
-| 사이드바 | Machines 하위 메뉴에 "SIMTOS 2026" 추가 |
+| 사이드바 | Layout.tsx에 "SIMTOS 2026" 메뉴 추가됨 |
 | 접근 권한 | 로그인 사용자 누구나 열람, **ADMIN/HQ_ENGINEER만 실행** |
 | 실행 조건 | 인터록 전항목 만족 + 제어권(ControlLock) 보유 |
 
@@ -21,45 +22,64 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  [배너] 2026 SIMTOS — Star CNC Demo         [제어권 버튼]   │
-│  안내 문구 + 인터록 상태 줄 (4항목)                          │
+│  MachineTopBar (lockDisabled=!interlockSatisfied)           │
+│  rightSlot: 인터록 pills 4개 + 실행가능/조건미충족 배지       │
 ├─────────────────────────────────────────────────────────────┤
-│                                                             │
 │   [O3001]      [O3002]      [O3003]                        │
 │   제품카드      제품카드      제품카드                        │
-│                                                             │
 │       [O3004]          [O3005]                             │
 │       제품카드          제품카드                             │
-│                                                             │
 ├─────────────────────────────────────────────────────────────┤
-│  실행 로그 (5줄 고정 + 스크롤)                               │
+│  실행 로그 (최대 50줄, auto-scroll)                          │
 └─────────────────────────────────────────────────────────────┘
 ```
 
+> **MachineTopBar 실제 사용 중** — 별도 배너로 대체하지 않고 표준 TopBar에 `rightSlot`으로 SIMTOS 전용 인터록 pills 삽입.
+
 ---
 
-## 3. 인터록 항목 (하드코딩)
+## 3. 인터록 항목 (PMC 직접 참조 — 하드코딩)
 
-| 항목명 | 신호 소스 | 판정 기준 | 정상 조건 |
-|--------|-----------|-----------|-----------|
-| MEM 모드 | `telemetry.mode` | `=== 'MEM'` | 초록 (MEM 모드 진입 상태) |
-| 절단 정지 | `telemetry.runState` | `=== 0` | 초록 (사이클 미실행 상태) |
-| HEAD1 | PMC `R6004.0` | `=== 1` | 초록 (HEAD1 ON) |
-| HEAD2 | PMC `R6004.1` | `=== 1` | 초록 (HEAD2 ON) |
+### 3-1. 확정된 인터록 조건
 
-> **보완 필요**: "DNC 모드 설정" 항목의 의도 확인 필요.
-> 현재 해석: 메모리 모드 실행이므로 MEM 모드 여부를 확인하는 것으로 가정.
-> → 전시 현장에서 DNC 모드 별도 설정 항목이 필요하면 추가 논의.
+| 항목명 | PMC 주소 | 판정 기준 | 정상 조건 |
+|--------|----------|-----------|-----------|
+| 메모리 모드 | `R6037.0` | `=== 1` | 초록 |
+| 운전 대기중 | `R6024.0` | `=== 0` | 초록 (비가동) |
+| 도어 닫힘 | `R6011.0` | `=== 1` | 초록 |
+| PATH ALL | `R6035.0` | `=== 1` | 초록 |
 
-`interlockSatisfied = mode === 'MEM' && runState === 0 && head1 === 1 && head2 === 1`
+```typescript
+const interlockMem     = pmcBits['R6037.0'] === 1;
+const interlockStop    = pmcBits['R6024.0'] === 0;
+const interlockDoor    = pmcBits['R6011.0'] === 1;
+const interlockPathAll = pmcBits['R6035.0'] === 1;
+const interlockSatisfied = interlockMem && interlockStop && interlockDoor && interlockPathAll;
+```
+
+### 3-2. 인터록 설계 정책 (확정)
+
+- **모든 인터록 판단은 PMC 직접 참조만 사용**
+- `telemetry.mode`, `telemetry.runState` 기반 인터록 설계는 완전 폐기
+- 향후 SIMTOS 인터록 추가 시에도 PMC R6xxx 주소 기준만 허용
+- R6035.0은 `extraPmcAddrs` 파이프라인을 통해 pmc_bits로 수신
+
+### 3-3. extraPmcAddrs 연동
+
+R6035.0은 topBarInterlock과 무관한 주소이므로 템플릿 JSON의 `extraPmcAddrs` 배열에 등록:
+
+```json
+"extraPmcAddrs": ["R6035.0"]
+```
+
+에이전트가 pmc_bits 발행 시 이 주소를 포함하여 100ms마다 읽음.
 
 ---
 
 ## 4. 제어권 UI
 
-- `ControlLockButton` 컴포넌트(기존) 재사용
-- 우상단 배너 영역에 배치
-- 제어권 없으면 제품 카드 longpress 비활성화
+- `MachineTopBar`의 `lockDisabled={!interlockSatisfied}` 로 인터록 미충족 시 제어권 버튼 비활성화
+- 제어권 없으면 제품 카드 롱프레스 비활성화 (`canOperate = controlLock.isOwner && isAdmin`)
 
 ---
 
@@ -67,72 +87,43 @@
 
 | No | 프로그램 (Path1) | Path2 | 카드 레이아웃 |
 |----|-----------------|-------|--------------|
-| 1 | O3001 | O1111 | 상단 좌 |
-| 2 | O3002 | O1111 | 상단 중 |
-| 3 | O3003 | O1111 | 상단 우 |
-| 4 | O3004 | O1111 | 하단 좌 |
-| 5 | O3005 | O1111 | 하단 우 |
+| 1 | O3001 (path1=3001) | O1111 | 상단 좌 |
+| 2 | O3002 (path1=3002) | O1111 | 상단 중 |
+| 3 | O3003 (path1=3003) | O1111 | 상단 우 |
+| 4 | O3004 (path1=3004) | O1111 | 하단 좌 |
+| 5 | O3005 (path1=3005) | O1111 | 하단 우 |
 
-- Path2는 **O1111 고정**
-- 실행 모드: **Memory 모드** (`cnc_search` + `cnc_rewind`)
-- 레이아웃: 3+2 (상단 3개 / 하단 2개 중앙 정렬), 카드가 화면을 거의 채우는 크기
-
-### 카드 상태 표시 (runState + programNo 기반)
-
-| 조건 | 카드 표시 |
-|------|----------|
-| `programNo === 'O3001'` && `runState >= 2` | 이미지 순환 애니메이션 (0.5초 간격) |
-| 그 외 (정지 중 / 다른 프로그램) | 기본 대표 이미지 고정 |
+- Path2는 **O1111 고정** (`PATH2_PROGRAM = 1111`)
+- 실행 모드: **Memory 모드** (`SEARCH_PROGRAM` 명령)
+- 레이아웃: 3+2 (상단 3개 / 하단 2개 중앙 정렬)
+- 이미지: `/simtos/{programNo}/main.jpg` (정지) / `/simtos/{programNo}/running.gif` (가동)
 
 ---
 
 ## 6. 롱프레스 → 실행 시퀀스
 
-### 6-1. 롱프레스 (1500ms)
-- 기존 `useLongPress` 훅 재사용
-- `disabled`: `!canOperate || !interlockSatisfied || isExecuting`
-- 원형 프로그레스 오버레이 (RemoteControl과 동일 스타일)
-- 중간에 손 떼면 취소
+### 6-1. 롱프레스
+- `useLongPress` 훅 사용, `LONG_PRESS_MS = 1500ms`
+- 비활성 조건: `!canOperate || !interlockSatisfied || isExecuting`
 
 ### 6-2. 확인 팝업
-```
-"O3001 프로그램을 실행하시겠습니까?"
-[확인]  [취소]
-```
-- 팝업 중 다른 카드 롱프레스 차단 (`isExecuting` 플래그)
+- "O3001 프로그램을 실행하시겠습니까?" → [확인] [취소]
 
-### 6-3. 실행 시퀀스 (확인 후)
+### 6-3. 실행 시퀀스
 
 ```
-STEP 1. SEARCH_PROGRAM (Path1)
-  commandApi.send(machineId, 'SEARCH_PROGRAM', { programNo: 3001, path: 1 })
-
-STEP 2. SEARCH_PROGRAM (Path2)
-  commandApi.send(machineId, 'SEARCH_PROGRAM', { programNo: 1111, path: 2 })
-
-STEP 3. REWIND (Path1 선두 복귀)
-  commandApi.send(machineId, 'PMC_WRITE', { address: 'R6103.0', value: 1, holdMs: 300 })
-  → 500ms 대기
-
-STEP 4. PATH2 REWIND
-  commandApi.send(machineId, 'REWIND_PROGRAM', { path: 2 })
-
-STEP 5. CYCLE_START 루프 (최대 5회, 2초 간격)
-  for attempt 1~5:
-    commandApi.send(machineId, 'PMC_WRITE', { address: 'R6105.4', value: 1, holdMs: 200 })
-    2초 대기
-    if runState >= 2 → 가동 확인, 루프 종료
-    else → 재시도 (OCS ON으로 첫 M20 정지 후 재스타트 대비)
+STEP 1. SEARCH_PROGRAM path=1  (programNo: 3001)
+STEP 2. SEARCH_PROGRAM path=2  (programNo: 1111)
+STEP 3. PMC_WRITE R6124.0=1 holdMs=300 (Path1 RESET → 선두 복귀) + 500ms 대기
+STEP 4. REWIND_PROGRAM path=2
+STEP 5. CYCLE_START 루프 최대 5회 (R6144.0=1 holdMs=500, 2초 간격)
+         → 루프 종료 후 runState >= 2 확인
 ```
 
-> **OCS 처리 방침**: 전시 환경에서 OCS(원사이클 스톱)가 ON 상태일 수 있음.
-> OCS ON → 첫 M20 이후 기계 정지 → runState = 0 → CYCLE_START 재시도로 자동 처리.
-> 세부 OCS ON/OFF 제어는 이 메뉴에서 직접 하지 않고, 기계가 멈추면 재스타트하는 방식으로 단순화.
+> **사이클 스타트 5회 루프**: 가동 확인 없이 무조건 5회 발행. OCS ON 상태에서 첫 M20 정지 후 재스타트 자동 처리 목적.
 
 ### 6-4. 중복 실행 방지
-- `isExecuting: boolean` 상태
-- 실행 중 다른 카드 롱프레스 비활성화
-- 팝업 중복 표시 차단
+- `isExecuting: boolean` 상태로 차단
 
 ---
 
@@ -140,85 +131,49 @@ STEP 5. CYCLE_START 루프 (최대 5회, 2초 간격)
 
 ```
 packages/web/public/simtos/
-├── O3001/
-│   ├── default.jpg     ← 기본 대표 이미지 (정지 시 표시)
-│   ├── 001.jpg         ← 가공 중 순환 이미지 1~10
-│   ├── 002.jpg
-│   └── ... (최대 010.jpg)
-├── O3002/
-│   ├── default.jpg
-│   └── 001.jpg ~ 010.jpg
-├── O3003/ ...
-├── O3004/ ...
-└── O3005/ ...
+├── O3001/main.jpg, running.gif
+├── O3002/main.jpg, running.gif
+├── O3003/main.jpg, running.gif
+├── O3004/main.jpg, running.gif
+└── O3005/main.jpg, running.gif
 ```
-
-### 이미지 로딩 규칙
-- 기본 이미지: `/simtos/{programNo}/default.jpg`
-- 순환 이미지: `/simtos/{programNo}/001.jpg` ~ `/simtos/{programNo}/010.jpg`
-- 순환 이미지가 없을 경우 대표 이미지 고정 (오류 없이 폴백)
-- 이미지 파일 부재 시: 회색 플레이스홀더 카드 표시 (에러 없음)
-
-### 순환 로직
-- `runState >= 2` && `programNo === currentProduct.programNo` → `setInterval` 0.5초마다 인덱스 증가
-- 정지 → 인덱스 0으로 리셋, `default.jpg` 표시
 
 ---
 
 ## 8. 실행 로그
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│ 14:23:05  admin  O3001  ▶ 실행 시작                         │
-│ 14:23:07  admin  O3001  ✓ 프로그램 선택 완료                 │
-│ 14:23:08  admin  O3001  ✓ 선두 복귀 완료                     │
-│ 14:23:10  admin  O3001  ▶ 사이클 스타트 1/5                  │
-│ 14:23:12  admin  O3001  ✓ 가동 확인                          │
-└──────────────────────────────────────────────────────────────┘
-```
-
-- 고정 5줄 표시 영역 (overflow-y-scroll)
-- `useRef` 배열로 최신 50줄 유지
+- 최대 50줄 유지, auto-scroll
 - 컬럼: 시간 / 사용자 / 프로그램 번호 / 상태 메시지
 - 색상: 성공(초록), 오류(빨강), 정보(회색)
 
 ---
 
-## 9. 기술 스택 및 재사용 컴포넌트
+## 9. 기술 스택 및 사용 컴포넌트
 
 | 항목 | 사용 방식 |
 |------|----------|
 | `useLongPress` | 그대로 재사용 |
-| `ControlLockButton` | 기존 컴포넌트 import |
-| `commandApi.send()` | 기존 API 함수 |
-| `useMachineTelemetry` | runState, mode, programNo, pmcBits |
+| `MachineTopBar` | 실제 사용 중 (rightSlot으로 인터록 pills 삽입) |
+| `commandApi.sendAndWait()` | SEARCH_PROGRAM, PMC_WRITE, REWIND_PROGRAM |
+| `useMachineTelemetry` | runState, programNo, pmcBits |
 | `useControlLock` | 제어권 상태 |
 | `useAuthStore` | 사용자 역할 확인 |
-| `MachineTopBar` | **미사용** (전시 전용 배너로 대체) |
 
 ---
 
-## 10. 보완 사항 및 확인 필요 항목
+## 10. git 관리 현황
 
-| # | 항목 | 내용 | 처리 방향 |
-|---|------|------|-----------|
-| 1 | `REWIND_PROGRAM` 커맨드 | Agent CommandHandler에 path 지정 rewind가 있는지 확인 필요 | PMC RESET 펄스(R6103.0) fallback 사용 |
-| 2 | `SEARCH_PROGRAM` path 파라미터 | path=2 cnc_search 지원 여부 확인 (FocasDataReader.SearchProgram 인자) | 기존 구현 확인 후 확정 |
-| 3 | 인터록 "DNC 모드 설정" 항목 | 요구사항의 의도가 불명확 — MEM 모드 여부로 해석 | **확인 필요** |
-| 4 | 제품 이미지 파일 | 실제 이미지 없음 → 플레이스홀더로 우선 구현 | 전시 전 이미지 파일 추가 |
-| 5 | 사이드바 노출 조건 | 모든 사용자 / ADMIN만? | ADMIN/HQ_ENGINEER에게만 사이드바 표시 권장 |
-| 6 | `programNo` 형식 | telemetry.programNo가 `'O3001'`인지 `'3001'`인지 확인 | 기존 telemetry 파이프라인 확인 필요 |
-| 7 | OCS 자동 제어 여부 | 전시 중 OCS 켜진 상태로 운영 가능성 — 재스타트로만 처리 | 현재 방침 유지 (단순화) |
+| 항목 | 상태 |
+|------|------|
+| `Simtos.tsx` | 구현 완료, 커밋됨 |
+| `extraPmcAddrs` 파이프라인 | 완료 (JSON + templateSync + Prisma + routes + Agent) |
+| SIMTOS 전용 PMC 주소 | `extraPmcAddrs: ["R6035.0"]` 템플릿 JSON에 등록 완료 |
 
 ---
 
-## 11. 구현 범위 (이번 작업)
+## 11. 알려진 이슈 / 향후 작업
 
-- [x] `packages/web/public/simtos/` 폴더 구조 생성 (플레이스홀더 포함)
-- [ ] `packages/web/src/pages/Simtos.tsx` 구현
-- [ ] `packages/web/src/App.tsx` 라우트 추가 (`/simtos`)
-- [ ] `packages/web/src/components/Layout.tsx` 사이드바 항목 추가
-
----
-
-*이 문서는 구현 시작 전 확인 및 보완 사항 정리용. 실제 구현은 확인 완료 후 진행.*
+| # | 항목 | 내용 |
+|---|------|------|
+| 1 | 사이클 스타트 가동 확인 | 현재 5회 루프 후 runState 확인. 가동 전 확인으로 개선 가능 |
+| 2 | 이미지 파일 | 실제 전시용 이미지로 교체 필요 |

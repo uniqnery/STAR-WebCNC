@@ -331,14 +331,27 @@ public class SchedulerManager
         _logger.LogInformation("[Scheduler] StartRow: {ProgramNo} preset={Preset} count={Count} rowId={RowId}",
             row.MainProgramNo, row.Preset, row.Count, row.Id);
 
-        // [1] 인터락 확인 — 불만족 시 CONTROL DENIED (ERROR 전환 없음, IDLE 유지)
+        // [1] 기계 run 상태 검증 — STOP(run=0) 이외 상태에서 실행 차단
+        // HOLD(run=1) 상태에서는 cnc_search/cnc_rewind가 EW_OK를 반환해도 실제 적용이 안 됨
+        // 1단계 정책: run != 0 전체 차단 (HOLD 비트 실기기 확인 후 2단계로 세분화 예정)
+        var machineStatus = _dataReader.ReadStatus();
+        if (machineStatus != null && machineStatus.Run != 0)
+        {
+            _logger.LogWarning("[Scheduler] StartRow 차단: 기계가 STOP 상태가 아님 (run={Run}). STOP 후 재시도하세요.", machineStatus.Run);
+            ReportControlDenied("MACHINE_NOT_STOP",
+                $"기계가 STOP 상태가 아닙니다 (run={machineStatus.Run}). RESET 또는 FEED HOLD 해제 후 재시도하세요.");
+            return;
+        }
+        _logger.LogInformation("[Scheduler] 기계 STOP 상태 확인 (run=0) — 실행 진행");
+
+        // [2] 인터락 확인 — 불만족 시 CONTROL DENIED (ERROR 전환 없음, IDLE 유지)
         if (!CheckInterlock(tpl))
         {
             ReportControlDenied("CONTROL_DENIED", "인터락 조건이 충족되지 않았습니다. 도어 닫힘 / 비상정지 해제 확인 후 재시도하세요.");
             return;
         }
 
-        // [2] count >= preset 검사 — 이미 완료된 행은 PAUSE 없이 자동 스킵 (이전 실행 잔여 행)
+        // [3] count >= preset 검사 — 이미 완료된 행은 PAUSE 없이 자동 스킵 (이전 실행 잔여 행)
         // PAUSE 후 RESUME 명령이 Tick에서 처리될 때 ExecutePath2Only 재호출되는 무한루프 방지
         if (row.Count >= row.Preset)
         {

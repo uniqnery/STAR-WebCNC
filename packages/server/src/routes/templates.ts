@@ -44,6 +44,7 @@ router.get('/', asyncHandler(async (
       schedulerConfig: true,
       pmcMessages: true,
       capabilities: true,
+      extraPmcAddrs: true,
       isActive: true,
       createdAt: true,
       updatedAt: true,
@@ -186,6 +187,7 @@ router.put('/:id',
       toolLifeConfig?: object;
       pmcMessages?: unknown[];
       capabilities?: object;
+      extraPmcAddrs?: unknown[];
     };
 
     const updateData: TemplateUpdateInput = {};
@@ -194,7 +196,7 @@ router.put('/:id',
       'interlockModules', 'remoteControlInterlock', 'virtualPanel',
       'panelLayout', 'topBarInterlock', 'schedulerConfig',
       'offsetConfig', 'counterConfig', 'toolLifeConfig',
-      'pmcMessages', 'capabilities',
+      'pmcMessages', 'capabilities', 'extraPmcAddrs',
     ] as const;
     const strFields = ['version', 'name', 'description', 'cncType', 'seriesName'] as const;
 
