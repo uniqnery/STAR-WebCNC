@@ -8,8 +8,9 @@ import { useTemplateStore, type SchedulerConfig } from '../stores/templateStore'
 
 // ── 빈 기본값 ───────────────────────────────────────────
 const EMPTY: SchedulerConfig = {
+  cycleStartAddr: '',
   m20Addr: '',
-  countDisplay: { countMacroNo: 500, countVarType: 'macro' as const, presetMacroNo: 501, presetVarType: 'macro' as const },
+  countDisplay: { countMacroNo: 900, countVarType: 'macro' as const, presetMacroNo: 10000, presetVarType: 'pcode' as const, cycleTimeAddr: 'D96', cycleTimeMultiplier: 4 },
   resetAddr: '',
   oneCycleStopAddr: '',
   oneCycleStopStatusAddr: '',
@@ -500,14 +501,18 @@ export function SchedulerConfig() {
             index={9}
             title="사이클 스타트"
             color="green"
-            subtitle="패널 레이아웃의 CYCLE_START reqAddr에 신호 입력 (패널 편집기에서 설정)."
+            subtitle="지정된 PMC 주소에 200ms 펄스 2회 출력 (3초 간격). 필수 항목 — 미설정 시 START 거부."
           >
-            <Link
-              to="/admin/panel-editor"
-              className="text-xs text-blue-500 hover:text-blue-700 underline"
-            >
-              패널 편집기 →
-            </Link>
+            <AddrInput
+              label="사이클 스타트 출력"
+              value={cfg.cycleStartAddr}
+              onChange={(v) => patch({ cycleStartAddr: v })}
+              placeholder="R6105.4"
+              optional={false}
+            />
+            {!cfg.cycleStartAddr && (
+              <span className="text-xs text-red-400">미설정 시 스케줄러 START가 거부됩니다.</span>
+            )}
           </FlowStep>
 
           {/* ─────────────────────────────────────────────────
@@ -625,6 +630,7 @@ export function SchedulerConfig() {
               </thead>
               <tbody className="divide-y divide-gray-700">
                 {[
+                  { label: '사이클 스타트 출력',        value: cfg.cycleStartAddr,          required: true  },
                   { label: 'M20 완료 신호',           value: cfg.m20Addr,                 required: true  },
                   { label: '카운트 변수',     value: `${cfg.countDisplay.countVarType === 'pcode' ? 'P' : '#'}${cfg.countDisplay.countMacroNo}`,   required: false },
                   { label: '프리셋 변수',     value: `${cfg.countDisplay.presetVarType === 'pcode' ? 'P' : '#'}${cfg.countDisplay.presetMacroNo}`, required: false },

@@ -215,6 +215,15 @@ public class SchedulerManager
 
     private void HandleStart(SchedulerMessage cmd, CancellationToken ct)
     {
+        // 사이클 스타트 주소 사전 검증 — 미설정이면 START 거부
+        var cfg = _templateLoader.CurrentTemplate?.SchedulerConfig;
+        if (cfg == null || string.IsNullOrEmpty(cfg.CycleStartAddr) || PmcAddress.ParseString(cfg.CycleStartAddr) == null)
+        {
+            ReportError(null, "CYCLE_START_ADDR_NOT_SET",
+                "스케줄러 설정의 '사이클 스타트 출력' 주소가 설정되지 않았습니다. 템플릿 편집기에서 주소를 입력하세요.");
+            return;
+        }
+
         // DNC 실행 설정 저장 (행 시작 전 반드시 먼저)
         _mainMode  = string.IsNullOrEmpty(cmd.MainMode) ? "memory" : cmd.MainMode.ToLower();
         _subMode   = string.IsNullOrEmpty(cmd.SubMode)  ? "memory" : cmd.SubMode.ToLower();
@@ -825,10 +834,11 @@ public class SchedulerManager
 
     private void CycleStart(MachineTemplate tpl)
     {
-        var cycleStartAddr = tpl.PmcMap.Control.CycleStart;
+        // schedulerConfig.cycleStartAddr 전용 — pmcMap.control 참조 없음
+        var cycleStartAddr = PmcAddress.ParseString(tpl.SchedulerConfig.CycleStartAddr);
         if (cycleStartAddr == null)
         {
-            _logger.LogWarning("[Scheduler] CycleStart PMC 주소 없음 — 사이클 스타트 스킵");
+            _logger.LogError("[Scheduler] CycleStart PMC 주소 미설정 — 스케줄러 설정의 '사이클 스타트 출력' 주소를 확인하세요.");
             return;
         }
         for (int i = 0; i < 2; i++)

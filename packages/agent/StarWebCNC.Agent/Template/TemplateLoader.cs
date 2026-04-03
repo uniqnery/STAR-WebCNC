@@ -128,7 +128,7 @@ public class TemplateLoader
             {
                 MaxQueueSize = 15,
                 M20Addr      = "",   // 폴백 템플릿: M20 주소 미설정 (스케줄러 비활성화)
-                CountDisplay = new CountDisplay { CountMacroNo = 500, PresetMacroNo = 501 }
+                CountDisplay = new CountDisplay { CountMacroNo = 900, CountVarType = "macro", PresetMacroNo = 10000, PresetVarType = "pcode", CycleTimeAddr = "D96", CycleTimeMultiplier = 4 }
             },
             Capabilities = new CapabilitiesConfig
             {

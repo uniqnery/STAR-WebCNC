@@ -48,6 +48,9 @@ public class MachineTemplate
     // 조작반 패널 레이아웃 (램프 어드레스 수집용, 최소 파싱)
     public List<PanelGroupMinimal> PanelLayout { get; set; } = new();
 
+    // 추가 PMC 모니터링 주소 (인터락/상태 표시 등 페이지별 하드코딩 주소)
+    public List<string> ExtraPmcAddrs { get; set; } = new();
+
     /// <summary>
     /// 패널에서 hasLamp=true이고 lampAddr이 있는 모든 주소 목록
     /// </summary>
@@ -269,23 +272,36 @@ public class SchedulerConfig
     /// <summary>사이클 실행 중 상태 PMC 주소 (읽기). Path2Only 완료 후 기계 정지 확인용. 빈값이면 대기 스킵.</summary>
     public string CycleRunningAddr { get; set; } = "";
 
+    // ── 사이클 스타트 출력 ──────────────────────────────────
+    /// <summary>
+    /// 사이클 스타트 출력 PMC 주소 (쓰기). 빈값이면 pmcMap.control.cycleStart fallback.
+    /// 패널 레이아웃과 독립적으로 스케줄러 전용 주소를 지정할 수 있다.
+    /// </summary>
+    public string CycleStartAddr { get; set; } = "";
+
     // ── 큐 설정 ─────────────────────────────────────────────
     public int MaxQueueSize { get; set; } = 15;
 }
 
 public class CountDisplay
 {
-    // ── 카운트 (현재 생산 수량을 NC에 쓰는 변수) ──────────────
-    /// <summary>카운트 변수 번호 (기본 #500)</summary>
-    public int CountMacroNo { get; set; } = 500;
-    /// <summary>카운트 변수 타입: "macro" = 커스텀 매크로(#xxx), "pcode" = P코드(Pxxx)</summary>
+    // ── 카운트 (현재 생산 수량을 NC에서 읽는 변수) ────────────
+    /// <summary>카운트 변수 번호 (기본 #900)</summary>
+    public int CountMacroNo { get; set; } = 900;
+    /// <summary>카운트 변수 타입: "macro" = 커스텀 매크로(#xxx), "pcode" = P코드(cnc_rdpmacro)</summary>
     public string CountVarType { get; set; } = "macro";
 
-    // ── 프리셋 (목표 수량) ────────────────────────────────────
-    /// <summary>프리셋 변수 번호 (기본 #501)</summary>
-    public int PresetMacroNo { get; set; } = 501;
+    // ── 프리셋 (목표 수량을 NC에서 읽는 변수) ────────────────
+    /// <summary>프리셋 변수 번호 (기본 #10000)</summary>
+    public int PresetMacroNo { get; set; } = 10000;
     /// <summary>프리셋 변수 타입: "macro" | "pcode"</summary>
-    public string PresetVarType { get; set; } = "macro";
+    public string PresetVarType { get; set; } = "pcode";
+
+    // ── 사이클타임 (PMC D 어드레스 기반) ─────────────────────
+    /// <summary>사이클타임 PMC 주소 (예: "D96"). 빈값이면 수집 스킵.</summary>
+    public string CycleTimeAddr { get; set; } = "D96";
+    /// <summary>래더 실행 주기 → ms 환산 배수 (파라미터 No.11930 설정값: 4 또는 8)</summary>
+    public int CycleTimeMultiplier { get; set; } = 4;
 }
 
 // ─── Capabilities ────────────────────────────────────────

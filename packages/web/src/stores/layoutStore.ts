@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 // 배치 가능한 요소 타입
-export type LayoutItemType = 'machine' | 'barfeeder' | 'conveyor' | 'robot' | 'table' | 'pillar' | 'wall' | 'door' | 'corridor' | 'custom';
+export type LayoutItemType = 'machine' | 'barfeeder' | 'rect' | 'circle';
 
 export interface LayoutItem {
   id: string;
@@ -17,6 +17,9 @@ export interface LayoutItem {
   height: number;
   rotation: number;
   color?: string;
+  opacity?: number;   // 0~100
+  fontSize?: number;
+  labelAlign?: 'start' | 'middle' | 'end';
 }
 
 export interface FactoryLayout {
@@ -29,10 +32,14 @@ export interface FactoryLayout {
   updatedAt: string;
 }
 
+// 타입별 마지막 설정값 (위치/id/type 제외한 스타일 필드)
+type ItemStyleFields = Pick<LayoutItem, 'width' | 'height' | 'rotation' | 'color' | 'opacity' | 'fontSize' | 'labelAlign'>;
+
 interface LayoutState {
   layout: FactoryLayout;
   isEditMode: boolean;
   selectedItemId: string | null;
+  lastSettings: Partial<Record<LayoutItemType, Partial<ItemStyleFields>>>;
 
   // Actions
   setEditMode: (enabled: boolean) => void;
@@ -46,6 +53,9 @@ interface LayoutState {
   resizeLayout: (width: number, height: number) => void;
   setLayout: (layout: FactoryLayout) => void;
   resetLayout: () => void;
+  bringForward: (itemId: string) => void;
+  sendBackward: (itemId: string) => void;
+  duplicateItem: (itemId: string) => void;
 }
 
 // 기본 레이아웃
@@ -72,19 +82,29 @@ const DEFAULT_LAYOUT: FactoryLayout = {
 
 // 아이템 타입별 기본 속성
 export const ITEM_DEFAULTS: Record<LayoutItemType, { width: number; height: number; color: string; label: string }> = {
-  machine: { width: 100, height: 80, color: '#6B7280', label: '장비' },
-  barfeeder: { width: 100, height: 25, color: '#4B5563', label: '바피더' },
-  conveyor: { width: 200, height: 30, color: '#F59E0B', label: '컨베이어' },
-  robot: { width: 60, height: 60, color: '#8B5CF6', label: '로봇' },
-  table: { width: 80, height: 60, color: '#78716C', label: '작업대' },
-  pillar: { width: 30, height: 30, color: '#374151', label: '기둥' },
-  wall: { width: 200, height: 10, color: '#1F2937', label: '벽' },
-  door: { width: 80, height: 20, color: '#3B82F6', label: '출입구' },
-  corridor: { width: 200, height: 50, color: '#FCD34D', label: '통로' },
-  custom: { width: 50, height: 50, color: '#06B6D4', label: '사용자 정의' },
+  machine:   { width: 100, height: 80,  color: '#6B7280', label: '장비' },
+  barfeeder: { width: 100, height: 25,  color: '#4B5563', label: '바피더' },
+  rect:      { width: 80,  height: 50,  color: '#3B82F6', label: '' },
+  circle:    { width: 50,  height: 50,  color: '#10B981', label: '' },
 };
 
+// updateItem 시 lastSettings에 저장할 필드 목록
+const STYLE_FIELDS: (keyof ItemStyleFields)[] = ['width', 'height', 'rotation', 'color', 'opacity', 'fontSize', 'labelAlign'];
+
 let itemCounter = 100;
+
+// 저장된 아이템 ID에서 최대값을 추출하여 중복 방지
+function extractMaxCounter(items: LayoutItem[]): number {
+  let max = 100;
+  for (const item of items) {
+    const m = item.id.match(/^item-(\d+)$/);
+    if (m) {
+      const n = parseInt(m[1]);
+      if (n > max) max = n;
+    }
+  }
+  return max;
+}
 
 export const useLayoutStore = create<LayoutState>()(
   persist(
@@ -92,6 +112,7 @@ export const useLayoutStore = create<LayoutState>()(
       layout: DEFAULT_LAYOUT,
       isEditMode: false,
       selectedItemId: null,
+      lastSettings: {},
 
       setEditMode: (enabled) => set({ isEditMode: enabled, selectedItemId: null }),
 
@@ -109,15 +130,30 @@ export const useLayoutStore = create<LayoutState>()(
       },
 
       updateItem: (itemId, updates) => {
-        set((state) => ({
-          layout: {
-            ...state.layout,
-            items: state.layout.items.map((item) =>
-              item.id === itemId ? { ...item, ...updates } : item
-            ),
-            updatedAt: new Date().toISOString(),
-          },
-        }));
+        set((state) => {
+          const item = state.layout.items.find((i) => i.id === itemId);
+          const newLastSettings = { ...state.lastSettings };
+          if (item) {
+            // 스타일 관련 필드가 포함된 경우 lastSettings 업데이트
+            const styleUpdates: Partial<ItemStyleFields> = {};
+            for (const field of STYLE_FIELDS) {
+              if (field in updates) {
+                (styleUpdates as Record<string, unknown>)[field] = (updates as Record<string, unknown>)[field];
+              }
+            }
+            if (Object.keys(styleUpdates).length > 0) {
+              newLastSettings[item.type] = { ...newLastSettings[item.type], ...styleUpdates };
+            }
+          }
+          return {
+            lastSettings: newLastSettings,
+            layout: {
+              ...state.layout,
+              items: state.layout.items.map((i) => i.id === itemId ? { ...i, ...updates } : i),
+              updatedAt: new Date().toISOString(),
+            },
+          };
+        });
       },
 
       removeItem: (itemId) => {
@@ -132,7 +168,14 @@ export const useLayoutStore = create<LayoutState>()(
       },
 
       moveItem: (itemId, x, y) => {
-        get().updateItem(itemId, { x, y });
+        // moveItem은 lastSettings 갱신 불필요 — updateItem 우회
+        set((state) => ({
+          layout: {
+            ...state.layout,
+            items: state.layout.items.map((i) => i.id === itemId ? { ...i, x, y } : i),
+            updatedAt: new Date().toISOString(),
+          },
+        }));
       },
 
       resizeItem: (itemId, width, height) => {
@@ -147,8 +190,8 @@ export const useLayoutStore = create<LayoutState>()(
         set((state) => ({
           layout: {
             ...state.layout,
-            width: Math.max(400, width),
-            height: Math.max(300, height),
+            width,
+            height,
             updatedAt: new Date().toISOString(),
           },
         }));
@@ -157,9 +200,60 @@ export const useLayoutStore = create<LayoutState>()(
       setLayout: (layout) => set({ layout }),
 
       resetLayout: () => set({ layout: DEFAULT_LAYOUT, selectedItemId: null }),
+
+      bringForward: (itemId) => {
+        set((state) => {
+          const items = [...state.layout.items];
+          const idx = items.findIndex((i) => i.id === itemId);
+          if (idx < items.length - 1) {
+            [items[idx], items[idx + 1]] = [items[idx + 1], items[idx]];
+          }
+          return { layout: { ...state.layout, items, updatedAt: new Date().toISOString() } };
+        });
+      },
+
+      sendBackward: (itemId) => {
+        set((state) => {
+          const items = [...state.layout.items];
+          const idx = items.findIndex((i) => i.id === itemId);
+          if (idx > 0) {
+            [items[idx], items[idx - 1]] = [items[idx - 1], items[idx]];
+          }
+          return { layout: { ...state.layout, items, updatedAt: new Date().toISOString() } };
+        });
+      },
+
+      duplicateItem: (itemId) => {
+        set((state) => {
+          const original = state.layout.items.find((i) => i.id === itemId);
+          if (!original) return state;
+          // machine 타입 복사 시 machineId 제거 → rect로 변환 (독립 도형)
+          const { machineId: _m, ...rest } = original;
+          const newType: LayoutItemType = original.type === 'machine' ? 'rect' : original.type;
+          const newItem: LayoutItem = {
+            ...rest,
+            type: newType,
+            id: `item-${++itemCounter}`,
+            x: original.x + 30,
+            y: original.y + 30,
+          };
+          const idx = state.layout.items.findIndex((i) => i.id === itemId);
+          const items = [...state.layout.items];
+          items.splice(idx + 1, 0, newItem);
+          return {
+            layout: { ...state.layout, items, updatedAt: new Date().toISOString() },
+            selectedItemId: newItem.id,
+          };
+        });
+      },
     }),
     {
       name: 'factory-layout',
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          itemCounter = extractMaxCounter(state.layout.items);
+        }
+      },
     }
   )
 );

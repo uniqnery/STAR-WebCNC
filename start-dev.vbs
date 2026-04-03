@@ -1,2 +1,4 @@
 Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "cmd /c ""cd /d " & Replace(WScript.ScriptFullName, "\start-dev.vbs", "") & "\packages\web && npx vite""", 0, False
+Dim root
+root = Replace(WScript.ScriptFullName, "\start-dev.vbs", "")
+WshShell.Run "cmd /c """ & root & "\_runner-dev.bat""", 0, False

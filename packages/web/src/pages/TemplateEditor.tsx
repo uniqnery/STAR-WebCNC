@@ -372,20 +372,86 @@ function SectionPmcMap({ data, update }: { data: CncTemplate; update: (path: str
 // ── Section 5: Scheduler Config ─────────────────────────
 function SectionSchedulerConfig({ data, update }: { data: CncTemplate; update: (path: string, v: unknown) => void }) {
   const sc = data.schedulerConfig;
+  const cd = sc.countDisplay;
   return (
-    <div className="grid grid-cols-2 gap-4 pt-3">
-      <TextInput label="M20 감지 주소" value={sc.m20Addr} onChange={v => update('schedulerConfig.m20Addr', v)} placeholder="R6002.4" mono />
-      <NumberInput label="카운트 변수 번호" value={sc.countDisplay.countMacroNo} onChange={v => update('schedulerConfig.countDisplay.countMacroNo', v)} />
-      <NumberInput label="프리셋 변수 번호" value={sc.countDisplay.presetMacroNo} onChange={v => update('schedulerConfig.countDisplay.presetMacroNo', v)} />
-      <TextInput label="RESET 신호 주소" value={sc.resetAddr} onChange={v => update('schedulerConfig.resetAddr', v)} placeholder="R6103.0" mono />
-      <TextInput label="원사이클 스톱 출력" value={sc.oneCycleStopAddr} onChange={v => update('schedulerConfig.oneCycleStopAddr', v)} placeholder="R0000.0" mono />
-      <TextInput label="원사이클 스톱 상태" value={sc.oneCycleStopStatusAddr} onChange={v => update('schedulerConfig.oneCycleStopStatusAddr', v)} placeholder="R0000.0" mono />
-      <TextInput label="MAIN HEAD 출력" value={sc.mainHeadAddr} onChange={v => update('schedulerConfig.mainHeadAddr', v)} placeholder="R0000.0" mono />
-      <TextInput label="MAIN HEAD 상태" value={sc.mainHeadStatusAddr} onChange={v => update('schedulerConfig.mainHeadStatusAddr', v)} placeholder="R0000.0" mono />
-      <TextInput label="SUB HEAD 출력" value={sc.subHeadAddr} onChange={v => update('schedulerConfig.subHeadAddr', v)} placeholder="R0000.0" mono />
-      <TextInput label="SUB HEAD 상태" value={sc.subHeadStatusAddr} onChange={v => update('schedulerConfig.subHeadStatusAddr', v)} placeholder="R0000.0" mono />
-      <TextInput label="path2 only 확인 주소" value={sc.path2OnlyConfirmAddr} onChange={v => update('schedulerConfig.path2OnlyConfirmAddr', v)} placeholder="R0000.0" mono />
-      <NumberInput label="큐 최대 크기" value={sc.maxQueueSize} onChange={v => update('schedulerConfig.maxQueueSize', v)} min={1} max={100} />
+    <div className="space-y-4 pt-3">
+      {/* COUNT / PRESET / CYCLE TIME */}
+      <div>
+        <p className="text-xs text-gray-400 font-semibold mb-2 uppercase tracking-wide">카운트 / 프리셋 / 사이클타임</p>
+        <div className="grid grid-cols-2 gap-4">
+          {/* COUNT */}
+          <div className="col-span-2 grid grid-cols-2 gap-2 bg-gray-900/40 rounded p-3">
+            <p className="col-span-2 text-xs text-blue-400 font-medium mb-1">COUNT (현재 생산 수량)</p>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-300 w-20 shrink-0">변수 타입</span>
+              <select
+                value={cd.countVarType}
+                onChange={e => update('schedulerConfig.countDisplay.countVarType', e.target.value)}
+                className="flex-1 px-2 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-white"
+              >
+                <option value="macro">커스텀 변수 (#)</option>
+                <option value="pcode">P코드 (cnc_rdpmacro)</option>
+              </select>
+            </div>
+            <NumberInput label="변수 번호 (#)" value={cd.countMacroNo} onChange={v => update('schedulerConfig.countDisplay.countMacroNo', v)} />
+          </div>
+          {/* PRESET */}
+          <div className="col-span-2 grid grid-cols-2 gap-2 bg-gray-900/40 rounded p-3">
+            <p className="col-span-2 text-xs text-green-400 font-medium mb-1">PRESET (목표 수량)</p>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-300 w-20 shrink-0">변수 타입</span>
+              <select
+                value={cd.presetVarType}
+                onChange={e => update('schedulerConfig.countDisplay.presetVarType', e.target.value)}
+                className="flex-1 px-2 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-white"
+              >
+                <option value="macro">커스텀 변수 (#)</option>
+                <option value="pcode">P코드 (cnc_rdpmacro)</option>
+              </select>
+            </div>
+            <NumberInput label="변수 번호 (#)" value={cd.presetMacroNo} onChange={v => update('schedulerConfig.countDisplay.presetMacroNo', v)} />
+          </div>
+          {/* CYCLE TIME */}
+          <div className="col-span-2 grid grid-cols-2 gap-2 bg-gray-900/40 rounded p-3">
+            <p className="col-span-2 text-xs text-yellow-400 font-medium mb-1">CYCLE TIME (PMC D 어드레스)</p>
+            <TextInput label="PMC 주소" value={cd.cycleTimeAddr} onChange={v => update('schedulerConfig.countDisplay.cycleTimeAddr', v)} placeholder="D96" mono />
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-300 w-20 shrink-0">배수 (ms)</span>
+              <select
+                value={cd.cycleTimeMultiplier}
+                onChange={e => update('schedulerConfig.countDisplay.cycleTimeMultiplier', Number(e.target.value))}
+                className="flex-1 px-2 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-white"
+              >
+                <option value={4}>×4 ms (파라미터 11930=4ms)</option>
+                <option value={8}>×8 ms (파라미터 11930=8ms)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 스케줄러 신호 */}
+      <div>
+        <p className="text-xs text-gray-400 font-semibold mb-2 uppercase tracking-wide">스케줄러 신호</p>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="col-span-2">
+            <TextInput label="사이클 스타트 출력 *필수" value={sc.cycleStartAddr ?? ''} onChange={v => update('schedulerConfig.cycleStartAddr', v)} placeholder="R6105.4" mono />
+            {!sc.cycleStartAddr && (
+              <p className="mt-1 text-xs text-red-400">미설정 시 스케줄러 START가 거부됩니다.</p>
+            )}
+          </div>
+          <TextInput label="M20 감지 주소" value={sc.m20Addr} onChange={v => update('schedulerConfig.m20Addr', v)} placeholder="R6002.4" mono />
+          <TextInput label="RESET 신호 주소" value={sc.resetAddr} onChange={v => update('schedulerConfig.resetAddr', v)} placeholder="R6103.0" mono />
+          <TextInput label="원사이클 스톱 출력" value={sc.oneCycleStopAddr} onChange={v => update('schedulerConfig.oneCycleStopAddr', v)} placeholder="R0000.0" mono />
+          <TextInput label="원사이클 스톱 상태" value={sc.oneCycleStopStatusAddr} onChange={v => update('schedulerConfig.oneCycleStopStatusAddr', v)} placeholder="R0000.0" mono />
+          <TextInput label="MAIN HEAD 출력" value={sc.mainHeadAddr} onChange={v => update('schedulerConfig.mainHeadAddr', v)} placeholder="R0000.0" mono />
+          <TextInput label="MAIN HEAD 상태" value={sc.mainHeadStatusAddr} onChange={v => update('schedulerConfig.mainHeadStatusAddr', v)} placeholder="R0000.0" mono />
+          <TextInput label="SUB HEAD 출력" value={sc.subHeadAddr} onChange={v => update('schedulerConfig.subHeadAddr', v)} placeholder="R0000.0" mono />
+          <TextInput label="SUB HEAD 상태" value={sc.subHeadStatusAddr} onChange={v => update('schedulerConfig.subHeadStatusAddr', v)} placeholder="R0000.0" mono />
+          <TextInput label="path2 only 확인 주소" value={sc.path2OnlyConfirmAddr} onChange={v => update('schedulerConfig.path2OnlyConfirmAddr', v)} placeholder="R0000.0" mono />
+          <NumberInput label="큐 최대 크기" value={sc.maxQueueSize} onChange={v => update('schedulerConfig.maxQueueSize', v)} min={1} max={100} />
+        </div>
+      </div>
     </div>
   );
 }

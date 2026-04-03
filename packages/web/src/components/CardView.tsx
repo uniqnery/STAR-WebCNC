@@ -206,7 +206,7 @@ export function MachineStatusCard({ machine, onClick, compact = false }: Machine
           <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">사이클타임</div>
             <div className="text-lg font-mono font-bold text-gray-900 dark:text-white">
-              {telemetry?.cycleTime ? formatCycleTime(telemetry.cycleTime) : '--:--'}
+              {telemetry?.cycleTime != null && telemetry.cycleTime > 0 ? formatCycleTime(telemetry.cycleTime) : '--:--'}
             </div>
           </div>
         </div>
@@ -226,7 +226,7 @@ export function MachineStatusCard({ machine, onClick, compact = false }: Machine
             <div className="flex items-center justify-between">
               <span className="text-xs text-gray-400">SUB</span>
               <span className="font-mono text-sm text-gray-600 dark:text-gray-300">
-                {telemetry?.subProgramNo || '-'}
+                {telemetry?.path2?.programNo || '-'}
               </span>
             </div>
             {/* 제품명 */}

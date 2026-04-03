@@ -1,5 +1,5 @@
 import { useEffect, Component, ReactNode, useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
 import { useMachineStore } from './stores/machineStore';
 import { Login } from './components/Login';
@@ -19,6 +19,7 @@ import { PanelEditor } from './pages/PanelEditor';
 import { MachineAdmin } from './pages/MachineAdmin';
 import { InterlockEditor } from './pages/InterlockEditor';
 import { SchedulerConfig } from './pages/SchedulerConfig';
+import { Simtos } from './pages/Simtos';
 
 // ── Copy Button ───────────────────────────────────────────
 function CopyButton({ text }: { text: string }) {
@@ -175,9 +176,16 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  return null;
+}
+
 function App() {
   return (
     <ErrorBoundary>
+      <ScrollToTop />
       <WsConnector />
       <Routes>
       {/* Public Routes */}
@@ -231,6 +239,15 @@ function App() {
         element={
           <ProtectedRoute>
             <Transfer />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/simtos"
+        element={
+          <ProtectedRoute>
+            <Simtos />
           </ProtectedRoute>
         }
       />

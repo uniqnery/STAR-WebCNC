@@ -98,9 +98,9 @@ export function Dashboard() {
   }
 
   return (
-    <div className="p-6">
+    <div className={`p-6 ${viewMode === 'factory' ? 'lg:h-full lg:flex lg:flex-col lg:overflow-hidden' : ''}`}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className={`flex items-center justify-between ${viewMode === 'factory' ? 'lg:shrink-0 mb-3' : 'mb-6'}`}>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
           대시보드
         </h1>
@@ -126,7 +126,7 @@ export function Dashboard() {
                   : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
               }`}
             >
-              공장뷰
+              레이아웃뷰
             </button>
           </div>
 
@@ -145,7 +145,7 @@ export function Dashboard() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+      <div className={`grid grid-cols-2 md:grid-cols-5 gap-4 ${viewMode === 'factory' ? 'lg:shrink-0 mb-3' : 'mb-6'}`}>
         <SummaryCard label="전체" value={stats.total} color="bg-slate-500" />
         <SummaryCard label="가동중" value={stats.running} color={STATUS_COLORS.running} />
         <SummaryCard label="대기" value={stats.idle} color={STATUS_COLORS.idle} />
@@ -157,11 +157,13 @@ export function Dashboard() {
       {viewMode === 'card' ? (
         <CardView machines={machines} onSelectMachine={selectMachine} />
       ) : (
-        <FactoryView
-          machines={machines}
-          onSelectMachine={selectMachine}
-          selectedMachineId={selectedMachineId}
-        />
+        <div className="lg:flex-1 lg:min-h-0">
+          <FactoryView
+            machines={machines}
+            onSelectMachine={selectMachine}
+            selectedMachineId={selectedMachineId}
+          />
+        </div>
       )}
     </div>
   );

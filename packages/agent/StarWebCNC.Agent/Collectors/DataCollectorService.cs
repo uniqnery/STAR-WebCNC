@@ -276,6 +276,7 @@ public class DataCollectorService : BackgroundService
         var uniqueAddrs = interlockAddrs
             .Concat(tpl.PanelLampAddrs)
             .Concat(pmcMessageAddrs)
+            .Concat(tpl.ExtraPmcAddrs)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -313,10 +314,22 @@ public class DataCollectorService : BackgroundService
         var machinePos = _dataReader.ReadMachinePosition();
 
         int partsCount = 0;
+        int presetCount = 0;
+        double cycleTime = 0.0;
         if (_templateLoader.CurrentTemplate != null)
         {
-            var macroNo = _templateLoader.CurrentTemplate.SchedulerConfig.CountDisplay.CountMacroNo;
-            partsCount = _dataReader.ReadPartsCount(macroNo) ?? 0;
+            var cd = _templateLoader.CurrentTemplate.SchedulerConfig.CountDisplay;
+            partsCount  = _dataReader.ReadPartsCount(cd.CountMacroNo, cd.CountVarType) ?? 0;
+
+            // Preset: CNC에서 직접 읽기 (스케줄러가 쓴 값을 확인)
+            double? presetVal = string.Equals(cd.PresetVarType, "pcode", StringComparison.OrdinalIgnoreCase)
+                ? _dataReader.ReadPcodeMacroVariable(cd.PresetMacroNo)
+                : _dataReader.ReadMacroVariable(cd.PresetMacroNo);
+            presetCount = presetVal.HasValue ? (int)presetVal.Value : 0;
+
+            // 사이클타임: PMC D 어드레스 (래더 실행 주기 횟수 × multiplier = ms)
+            double? ctMs = _dataReader.ReadCycleTimeMs(cd.CycleTimeAddr, cd.CycleTimeMultiplier);
+            cycleTime = ctMs.HasValue ? ctMs.Value / 1000.0 : 0.0;
         }
 
         // 경로별 상세 데이터 (2-Path 자동선반용)
@@ -332,10 +345,12 @@ public class DataCollectorService : BackgroundService
             {
                 RunState = status?.Run ?? 0,
                 Mode = status?.ModeString ?? "UNKNOWN",
-                ProgramNo = program != null ? $"O{program.CurrentProgram}" : null,
+                ProgramNo = program != null ? $"O{program.CurrentProgram:D4}" : null,
                 Feedrate = feedrate ?? 0,
                 SpindleSpeed = spindleSpeed ?? 0,
                 PartsCount = partsCount,
+                PresetCount = presetCount,
+                CycleTime = cycleTime,
                 AlarmActive = status?.HasAlarm ?? false,
                 AbsolutePosition = absolutePos?.Values,
                 MachinePosition = machinePos?.Values,
@@ -563,7 +578,7 @@ public class DataCollectorService : BackgroundService
                     _logger.LogInformation("M20 edge detected");
 
                     var program = _dataReader.ReadProgramInfo();
-                    string? programNo = program != null ? $"O{program.CurrentProgram}" : null;
+                    string? programNo = program != null ? $"O{program.CurrentProgram:D4}" : null;
 
                     // 스케줄러 실행 중이면 SchedulerManager에서 처리 (count authority = Agent)
                     bool schedulerConsumed = _schedulerManager.OnM20Edge(programNo);
@@ -572,7 +587,7 @@ public class DataCollectorService : BackgroundService
                     {
                         // 스케줄러 미실행 시 — 원시 M20_COMPLETE 이벤트 발행 (레거시 모니터링용)
                         int count = schedulerCfg != null
-                            ? (_dataReader.ReadPartsCount(schedulerCfg.CountDisplay.CountMacroNo) ?? 0)
+                            ? (_dataReader.ReadPartsCount(schedulerCfg.CountDisplay.CountMacroNo, schedulerCfg.CountDisplay.CountVarType) ?? 0)
                             : 0;
 
                         var eventMsg = new EventMessage

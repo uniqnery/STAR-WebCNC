@@ -43,8 +43,8 @@ export function NCMonitor({ path1, path2, machineMode, machineId, activeTab: ext
 
   return (
     <div className="bg-gray-900 rounded-lg shadow overflow-hidden flex flex-col h-full">
-      {/* 탭 콘텐츠 */}
-      <div className="flex-1 min-h-0">
+      {/* 탭 콘텐츠 — h-full 컨테이너 내에서 flex-1, 자식 뷰가 자체 스크롤 관리 */}
+      <div className="flex-1 min-h-0 overflow-hidden">
         {activeTab === 'monitor' && (
           <MonitorView path1={path1} path2={path2} machineMode={machineMode} />
         )}
@@ -68,7 +68,7 @@ export function NCMonitor({ path1, path2, machineMode, machineId, activeTab: ext
 
       {/* 하단 탭 선택 (hideTabs=true 시 숨김) */}
       {!hideTabs && (
-        <div className="flex border-t border-gray-700">
+        <div className="flex border-t border-gray-700 shrink-0">
           {TABS.map((tab) => (
             <button
               key={tab.id}
@@ -109,8 +109,8 @@ function MonitorView({ path1, path2, machineMode }: { path1?: PathData; path2?: 
     <div className="text-green-400 font-mono text-xs p-2 space-y-0">
       {/* 상단 모드 + 프로그램 번호 */}
       <div className="flex justify-between items-center text-cyan-300 mb-1">
-        <span className="text-[10px]">{machineMode || 'PROGRAM( CHECK )'}</span>
-        <span className="text-white text-sm font-bold">
+        <span className="text-[10px] max-lg:text-xs">{machineMode || 'PROGRAM( CHECK )'}</span>
+        <span className="text-white text-sm max-lg:text-base font-bold">
           {path1?.programNo || 'O0000'} {path1?.blockNo || 'N00000'}
         </span>
       </div>
@@ -119,11 +119,11 @@ function MonitorView({ path1, path2, machineMode }: { path1?: PathData; path2?: 
       <div className="grid grid-cols-2 gap-0 border border-gray-700">
         {/* PATH1 */}
         <div className="border-r border-gray-700">
-          <div className="bg-gray-800 px-2 py-0.5 flex justify-between">
+          <div className="bg-gray-800 px-2 py-0.5 flex justify-between max-lg:text-xs">
             <span className="text-cyan-300">PATH1</span>
             <span className="text-white">{path1?.programNo || '-'} {path1?.blockNo || ''}</span>
           </div>
-          <div className="px-2 py-1 h-24 overflow-hidden">
+          <div className="px-2 py-1 h-24 overflow-hidden max-lg:text-sm">
             {path1?.programContent?.map((line, i) => (
               <div key={i} className={line.startsWith('>') ? 'text-cyan-300 font-bold' : 'text-green-400'}>
                 {line || '\u00A0'}
@@ -133,11 +133,11 @@ function MonitorView({ path1, path2, machineMode }: { path1?: PathData; path2?: 
         </div>
         {/* PATH2 */}
         <div>
-          <div className="bg-gray-800 px-2 py-0.5 flex justify-between">
+          <div className="bg-gray-800 px-2 py-0.5 flex justify-between max-lg:text-xs">
             <span className="text-cyan-300">PATH2</span>
             <span className="text-white">{path2?.programNo || '-'} {path2?.blockNo || ''}</span>
           </div>
-          <div className="px-2 py-1 h-24 overflow-hidden">
+          <div className="px-2 py-1 h-24 overflow-hidden max-lg:text-sm">
             {path2?.programContent?.map((line, i) => (
               <div key={i} className={line.startsWith('>') ? 'text-cyan-300 font-bold' : 'text-green-400'}>
                 {line || '\u00A0'}
@@ -153,18 +153,18 @@ function MonitorView({ path1, path2, machineMode }: { path1?: PathData; path2?: 
         <div className="border-r border-gray-700">
           <div className="grid grid-cols-2">
             <div className="border-r border-gray-700">
-              <div className="bg-gray-800 px-2 py-0.5 text-center text-[10px] text-cyan-300">ABSOLUTE</div>
+              <div className="bg-gray-800 px-2 h-6 flex items-center justify-center text-[10px] max-lg:text-xs text-cyan-300">ABSOLUTE</div>
               {axes1.map((axis, i) => (
-                <div key={`p1a-${axis}`} className="flex justify-between px-2 py-0.5">
+                <div key={`p1a-${axis}`} className="flex justify-between items-center px-2 h-6 max-lg:text-xs">
                   <span className="text-cyan-300">{axis}</span>
                   <span className="text-white">{formatPos(path1?.coordinates?.absolute[i], path1?.coordinates?.decimalPlaces?.[i])}</span>
                 </div>
               ))}
             </div>
             <div>
-              <div className="bg-gray-800 px-2 py-0.5 text-center text-[10px] text-cyan-300">DISTANCE TO GO</div>
+              <div className="bg-gray-800 px-2 h-6 flex items-center justify-center text-[10px] max-lg:text-xs text-cyan-300">DIST TO GO</div>
               {axes1.map((axis, i) => (
-                <div key={`p1d-${axis}`} className="flex justify-between px-2 py-0.5">
+                <div key={`p1d-${axis}`} className="flex justify-between items-center px-2 h-6 max-lg:text-xs">
                   <span className="text-cyan-300">{axis}</span>
                   <span className="text-yellow-300">{formatPos(path1?.coordinates?.distanceToGo[i], path1?.coordinates?.decimalPlaces?.[i])}</span>
                 </div>
@@ -176,18 +176,18 @@ function MonitorView({ path1, path2, machineMode }: { path1?: PathData; path2?: 
         <div>
           <div className="grid grid-cols-2">
             <div className="border-r border-gray-700">
-              <div className="bg-gray-800 px-2 py-0.5 text-center text-[10px] text-cyan-300">ABSOLUTE</div>
+              <div className="bg-gray-800 px-2 h-6 flex items-center justify-center text-[10px] max-lg:text-xs text-cyan-300">ABSOLUTE</div>
               {axes2.map((axis, i) => (
-                <div key={`p2a-${axis}`} className="flex justify-between px-2 py-0.5">
+                <div key={`p2a-${axis}`} className="flex justify-between items-center px-2 h-6 max-lg:text-xs">
                   <span className="text-cyan-300">{axis}</span>
                   <span className="text-white">{formatPos(path2?.coordinates?.absolute[i], path2?.coordinates?.decimalPlaces?.[i])}</span>
                 </div>
               ))}
             </div>
             <div>
-              <div className="bg-gray-800 px-2 py-0.5 text-center text-[10px] text-cyan-300">DISTANCE TO GO</div>
+              <div className="bg-gray-800 px-2 h-6 flex items-center justify-center text-[10px] max-lg:text-xs text-cyan-300">DIST TO GO</div>
               {axes2.map((axis, i) => (
-                <div key={`p2d-${axis}`} className="flex justify-between px-2 py-0.5">
+                <div key={`p2d-${axis}`} className="flex justify-between items-center px-2 h-6 max-lg:text-xs">
                   <span className="text-cyan-300">{axis}</span>
                   <span className="text-yellow-300">{formatPos(path2?.coordinates?.distanceToGo[i], path2?.coordinates?.decimalPlaces?.[i])}</span>
                 </div>
@@ -228,7 +228,7 @@ function ModalGCodeGrid({ modal, pathLabel, isRight }: {
   const hasAnyCode = grid.some((row) => row.some((cell) => cell.trim() !== ''));
 
   return (
-    <div className={`px-1 py-1 text-[10px] ${isRight ? '' : 'border-r border-gray-700'}`}>
+    <div className={`px-1 py-1 text-[10px] max-lg:text-[9px] ${isRight ? '' : 'border-r border-gray-700'}`}>
       {grid.map((row, i) => (
         <div key={i} className="flex gap-1">
           {row.map((cell, j) => (
@@ -260,7 +260,7 @@ function ModalGCodeGrid({ modal, pathLabel, isRight }: {
 // ============================================================
 function PlaceholderView({ title, description }: { title: string; description: string }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-gray-500">
+    <div className="flex flex-col items-center justify-center h-full text-gray-500">
       <div className="text-lg font-bold text-gray-400 mb-2">{title}</div>
       <div className="text-sm text-gray-600">{description}</div>
     </div>

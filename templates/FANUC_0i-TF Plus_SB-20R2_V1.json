@@ -441,8 +441,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6104.0",
-          "lampAddr": "R6004.0"
+          "reqAddr": "R6132.0",
+          "lampAddr": "R6032.0"
         },
         {
           "id": "HEAD2",
@@ -455,8 +455,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6104.1",
-          "lampAddr": "R6004.1"
+          "reqAddr": "R6133.0",
+          "lampAddr": "R6033.0"
         },
         {
           "id": "HEAD_CHANGE",
@@ -469,7 +469,7 @@
             "longPressMs": 1500
           },
           "hasLamp": false,
-          "reqAddr": "R6103.7",
+          "reqAddr": "R6131.0",
           "lampAddr": ""
         }
       ],
@@ -489,8 +489,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6100.1",
-          "lampAddr": "R6000.1"
+          "reqAddr": "R6101.0",
+          "lampAddr": "R6001.0"
         },
         {
           "id": "SUB_CHUCK",
@@ -503,8 +503,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6100.3",
-          "lampAddr": "R6000.3"
+          "reqAddr": "R6103.0",
+          "lampAddr": "R6003.0"
         }
       ],
       "name": "CHUCKING",
@@ -524,8 +524,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6104.4",
-          "lampAddr": "R6004.4"
+          "reqAddr": "R6136.0",
+          "lampAddr": "R6036.0"
         },
         {
           "id": "MEMORY",
@@ -538,8 +538,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6104.5",
-          "lampAddr": "R6004.5"
+          "reqAddr": "R6137.0",
+          "lampAddr": "R6037.0"
         },
         {
           "id": "MDI",
@@ -552,8 +552,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6104.6",
-          "lampAddr": "R6004.6"
+          "reqAddr": "R6138.0",
+          "lampAddr": "R6038.0"
         },
         {
           "id": "JOG",
@@ -566,8 +566,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6105.0",
-          "lampAddr": "R6005.0"
+          "reqAddr": "R6140.0",
+          "lampAddr": "R6040.0"
         },
         {
           "id": "DNC",
@@ -580,8 +580,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6105.1",
-          "lampAddr": "R6005.1"
+          "reqAddr": "R0.0",
+          "lampAddr": "R0.0"
         }
       ],
       "name": "MODE"
@@ -600,8 +600,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6105.5",
-          "lampAddr": "R6005.5"
+          "reqAddr": "R6145.0",
+          "lampAddr": "R6045.0"
         },
         {
           "id": "OPT_STOP",
@@ -614,8 +614,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6105.6",
-          "lampAddr": "R6005.6"
+          "reqAddr": "R6146.0",
+          "lampAddr": "R6046.0"
         },
         {
           "id": "AIR_CUT",
@@ -628,8 +628,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6105.7",
-          "lampAddr": "R6005.7"
+          "reqAddr": "R6147.0",
+          "lampAddr": "R6047.0"
         },
         {
           "id": "AUTO_PWR_OFF",
@@ -642,8 +642,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6106.0",
-          "lampAddr": "R6006.0"
+          "reqAddr": "R6148.0",
+          "lampAddr": "R6048.0"
         },
         {
           "id": "WORK_LIGHT",
@@ -656,8 +656,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6106.1",
-          "lampAddr": "R6006.1"
+          "reqAddr": "R6149.0",
+          "lampAddr": "R6049.0"
         },
         {
           "id": "k-1774079767388-r2fj",
@@ -670,8 +670,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6106.2",
-          "lampAddr": "R6006.2"
+          "reqAddr": "R6150.0",
+          "lampAddr": "R6050.0"
         }
       ],
       "name": "FUNCTION"
@@ -690,22 +690,22 @@
             "longPressMs": 2000
           },
           "hasLamp": true,
-          "reqAddr": "R6105.4",
-          "lampAddr": "R6005.4"
+          "reqAddr": "R6144.0",
+          "lampAddr": "R6024.0"
         },
         {
           "id": "E_STOP",
           "size": "large",
           "color": "yellow",
-          "label": "FEED HOLD",
+          "label": "",
           "timing": {
             "holdMs": 1000,
             "timeoutMs": 5000,
             "longPressMs": 3000
           },
           "hasLamp": false,
-          "reqAddr": "R6105.3",
-          "lampAddr": "R6005.3"
+          "reqAddr": "R0.0",
+          "lampAddr": "R0.0"
         },
         {
           "id": "RESET",
@@ -718,7 +718,7 @@
             "longPressMs": 1500
           },
           "hasLamp": false,
-          "reqAddr": "R6103.0",
+          "reqAddr": "R6124.0",
           "lampAddr": ""
         }
       ],
@@ -733,11 +733,18 @@
     "remote": {
       "fields": [
         {
-          "id": "rc-estop",
-          "label": "비상정지 해제",
-          "contact": "B",
+          "id": "tbi-1774959699426-p0up",
+          "label": "도어 닫힘",
+          "contact": "A",
           "enabled": true,
-          "pmcAddr": "R6001.2"
+          "pmcAddr": "R6011.0"
+        },
+        {
+          "id": "tbi-1774959701281-4fyg",
+          "label": "비상정지 해제",
+          "contact": "A",
+          "enabled": true,
+          "pmcAddr": "G8.4"
         }
       ],
       "interlockEnabled": true
@@ -750,17 +757,38 @@
       "fields": [
         {
           "id": "sc-door",
-          "label": "도어 닫힘",
+          "label": "머시닝 모드",
           "contact": "A",
           "enabled": true,
-          "pmcAddr": "R6001.3"
+          "pmcAddr": "R6000.0"
+        },
+        {
+          "id": "tbi-1774959969310-jypr",
+          "label": "메모리 모드",
+          "contact": "A",
+          "enabled": true,
+          "pmcAddr": "R6037.0"
         },
         {
           "id": "sc-estop",
-          "label": "비상정지 해제",
+          "label": "도어 닫힘",
+          "contact": "A",
+          "enabled": true,
+          "pmcAddr": "R6011.0"
+        },
+        {
+          "id": "tbi-1774959968935-e3tz",
+          "label": "절삭유S/W ON",
+          "contact": "A",
+          "enabled": true,
+          "pmcAddr": "R6073.0"
+        },
+        {
+          "id": "tbi-1774961826472-1hzx",
+          "label": "비가동중",
           "contact": "B",
           "enabled": true,
-          "pmcAddr": "R6001.2"
+          "pmcAddr": "R6024.0"
         }
       ],
       "interlockEnabled": true
@@ -944,11 +972,11 @@
     ]
   },
   "schedulerConfig": {
-    "m20Addr": "r6002.4",
+    "m20Addr": "R6020.0",
     "countMode": "M20_EDGE",
-    "resetAddr": "r6103.0",
+    "resetAddr": "R6124.0",
     "countSignal": "scheduler.m20Complete",
-    "subHeadAddr": "r6104.1",
+    "subHeadAddr": "R6133.0",
     "countDisplay": {
       "macroNo": 500,
       "countMacroNo": 900,
@@ -956,11 +984,12 @@
       "presetMacroNo": 10000,
       "presetVarType": "pcode"
     },
-    "mainHeadAddr": "r6104.0",
+    "mainHeadAddr": "R6132.0",
     "maxQueueSize": 15,
-    "oneCycleStopAddr": "r6106.0",
-    "subHeadStatusAddr": "r6004.1",
-    "mainHeadStatusAddr": "r6004.0",
+    "cycleStartAddr": "R6144.0",
+    "oneCycleStopAddr": "R6148.0",
+    "subHeadStatusAddr": "R6033.0",
+    "mainHeadStatusAddr": "R6032.0",
     "path2OnlyTimeoutMs": 4000,
     "path2OnlyConfirmAddr": "A209.7",
     "oneCycleStopSupported": true,
@@ -970,10 +999,9 @@
       "address": 6106,
       "dataType": "bit"
     },
-    "oneCycleStopStatusAddr": "r6006.0",
+    "oneCycleStopStatusAddr": "R6048.0",
     "path2OnlyTimeoutAction": "error",
-    "path2OnlyConfirmDelayMs": 500,
-    "cycleRunningAddr": "R6003.0"
+    "path2OnlyConfirmDelayMs": 500
   },
   "capabilities": {
     "hasCAxis": true,

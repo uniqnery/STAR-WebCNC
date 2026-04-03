@@ -43,9 +43,17 @@ const app = express();
 
 // Middleware
 app.use(cors({
-  origin: config.nodeEnv === 'production'
-    ? config.corsOrigin
-    : 'http://localhost:5173',
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true); // same-origin or curl
+    if (config.nodeEnv === 'production') {
+      const allowed = Array.isArray(config.corsOrigin)
+        ? config.corsOrigin
+        : [config.corsOrigin];
+      return callback(null, allowed.includes(origin) ? origin : false);
+    }
+    // development: allow any http/https origin (LAN, Tailscale, localhost)
+    return callback(null, true);
+  },
   credentials: true,
 }));
 app.use(express.json());

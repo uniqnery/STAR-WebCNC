@@ -84,7 +84,8 @@ export interface EventMessage extends MqttMessage {
     | 'SCHEDULER_ROW_COMPLETED'
     | 'SCHEDULER_COMPLETED'
     | 'SCHEDULER_PAUSED'
-    | 'SCHEDULER_ERROR';
+    | 'SCHEDULER_ERROR'
+    | 'SCHEDULER_CONTROL_DENIED';
   programNo?: string;
   /** M20_COMPLETE: Agent-authoritative count value */
   count?: number;

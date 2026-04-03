@@ -1,4 +1,6 @@
 // Layout Component with Sidebar - Mobile Responsive
+// PC(lg:, ≥1024px): 사이드바 항상 고정 표시 (원본 복원)
+// Mobile(max-lg:, <1024px): 드로어 방식 + 큰 폰트/아이콘
 
 import { ReactNode, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -19,7 +21,6 @@ export function Layout({ children }: LayoutProps) {
   const releaseControlLock = useMachineStore((s) => s.releaseControlLock);
 
   const handleLogout = async () => {
-    // 보유 중인 제어권 모두 해제
     const ownedMachines = Object.entries(controlLockMap)
       .filter(([, entry]) => entry.isOwner)
       .map(([machineId]) => machineId);
@@ -34,21 +35,18 @@ export function Layout({ children }: LayoutProps) {
   };
 
   const handleNavClick = () => {
-    // 모바일에서 메뉴 클릭 시 사이드바 닫기
     setSidebarOpen(false);
   };
 
   const isHqEngineer = user?.role === 'HQ_ENGINEER' || user?.role === 'ADMIN';
   const isHqEngineerOnly = user?.role === 'HQ_ENGINEER';
 
-  // 하위 메뉴 펼침 상태 (기본 접힘)
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({ machines: false, admin: false });
 
   const toggleMenu = (key: string) => {
     setExpandedMenus((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // 일반 메뉴 아이템
   const menuItems = [
     { path: '/', label: 'Dashboard', icon: DashboardIcon },
     { path: '/pop', label: 'POP', icon: POPIcon },
@@ -58,16 +56,16 @@ export function Layout({ children }: LayoutProps) {
     { path: '/settings', label: 'Settings', icon: SettingsIcon },
   ];
 
-  // Machines 하위 메뉴
   const machineSubMenus = [
     { path: '/remote', label: 'Remote Panel', icon: RemotePanelIcon },
     { path: '/scheduler', label: 'Scheduler', icon: SchedulerIcon },
     { path: '/transfer', label: 'File Transfer', icon: TransferIcon },
+    ...(isHqEngineer ? [{ path: '/simtos', label: 'SIMTOS 2026', icon: SimtosIcon }] : []),
   ];
 
   return (
-    <div className="flex h-screen bg-gray-100 dark:bg-gray-900">
-      {/* Mobile Overlay */}
+    <div className="flex h-full bg-gray-100 dark:bg-gray-900">
+      {/* Overlay — PC(lg:)에서는 숨김(사이드바 항상 고정), 모바일 드로어 배경 */}
       {sidebarOpen && (
         <div
           className="fixed inset-0 bg-black/50 z-40 lg:hidden"
@@ -75,49 +73,57 @@ export function Layout({ children }: LayoutProps) {
         />
       )}
 
-      {/* Sidebar */}
+      {/* Sidebar
+          PC(lg:): 항상 고정(static), w-64, 작은 폰트
+          Mobile(max-lg:): 드로어, w-72, 큰 폰트 */}
       <aside
         className={`
           fixed lg:static inset-y-0 left-0 z-50
-          w-64 bg-gray-800 text-white flex flex-col
+          w-64 max-lg:w-72 bg-gray-800 text-white flex flex-col
           transform transition-transform duration-300 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
+        style={{ fontSize: 'initial' }}
       >
-        {/* Logo */}
-        <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+        {/* Logo
+            PC: h-12 + STP 텍스트 표시
+            Mobile: h-16, STP 텍스트 숨김, safe-area 패딩 */}
+        <div
+          className="p-4 border-b border-gray-700 flex items-center justify-between"
+          style={{ paddingTop: 'calc(env(safe-area-inset-top) + 1rem)' }}
+        >
           <div className="flex items-center gap-3">
-            <img src="https://sktasdb.web.app/star.png" alt="Star" className="h-12 w-auto object-contain brightness-0 invert cursor-pointer" onClick={() => window.location.reload()} />
-            <div className="flex flex-col justify-center leading-none gap-[5px]">
+            <img
+              src="https://sktasdb.web.app/star.png"
+              alt="Star"
+              className="h-12 max-lg:h-16 w-auto object-contain brightness-0 invert cursor-pointer"
+              onClick={() => window.location.reload()}
+            />
+            {/* STP 텍스트 — PC만 표시 */}
+            <div className="max-lg:hidden flex flex-col justify-center leading-none gap-[5px]">
               <p className="text-[14px] font-medium text-gray-300"><span className="text-white font-bold text-[16px]">S</span>mart</p>
               <p className="text-[14px] font-medium text-gray-300"><span className="text-white font-bold text-[16px]">T</span>hinking</p>
-              <p className="text-[14px] font-medium text-gray-300"><span className="text-white font-bold text-[16px]">P</span>ro</p>
+              <p className="text-[14px] font-medium text-gray-300"><span className="text-white font-bold text-[16px]">P</span>ro_V2.0</p>
             </div>
           </div>
-          {/* 모바일 닫기 버튼 */}
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="lg:hidden p-2 text-gray-400 hover:text-white"
-          >
-            <CloseIcon className="w-5 h-5" />
-          </button>
+          {/* X 버튼 제거 (사용자 요청) */}
         </div>
 
         {/* Navigation */}
         <nav className="flex-1 p-4 overflow-y-auto">
-          <ul className="space-y-1">
+          <ul className="space-y-1 max-lg:space-y-1.5">
             {/* Dashboard */}
             <li>
               <Link
                 to="/"
                 onClick={handleNavClick}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                className={`flex items-center gap-3 px-3 py-2 max-lg:px-4 max-lg:py-3.5 rounded-lg transition-colors max-lg:text-xl max-lg:font-bold ${
                   location.pathname === '/'
                     ? 'bg-blue-600 text-white'
                     : 'text-gray-300 hover:bg-gray-700'
                 }`}
               >
-                <DashboardIcon className="w-5 h-5" />
+                <DashboardIcon className="w-5 h-5 max-lg:w-6 max-lg:h-6" />
                 <span>Dashboard</span>
               </Link>
             </li>
@@ -126,16 +132,15 @@ export function Layout({ children }: LayoutProps) {
             <li>
               <button
                 onClick={() => toggleMenu('machines')}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-gray-300 hover:bg-gray-700 transition-colors"
+                className="w-full flex items-center justify-between px-3 py-2 max-lg:px-4 max-lg:py-3.5 rounded-lg text-gray-300 hover:bg-gray-700 transition-colors max-lg:text-xl max-lg:font-bold"
               >
                 <div className="flex items-center gap-3">
-                  <MachineIcon className="w-5 h-5" />
+                  <MachineIcon className="w-5 h-5 max-lg:w-6 max-lg:h-6" />
                   <span>Machines</span>
                 </div>
-                <ChevronIcon className={`w-4 h-4 transition-transform ${expandedMenus.machines ? 'rotate-90' : ''}`} />
+                <ChevronIcon className={`w-4 h-4 max-lg:w-5 max-lg:h-5 transition-transform ${expandedMenus.machines ? 'rotate-90' : ''}`} />
               </button>
 
-              {/* 하위 메뉴 */}
               {expandedMenus.machines && (
                 <ul className="mt-1 ml-4 space-y-1 border-l border-gray-700 pl-3">
                   {machineSubMenus.map((item) => {
@@ -145,13 +150,13 @@ export function Layout({ children }: LayoutProps) {
                         <Link
                           to={item.path}
                           onClick={handleNavClick}
-                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                          className={`flex items-center gap-3 px-3 py-2 max-lg:px-4 max-lg:py-3.5 rounded-lg transition-colors text-sm max-lg:text-lg max-lg:font-semibold ${
                             isActive
                               ? 'bg-blue-600 text-white'
                               : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
                           }`}
                         >
-                          <item.icon className="w-4 h-4" />
+                          <item.icon className="w-4 h-4 max-lg:w-5 max-lg:h-5" />
                           <span>{item.label}</span>
                         </Link>
                       </li>
@@ -169,13 +174,13 @@ export function Layout({ children }: LayoutProps) {
                   <Link
                     to={item.path}
                     onClick={handleNavClick}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                    className={`flex items-center gap-3 px-3 py-2 max-lg:px-4 max-lg:py-3.5 rounded-lg transition-colors max-lg:text-xl max-lg:font-bold ${
                       isActive
                         ? 'bg-blue-600 text-white'
                         : 'text-gray-300 hover:bg-gray-700'
                     }`}
                   >
-                    <item.icon className="w-5 h-5" />
+                    <item.icon className="w-5 h-5 max-lg:w-6 max-lg:h-6" />
                     <span>{item.label}</span>
                   </Link>
                 </li>
@@ -193,13 +198,13 @@ export function Layout({ children }: LayoutProps) {
                 <li>
                   <button
                     onClick={() => toggleMenu('admin')}
-                    className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-gray-300 hover:bg-gray-700 transition-colors"
+                    className="w-full flex items-center justify-between px-3 py-2 max-lg:px-4 max-lg:py-3.5 rounded-lg text-gray-300 hover:bg-gray-700 transition-colors max-lg:text-xl max-lg:font-bold"
                   >
                     <div className="flex items-center gap-3">
-                      <AdminIcon className="w-5 h-5" />
+                      <AdminIcon className="w-5 h-5 max-lg:w-6 max-lg:h-6" />
                       <span>Admin</span>
                     </div>
-                    <ChevronIcon className={`w-4 h-4 transition-transform ${expandedMenus.admin ? 'rotate-90' : ''}`} />
+                    <ChevronIcon className={`w-4 h-4 max-lg:w-5 max-lg:h-5 transition-transform ${expandedMenus.admin ? 'rotate-90' : ''}`} />
                   </button>
                   {expandedMenus.admin && (
                     <ul className="mt-1 ml-4 space-y-1 border-l border-gray-700 pl-3">
@@ -207,7 +212,7 @@ export function Layout({ children }: LayoutProps) {
                         <Link
                           to="/admin/machines"
                           onClick={handleNavClick}
-                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm max-lg:text-lg max-lg:font-semibold ${
                             location.pathname === '/admin/machines'
                               ? 'bg-blue-600 text-white'
                               : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
@@ -218,26 +223,26 @@ export function Layout({ children }: LayoutProps) {
                         </Link>
                       </li>
                       {isHqEngineerOnly && (
-                      <li>
-                        <Link
-                          to="/admin/templates"
-                          onClick={handleNavClick}
-                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
-                            location.pathname === '/admin/templates'
-                              ? 'bg-blue-600 text-white'
-                              : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
-                          }`}
-                        >
-                          <TemplateIcon className="w-4 h-4" />
-                          <span>템플릿 편집</span>
-                        </Link>
-                      </li>
+                        <li>
+                          <Link
+                            to="/admin/templates"
+                            onClick={handleNavClick}
+                            className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm max-lg:text-lg max-lg:font-semibold ${
+                              location.pathname === '/admin/templates'
+                                ? 'bg-blue-600 text-white'
+                                : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                            }`}
+                          >
+                            <TemplateIcon className="w-4 h-4" />
+                            <span>템플릿 편집</span>
+                          </Link>
+                        </li>
                       )}
                       <li>
                         <Link
                           to="/admin/panel-editor"
                           onClick={handleNavClick}
-                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm max-lg:text-lg max-lg:font-semibold ${
                             location.pathname === '/admin/panel-editor'
                               ? 'bg-blue-600 text-white'
                               : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
@@ -251,7 +256,7 @@ export function Layout({ children }: LayoutProps) {
                         <Link
                           to="/admin/interlocks"
                           onClick={handleNavClick}
-                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm max-lg:text-lg max-lg:font-semibold ${
                             location.pathname === '/admin/interlocks'
                               ? 'bg-blue-600 text-white'
                               : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
@@ -265,7 +270,7 @@ export function Layout({ children }: LayoutProps) {
                         <Link
                           to="/admin/scheduler-config"
                           onClick={handleNavClick}
-                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm max-lg:text-lg max-lg:font-semibold ${
                             location.pathname === '/admin/scheduler-config'
                               ? 'bg-blue-600 text-white'
                               : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
@@ -286,19 +291,19 @@ export function Layout({ children }: LayoutProps) {
         {/* User */}
         <div className="p-4 border-t border-gray-700">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
+            <div className="w-8 h-8 max-lg:w-10 max-lg:h-10 bg-blue-600 rounded-full flex items-center justify-center font-bold">
               {user?.username?.[0]?.toUpperCase() || 'U'}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{user?.username}</p>
-              <p className="text-xs text-gray-400">{user?.role}</p>
+              <p className="text-sm max-lg:text-base font-medium truncate">{user?.username}</p>
+              <p className="text-xs max-lg:text-sm text-gray-400">{user?.role}</p>
             </div>
             <button
               onClick={handleLogout}
               className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded"
               title="로그아웃"
             >
-              <LogoutIcon className="w-5 h-5" />
+              <LogoutIcon className="w-5 h-5 max-lg:w-6 max-lg:h-6" />
             </button>
           </div>
         </div>
@@ -306,19 +311,33 @@ export function Layout({ children }: LayoutProps) {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Mobile Header */}
-        <header className="lg:hidden bg-gray-800 text-white p-4 flex items-center gap-4">
+        {/* Portrait 모바일 헤더 — PC(lg:) 및 landscape에서 숨김 */}
+        <header
+          className="lg:hidden landscape:hidden bg-gray-800 text-white p-4 flex items-center gap-4 shrink-0"
+          style={{ fontSize: 'initial' }}
+        >
           <button
             onClick={() => setSidebarOpen(true)}
             className="p-2 hover:bg-gray-700 rounded"
           >
-            <HamburgerIcon className="w-6 h-6" />
+            <HamburgerIcon className="w-10 h-10" />
           </button>
-          <h1 className="text-lg font-bold"><span className="text-blue-400">S</span>mart <span className="text-blue-400">T</span>hinking <span className="text-blue-400">P</span>ro</h1>
+          <h1 className="text-3xl font-bold">
+            <span className="text-blue-400">S</span>mart{' '}
+            <span className="text-blue-400">T</span>hinking{' '}
+            <span className="text-blue-400">P</span>ro
+          </h1>
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-auto relative">
+          {/* Landscape 모바일 플로팅 햄버거 — PC(lg:) 및 portrait에서 숨김 */}
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="lg:hidden portrait:hidden fixed top-2 left-2 z-30 p-1.5 bg-gray-800/80 hover:bg-gray-700 text-white rounded shadow-lg backdrop-blur-sm"
+          >
+            <HamburgerIcon className="w-4 h-4" />
+          </button>
           {children}
         </main>
       </div>
@@ -335,13 +354,6 @@ function HamburgerIcon({ className }: { className?: string }) {
   );
 }
 
-function CloseIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-    </svg>
-  );
-}
 
 function DashboardIcon({ className }: { className?: string }) {
   return (
@@ -468,6 +480,14 @@ function PanelEditorIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+    </svg>
+  );
+}
+
+function SimtosIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3l14 9-14 9V3z" />
     </svg>
   );
 }

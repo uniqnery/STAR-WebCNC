@@ -58,6 +58,19 @@ export function RemoteControl() {
   const hasControlLock = controlLock?.isOwner ?? false;
 
   const [monitorTab, setMonitorTab] = useState<MonitorTab>('monitor');
+  const [mobileTab, setMobileTab] = useState<'monitor' | 'panel'>('monitor');
+  const TABS_ORDER: ('monitor' | 'panel')[] = ['monitor', 'panel'];
+  const swipeStartX = useRef<number | null>(null);
+  const handleTouchStart = (e: React.TouchEvent) => { swipeStartX.current = e.touches[0].clientX; };
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (swipeStartX.current === null) return;
+    const dx = e.changedTouches[0].clientX - swipeStartX.current;
+    swipeStartX.current = null;
+    if (Math.abs(dx) < 50) return;
+    const idx = TABS_ORDER.indexOf(mobileTab);
+    if (dx < 0 && idx < TABS_ORDER.length - 1) setMobileTab(TABS_ORDER[idx + 1]);
+    if (dx > 0 && idx > 0) setMobileTab(TABS_ORDER[idx - 1]);
+  };
   const [activePressId, setActivePressId] = useState<string | null>(null);
   const [activeProgress, setActiveProgress] = useState(0);
   const [activeLabel, setActiveLabel] = useState('');
@@ -170,20 +183,44 @@ export function RemoteControl() {
   }, [selectedMachineId, canOperate, addFocasEvent, setWarning]);
 
   return (
-    <div className="p-6 space-y-4">
+    <div
+      className="p-6 lg:p-4 space-y-4 lg:space-y-0 lg:gap-3 lg:h-full lg:flex lg:flex-col lg:overflow-hidden max-lg:landscape:p-1 max-lg:landscape:space-y-1 max-lg:landscape:pl-7"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
       {/* MachineTopBar */}
-      <MachineTopBar
-        pageTitle="원격 조작반"
-        pageId="remote"
-      />
+      <div className="lg:shrink-0">
+        <MachineTopBar
+          pageTitle="원격 조작반"
+          pageId="remote"
+        />
+      </div>
 
-      {/* 2분할 레이아웃: NC 모니터 / 오퍼레이션 패널 (5:5) */}
+      {/* 2분할 레이아웃: NC 모니터 / 오퍼레이션 패널 */}
       {selectedMachineId && (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* 좌측: NC 모니터(탭 숨김) + 알람/메시지 + 탭 바 */}
-            <div className="flex flex-col gap-2 h-[580px]">
-              <div className="flex-1 min-h-0">
+          {/* 모바일 portrait 탭 바 — PC(lg:) 및 landscape에서 숨김 */}
+          <div className="hidden max-lg:portrait:flex rounded-lg overflow-hidden border border-gray-700">
+            {(['monitor', 'panel'] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setMobileTab(t)}
+                className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                  mobileTab === t
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                }`}
+              >
+                {t === 'monitor' ? '모니터' : '패널'}
+              </button>
+            ))}
+          </div>
+
+          {/* PC: lg:grid-cols-2 / 모바일 landscape: grid-cols-2 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 max-lg:landscape:grid-cols-2 gap-4 lg:flex-1 lg:min-h-0">
+            {/* 좌측: NC 모니터 + 알람 + 탭 바 */}
+            <div className={`flex flex-col gap-2 overflow-hidden lg:h-full max-lg:portrait:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-16rem)] max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'monitor' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
+              <div className="flex-1 min-h-0 lg:flex-none lg:shrink-0 lg:h-[435px]">
                 <NCMonitor
                   path1={telemetry?.path1}
                   path2={telemetry?.path2}
@@ -194,8 +231,8 @@ export function RemoteControl() {
                   hideTabs
                 />
               </div>
-              <AlarmStrip alarms={activeAlarms} pmcMessages={activePmcMessages} />
-              {/* 탭 바 — 우측 패널 하단과 수평 맞춤 */}
+              <div className="shrink-0 h-24 lg:h-auto lg:flex-1 lg:min-h-0"><AlarmStrip alarms={activeAlarms} pmcMessages={activePmcMessages} /></div>
+              {/* NC 탭 바 */}
               <div className="shrink-0 flex rounded-lg overflow-hidden border border-gray-700">
                 {TABS.map((tab) => (
                   <button
@@ -211,26 +248,38 @@ export function RemoteControl() {
                   </button>
                 ))}
               </div>
+              {/* 모바일 portrait 전용 로그 — PC(lg:) 및 landscape에서 숨김 */}
+              <div className="lg:hidden landscape:hidden shrink-0 h-40 mt-1">
+                <FocasEventLog events={focasEvents} />
+              </div>
             </div>
 
             {/* 우측: 오퍼레이션 패널 */}
-            <div className="bg-gray-800 text-white rounded-lg shadow p-4 flex flex-col h-[580px]">
-              <OperationPanel
-                groups={panelGroups}
-                lampStates={lampStates}
-                buttonWarnings={buttonWarnings}
-                disabled={!canOperate}
-                activePressId={activePressId}
-                onPressStart={(id, label) => { setActivePressId(id); setActiveLabel(label); }}
-                onPressProgress={(p) => setActiveProgress(p)}
-                onPressEnd={() => { setActivePressId(null); setActiveProgress(0); setActiveLabel(''); }}
-                onExecute={handleButtonExecute}
-              />
+            <div className={`flex flex-col gap-2 lg:h-full max-lg:portrait:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-16rem)] max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'panel' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
+              <div className="bg-gray-800 text-white rounded-lg shadow p-4 max-lg:p-2 flex flex-col lg:flex-1 lg:min-h-0 max-lg:flex-1 max-lg:min-h-0">
+                <OperationPanel
+                  groups={panelGroups}
+                  lampStates={lampStates}
+                  buttonWarnings={buttonWarnings}
+                  disabled={!canOperate}
+                  activePressId={activePressId}
+                  onPressStart={(id, label) => { setActivePressId(id); setActiveLabel(label); }}
+                  onPressProgress={(p) => setActiveProgress(p)}
+                  onPressEnd={() => { setActivePressId(null); setActiveProgress(0); setActiveLabel(''); }}
+                  onExecute={handleButtonExecute}
+                />
+              </div>
+              {/* 모바일 portrait 전용 로그 — PC(lg:) 및 landscape에서 숨김 */}
+              <div className="lg:hidden landscape:hidden shrink-0 h-40 mt-1">
+                <FocasEventLog events={focasEvents} />
+              </div>
             </div>
           </div>
 
-          {/* FOCAS 이벤트 로그 */}
-          <FocasEventLog events={focasEvents} />
+          {/* 이벤트 로그 — PC: 고정 h-40, 모바일 landscape: h-40, 모바일 portrait: 숨김(각 탭에 포함) */}
+          <div className="max-lg:portrait:hidden max-lg:landscape:h-40 max-lg:landscape:shrink-0 lg:shrink-0 lg:h-40">
+            <FocasEventLog events={focasEvents} />
+          </div>
 
           {/* 롱프레스 중앙 오버레이 */}
           {activePressId && (
@@ -276,7 +325,7 @@ function OperationPanel({
     const justifyCls = KEYS_JUSTIFY_CLS[group.nameAlign || 'left'];
     return (
       <GroupSection key={group.id} group={group}>
-        <div className={`flex flex-wrap gap-2 ${justifyCls}`}>
+        <div className={`flex flex-wrap gap-1.5 lg:gap-2 ${justifyCls}`}>
           {group.keys.map((key) => (
             <PmcButton
               key={key.id}
@@ -296,17 +345,17 @@ function OperationPanel({
   };
 
   return (
-    <div className="flex flex-col gap-3 h-full overflow-y-auto px-3 py-2">
+    <div className="flex flex-col gap-2 lg:gap-3 h-full overflow-y-auto px-2 lg:px-3 py-1 lg:py-2">
       {rows.map((row, ri) => (
         <div key={row[0].id}>
-          {ri > 0 && <div className="border-t border-gray-700 mb-3" />}
-          {ri === lastRowIdx && <div className="flex-1 min-h-2" />}
+          {ri > 0 && <div className="border-t border-gray-700 mb-2 lg:mb-3" />}
+          {ri === lastRowIdx && <div className="flex-1 min-h-1 lg:min-h-2" />}
           {row.length === 1 ? (
             renderGroup(row[0])
           ) : (
-            <div className="flex items-start gap-4">
+            <div className="flex items-start gap-3 lg:gap-4">
               {row.map((group, gi) => (
-                <div key={group.id} className="flex items-start gap-4">
+                <div key={group.id} className="flex items-start gap-3 lg:gap-4">
                   {gi > 0 && <div className="self-stretch w-px bg-gray-700" />}
                   {renderGroup(group)}
                 </div>
@@ -344,7 +393,7 @@ function GroupSection({ group, children }: { group: PanelGroup; children: React.
 
   return (
     <div>
-      <div className={`${sizeCls} ${weightCls} ${colorCls} ${alignCls} mb-2 tracking-widest uppercase`}>
+      <div className={`${sizeCls} ${weightCls} ${colorCls} ${alignCls} mb-1 tracking-widest uppercase`}>
         {group.name}
       </div>
       {children}
@@ -423,10 +472,10 @@ function PmcButton({ panelKey, lampOn, warning, disabled, onPressStart, onPressP
   const c = colorConfig[panelKey.color || 'gray'];
 
   const sizeConfig: Record<string, { w: string; h: string; font: string }> = {
-    small:  { w: 'w-[56px]', h: 'h-[70px]', font: 'text-[9px]' },
-    normal: { w: 'w-[70px]', h: 'h-[86px]', font: 'text-[10px]' },
-    wide:   { w: 'w-[110px]', h: 'h-[86px]', font: 'text-[10px]' },
-    large:  { w: 'w-[80px]', h: 'h-[96px]', font: 'text-[11px]' },
+    small:  { w: 'w-[3.5rem]',   h: 'h-[4.375rem]', font: 'text-[0.5625rem]' },
+    normal: { w: 'w-[4.375rem]', h: 'h-[5.375rem]', font: 'text-[0.625rem]'  },
+    wide:   { w: 'w-[6.875rem]', h: 'h-[5.375rem]', font: 'text-[0.625rem]'  },
+    large:  { w: 'w-[5rem]',     h: 'h-[6rem]',     font: 'text-[0.6875rem]' },
   };
   const sz = sizeConfig[panelKey.size] || sizeConfig.normal;
   const btnW = sz.w;
@@ -508,7 +557,7 @@ function AlarmStrip({ alarms, pmcMessages = [] }: AlarmStripProps) {
   const hasAny = hasAlarms || hasMsgs;
 
   return (
-    <div className={`shrink-0 h-[96px] rounded-lg border px-3 py-2 flex flex-col gap-1 overflow-y-auto transition-colors ${
+    <div className={`h-full rounded-lg border px-3 py-2 flex flex-col gap-1 overflow-y-auto transition-colors ${
       hasAlarms ? 'bg-red-950/40 border-red-700/60' : hasMsgs ? 'bg-yellow-950/30 border-yellow-700/50' : 'bg-gray-900 border-gray-700'
     }`}>
       {hasAny ? (

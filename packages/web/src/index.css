@@ -8,6 +8,26 @@ body {
     'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR',
     'Malgun Gothic', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
     sans-serif;
+  /* 노치/Dynamic Island 뒤 배경색 */
+  background-color: #111827;
+}
+
+/* Safe area 패딩 — 노치/Dynamic Island + 하단 홈 인디케이터 */
+#root {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  height: 100dvh;
+  box-sizing: border-box;
+}
+
+/* 모바일 전체 폰트/스페이싱 축소 — rem 기반이라 모든 Tailwind 크기 비례 축소 */
+@media screen and (max-width: 1024px) and (orientation: portrait) {
+  html { font-size: 10px; }
+}
+@media screen and (max-width: 1024px) and (orientation: landscape) {
+  html { font-size: 11px; }
 }
 
 /* Status Indicator */

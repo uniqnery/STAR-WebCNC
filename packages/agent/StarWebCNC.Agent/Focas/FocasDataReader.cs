@@ -959,12 +959,53 @@ public class FocasDataReader
     }
 
     /// <summary>
-    /// 파츠 카운터 읽기 (설정된 매크로 변수에서)
+    /// 파츠 카운터 읽기 (varType에 따라 macro/pcode 선택)
     /// </summary>
-    public int? ReadPartsCount(int macroVariableNo)
+    public int? ReadPartsCount(int macroVariableNo, string varType = "macro")
     {
-        var value = ReadMacroVariable(macroVariableNo);
+        double? value = string.Equals(varType, "pcode", StringComparison.OrdinalIgnoreCase)
+            ? ReadPcodeMacroVariable(macroVariableNo)
+            : ReadMacroVariable(macroVariableNo);
         return value.HasValue ? (int)value.Value : null;
+    }
+
+    /// <summary>
+    /// P코드 매크로 변수 읽기 (cnc_rdpmacro) — P코드 전용 변수 영역
+    /// </summary>
+    public double? ReadPcodeMacroVariable(int variableNo)
+    {
+        if (!_connection.IsConnected) return null;
+        try
+        {
+            var macro = new Focas1.ODBPM();
+            short ret = Focas1.cnc_rdpmacro(_connection.Handle, variableNo, macro);
+            if (ret != Focas1.EW_OK) return null;
+            return macro.mcr_val * Math.Pow(10, -macro.dec_val);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reading P-code macro variable {VariableNo}", variableNo);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 사이클타임 읽기 (PMC D 어드레스 — 래더 실행 주기 횟수)
+    /// addrStr: "D96" 형식, multiplier: 파라미터 No.11930 설정값 (4 또는 8ms)
+    /// 반환값: 밀리초 (ms). 오류 시 null.
+    /// </summary>
+    public double? ReadCycleTimeMs(string addrStr, int multiplier)
+    {
+        if (string.IsNullOrWhiteSpace(addrStr)) return null;
+        // "D96" → type="D", address=96
+        var upper = addrStr.Trim().ToUpper();
+        if (upper.Length < 2) return null;
+        string areaType = upper[0].ToString();
+        if (!int.TryParse(upper[1..], out int address)) return null;
+
+        var raw = ReadPmcAreaValue(areaType, address, "word");
+        if (raw == null) return null;
+        return (double)raw.Value * multiplier;
     }
 
     // ── NC 데이터 (Offset / Counter / Tool-Life) ───────────────

@@ -109,17 +109,23 @@ export interface VirtualPanel {
 
 // ── Section 8: Scheduler Config ───────────────────────────
 export interface SchedulerConfig {
+  // ── 사이클 스타트 출력 ──────────────────────────────────
+  cycleStartAddr: string;            // 사이클 스타트 출력 주소. 빈값 = pmcMap.control.cycleStart fallback
+
   // ── M20 감지 (필수) ──────────────────────────────────────
   m20Addr: string;                   // PMC bit polling 주소 (예: "R6002.4"). 빈값 = 스케줄러 비활성화
 
   // ── 카운트 동기화 ────────────────────────────────────────
   countDisplay: {
-    // count: 현재 생산 수량을 NC에 쓰는 변수
-    countMacroNo: number;          // 카운트 변수 번호
-    countVarType: 'macro' | 'pcode'; // macro: 커스텀 매크로(#xxx), pcode: P코드(Pxxx)
-    // preset: 목표 수량을 NC에서 읽거나 쓰는 변수
-    presetMacroNo: number;         // 프리셋 변수 번호
+    // count: 현재 생산 수량을 NC에서 읽는 변수
+    countMacroNo: number;            // 카운트 변수 번호 (기본 #900)
+    countVarType: 'macro' | 'pcode'; // macro: 커스텀 매크로(#xxx), pcode: P코드(cnc_rdpmacro)
+    // preset: 목표 수량을 NC에서 읽는 변수
+    presetMacroNo: number;           // 프리셋 변수 번호 (기본 #10000)
     presetVarType: 'macro' | 'pcode';
+    // cycle time: PMC D 어드레스 기반
+    cycleTimeAddr: string;           // PMC 주소 (예: "D96"), 빈값이면 수집 안함
+    cycleTimeMultiplier: number;     // 래더 주기 → ms 배수 (파라미터 No.11930: 4 또는 8)
   };
 
   // ── 프로그램 선두 복귀 ───────────────────────────────────
@@ -448,8 +454,9 @@ function createDefaultTemplate(): CncTemplate {
       overrides: { feedRate: null, spindleRate: null },
     },
     schedulerConfig: {
+      cycleStartAddr: '',
       m20Addr: '',
-      countDisplay: { countMacroNo: 500, countVarType: 'macro' as const, presetMacroNo: 501, presetVarType: 'macro' as const },
+      countDisplay: { countMacroNo: 900, countVarType: 'macro' as const, presetMacroNo: 10000, presetVarType: 'pcode' as const, cycleTimeAddr: 'D96', cycleTimeMultiplier: 4 },
       resetAddr: '',
       oneCycleStopAddr: '',
       oneCycleStopStatusAddr: '',
@@ -598,8 +605,9 @@ const _MOCK_SB20R2_STUB: Partial<CncTemplate> = {
     overrides: { feedRate: null, spindleRate: null },
   },
   schedulerConfig: {
+    cycleStartAddr: 'R6105.4',     // 사이클 스타트 출력 (실기기 확인값)
     m20Addr: 'R6002.4',            // M20 완료 신호 (실기기 확인값)
-    countDisplay: { countMacroNo: 500, countVarType: 'macro' as const, presetMacroNo: 501, presetVarType: 'macro' as const },
+    countDisplay: { countMacroNo: 900, countVarType: 'macro' as const, presetMacroNo: 10000, presetVarType: 'pcode' as const, cycleTimeAddr: 'D96', cycleTimeMultiplier: 4 },
     resetAddr: 'R6103.0',          // RESET 신호 (실기기 확인값)
     oneCycleStopAddr: '',          // 원사이클 스톱 출력 (미확인)
     oneCycleStopStatusAddr: '',    // 원사이클 스톱 상태 (미확인)

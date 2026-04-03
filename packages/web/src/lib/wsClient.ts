@@ -106,8 +106,9 @@ class WsClientService {
     }
 
     const token = this.tokenGetter();
-    // API 서버에 직접 연결 (Vite proxy 우회 — proxy가 서버→브라우저 메시지를 제대로 전달 못함)
-    const apiBase: string = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    // VITE_API_URL이 설정된 경우 사용, 없으면 현재 브라우저 hostname + 3000 포트 (모바일/LAN 접속 대응)
+    const apiBase: string = import.meta.env.VITE_API_URL
+      || `http://${window.location.hostname}:3000`;
     const wsBase = apiBase.replace(/^http/, 'ws');
     const url = `${wsBase}/ws?token=${encodeURIComponent(token)}`;
 

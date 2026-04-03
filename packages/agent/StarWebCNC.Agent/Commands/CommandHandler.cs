@@ -93,6 +93,8 @@ public class CommandHandler
                 "READ_TOOL_LIFE"         => await ExecuteReadToolLifeAsync(command),
                 "WRITE_TOOL_LIFE_PRESET" => await ExecuteWriteToolLifePresetAsync(command),
                 "PMC_WRITE"              => await ExecutePmcWriteAsync(command),
+                "SEARCH_PROGRAM"         => ExecuteSearchProgram(command),
+                "REWIND_PROGRAM"         => ExecuteRewind(command),
                 "REWIND"                 => ExecuteRewind(command),
                 "CREATE_BACKUP"          => await ExecuteCreateBackupAsync(command),
                 "PING"                   => ExecutePing(command),
@@ -763,6 +765,40 @@ public class CommandHandler
             CorrelationId = command.CorrelationId,
             Status        = "success",
             Result        = new { address = addrStr, value = bitValue, holdMs }
+        };
+    }
+
+    /// <summary>
+    /// SEARCH_PROGRAM: 프로그램 번호 선택 (cnc_search)
+    /// params: { programNo: int, path?: 1|2 }
+    /// </summary>
+    private CommandResultMessage ExecuteSearchProgram(CommandMessage command)
+    {
+        if (command.Params == null ||
+            !command.Params.TryGetValue("programNo", out var pNoObj) ||
+            !int.TryParse(pNoObj?.ToString(), out int programNo))
+        {
+            return CreateFailureResult(command, "INVALID_PARAMS", "programNo 파라미터가 필요합니다.");
+        }
+
+        int pathNo = 1;
+        if (command.Params.TryGetValue("path", out var pathObj) &&
+            int.TryParse(pathObj?.ToString(), out int parsedPath))
+        {
+            pathNo = parsedPath;
+        }
+
+        bool ok = _dataReader.SearchProgram(programNo, pathNo);
+        if (!ok)
+            return CreateFailureResult(command, "SEARCH_FAILED",
+                $"cnc_search O{programNo:D4} (path={pathNo}) 실패");
+
+        return new CommandResultMessage
+        {
+            MachineId     = _settings.MachineId,
+            CorrelationId = command.CorrelationId,
+            Status        = "success",
+            Result        = new { programNo, path = pathNo },
         };
     }
 

@@ -19,6 +19,8 @@ interface MachineTopBarProps {
   pageTitle: string;
   pageId?: TopBarPageId;
   settingsContent?: ReactNode;
+  rightSlot?: ReactNode; // Row 2 우측 패널을 커스텀 컨텐츠로 대체
+  lockDisabled?: boolean; // true면 제어권 획득 불가 (해제는 항상 가능)
 }
 
 // A접: pmcVal=1 → 정상(true), pmcVal=0 → 비정상(false)
@@ -34,7 +36,7 @@ function getPillOk(
   return field.contact === 'A' ? raw === 1 : raw === 0;
 }
 
-export function MachineTopBar({ pageTitle, pageId, settingsContent }: MachineTopBarProps) {
+export function MachineTopBar({ pageTitle, pageId, settingsContent, rightSlot, lockDisabled = false }: MachineTopBarProps) {
   const user = useAuthStore((s) => s.user);
   const {
     machines,
@@ -84,6 +86,8 @@ export function MachineTopBar({ pageTitle, pageId, settingsContent }: MachineTop
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const [lockLoading, setLockLoading] = useState(false);
+  const [lockError, setLockError] = useState<string | null>(null);
 
   // Auto-select first machine
   useEffect(() => {
@@ -130,31 +134,40 @@ export function MachineTopBar({ pageTitle, pageId, settingsContent }: MachineTop
   }, []);
 
   // Tower light
-  const towerRed = telemetry?.alarmActive ?? false;
-  const towerYellow = telemetry?.runState === 1;
-  const towerGreen = telemetry?.runState === 2;
+  const towerRed    = telemetry?.alarmActive ?? false;
+  const towerGreen  = (telemetry?.runState ?? -1) === 2 || (telemetry?.runState ?? -1) === 3;
+  const towerYellow = !towerGreen && !towerRed && telemetry != null;
 
   const hasTelemetry = !!telemetry;
   const pmcBits = telemetry?.pmcBits;
 
   const handleControlLock = async () => {
     if (!selectedMachineId || !canManage) return;
+    setLockLoading(true);
+    setLockError(null);
     if (hasControlLock) {
       try {
         const res = await machineApi.releaseControl(selectedMachineId);
         if (res.success) releaseControlLock(selectedMachineId);
+        else setLockError(res.error?.message || '제어권 해제 실패');
       } catch {
         releaseControlLock(selectedMachineId);
       }
     } else {
       try {
-        const sessionId = crypto.randomUUID();
+        // crypto.randomUUID()는 HTTPS/localhost 전용 — HTTP LAN 접속(태블릿) 대응 폴백
+        const sessionId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
         const res = await machineApi.acquireControl(selectedMachineId, sessionId);
         if (res.success) acquireControlLock(selectedMachineId, user?.username || 'unknown');
-      } catch {
-        // Server unavailable — don't grant lock without server
+        else setLockError(res.error?.message || '제어권 획득 실패');
+      } catch (err) {
+        setLockError('서버 연결 오류');
+        console.error('[ControlLock] acquire failed:', err);
       }
     }
+    setLockLoading(false);
   };
 
   const handleExtend = async () => {
@@ -200,18 +213,31 @@ export function MachineTopBar({ pageTitle, pageId, settingsContent }: MachineTop
             </div>
           )}
 
-          <button
-            onClick={handleControlLock}
-            disabled={!canManage || !selectedMachineId}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
-              hasControlLock
-                ? 'bg-green-600 text-white hover:bg-green-700'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            } disabled:opacity-50 disabled:cursor-not-allowed`}
-          >
-            <LockIcon locked={!hasControlLock} className="w-4 h-4" />
-            {hasControlLock ? '제어권 해제' : '제어권 획득'}
-          </button>
+          <div className="flex flex-col items-end gap-1">
+            <button
+              onClick={handleControlLock}
+              disabled={lockLoading || !canManage || !selectedMachineId || (!hasControlLock && lockDisabled)}
+              title={!hasControlLock && lockDisabled ? '인터록 조건 미충족' : undefined}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
+                hasControlLock
+                  ? 'bg-green-600 text-white hover:bg-green-700'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'
+              } disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              {lockLoading ? (
+                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+              ) : (
+                <LockIcon locked={!hasControlLock} className="w-4 h-4" />
+              )}
+              {hasControlLock ? '제어권 해제' : '제어권 획득'}
+            </button>
+            {lockError && (
+              <span className="text-xs text-red-400">{lockError}</span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -249,43 +275,47 @@ export function MachineTopBar({ pageTitle, pageId, settingsContent }: MachineTop
           </div>
         </div>
 
-        {/* 우측: 인터록 pills */}
+        {/* 우측: 인터록 pills (rightSlot 있으면 대체) */}
         <div className="flex items-center bg-white dark:bg-gray-800 rounded-lg shadow px-4 py-2.5 gap-2">
-          {/* 인터록 OFF 배지 */}
-          {!interlockEnabled && (
-            <span className="text-[10px] bg-yellow-500/20 text-yellow-400 border border-yellow-600/40 rounded px-1.5 py-0.5 shrink-0 font-semibold">
-              인터록 OFF
-            </span>
-          )}
+          {rightSlot ?? (
+            <>
+              {/* 인터록 OFF 배지 */}
+              {!interlockEnabled && (
+                <span className="text-[10px] bg-yellow-500/20 text-yellow-400 border border-yellow-600/40 rounded px-1.5 py-0.5 shrink-0 font-semibold">
+                  인터록 OFF
+                </span>
+              )}
 
-          {activeFields.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              {activeFields.map((field) => {
-                const ok = getPillOk(field, pmcBits, hasTelemetry);
-                return (
-                  <div
-                    key={field.id}
-                    title={`${field.pmcAddr} (${field.contact}접)`}
-                    className={`px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1 ${
-                      ok === undefined
-                        ? 'bg-gray-100 text-gray-400 dark:bg-gray-700'
-                        : ok
-                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                        : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                    }`}
-                  >
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full ${
-                        ok === undefined ? 'bg-gray-400' : ok ? 'bg-green-500' : 'bg-red-500'
-                      }`}
-                    />
-                    {field.label}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <span className="text-xs text-gray-500">인터록 없음</span>
+              {activeFields.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {activeFields.map((field) => {
+                    const ok = getPillOk(field, pmcBits, hasTelemetry);
+                    return (
+                      <div
+                        key={field.id}
+                        title={`${field.pmcAddr} (${field.contact}접)`}
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-1 ${
+                          ok === undefined
+                            ? 'bg-gray-100 text-gray-400 dark:bg-gray-700'
+                            : ok
+                            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                            : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                        }`}
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            ok === undefined ? 'bg-gray-400' : ok ? 'bg-green-500' : 'bg-red-500'
+                          }`}
+                        />
+                        {field.label}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <span className="text-xs text-gray-500">인터록 없음</span>
+              )}
+            </>
           )}
         </div>
       </div>

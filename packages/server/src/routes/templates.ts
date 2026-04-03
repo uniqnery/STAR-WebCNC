@@ -288,10 +288,10 @@ router.post('/:id/reload',
     for (const machine of template.machines) {
       try {
         await mqttService.publish(TOPICS.COMMAND_TO(machine.machineId), {
-          type: 'RELOAD_TEMPLATE',
+          command: 'RELOAD_TEMPLATE',
           correlationId: `reload-${template.id}-${Date.now()}`,
           machineId: machine.machineId,
-          data: { templateId: template.templateId },
+          params: { templateId: template.templateId },
           timestamp: new Date().toISOString(),
         });
         notified.push(machine.machineId);

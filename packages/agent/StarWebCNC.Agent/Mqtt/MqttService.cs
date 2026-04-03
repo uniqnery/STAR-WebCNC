@@ -377,6 +377,8 @@ public class TelemetryData
     public int Feedrate { get; set; }
     public int SpindleSpeed { get; set; }
     public int PartsCount { get; set; }
+    public int PresetCount { get; set; }
+    public double CycleTime { get; set; }   // 초(seconds) 단위
     public bool AlarmActive { get; set; }
     public int[]? AbsolutePosition { get; set; }
     public int[]? MachinePosition { get; set; }

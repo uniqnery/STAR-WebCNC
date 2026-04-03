@@ -1,6 +1,6 @@
 // Scheduler Page — SchedulerRow 기반 큐 관리 + 실행 제어
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   useMachineStore,
   useMachineTelemetry,
@@ -56,6 +56,19 @@ export function Scheduler() {
     .filter((m) => m.pmcAddr && pmcBits[m.pmcAddr] === 1);
 
   const [monitorTab, setMonitorTab] = useState<MonitorTab>('monitor');
+  const [mobileTab, setMobileTab] = useState<'monitor' | 'scheduler'>('monitor');
+  const SCHED_TABS_ORDER: ('monitor' | 'scheduler')[] = ['monitor', 'scheduler'];
+  const swipeStartX = useRef<number | null>(null);
+  const handleTouchStart = (e: React.TouchEvent) => { swipeStartX.current = e.touches[0].clientX; };
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (swipeStartX.current === null) return;
+    const dx = e.changedTouches[0].clientX - swipeStartX.current;
+    swipeStartX.current = null;
+    if (Math.abs(dx) < 50) return;
+    const idx = SCHED_TABS_ORDER.indexOf(mobileTab);
+    if (dx < 0 && idx < SCHED_TABS_ORDER.length - 1) setMobileTab(SCHED_TABS_ORDER[idx + 1]);
+    if (dx > 0 && idx > 0) setMobileTab(SCHED_TABS_ORDER[idx - 1]);
+  };
   const [actionError, setActionError] = useState<string | null>(null);
   const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
   const [editingPathKey, setEditingPathKey] = useState<'path1' | 'path2' | 'path3'>('path1');
@@ -83,22 +96,26 @@ export function Scheduler() {
 
   useEffect(() => { loadRows(); }, [loadRows]);
 
-  // DNC config 로드
+  // DNC config 로드 — 서버(경로/모드) + localStorage(기본값) 머지
   useEffect(() => {
     if (!selectedMachineId) return;
     dncApi.getConfig(selectedMachineId).then((res) => {
       if (res.success && res.data) {
-        const d = res.data as { machineId: string; dncConfig: { path1?: string; path2?: string; path3?: string; mainMode?: string; subMode?: string; executionMode?: string } };
+        const d = res.data as { machineId: string; dncConfig: { path1?: string; path2?: string; path3?: string; mainMode?: string; 'memory'?: string; executionMode?: string } };
         if (d.dncConfig && (d.dncConfig.path1 !== undefined || d.dncConfig.path2 !== undefined)) {
           // 하위호환: 서버에 구버전 executionMode만 있으면 mainMode로 사용
           const mainMode = (d.dncConfig.mainMode ?? d.dncConfig.executionMode ?? 'memory') as 'memory' | 'dnc';
-          const subMode  = (d.dncConfig.subMode ?? 'memory') as 'memory' | 'dnc';
+          // 기존 localStorage의 defaultMainPgm/defaultSubPgm/defaultPreset 보존
+          const existing = useMachineStore.getState().dncConfigs[selectedMachineId];
           setDncConfig(selectedMachineId, {
             machineId: selectedMachineId,
             pathCount,
             mainMode,
-            subMode,
+            subMode: 'memory',
             dncPaths: { path1: d.dncConfig.path1 || '', path2: d.dncConfig.path2 || '', path3: d.dncConfig.path3 },
+            defaultMainPgm: existing?.defaultMainPgm,
+            defaultSubPgm:  existing?.defaultSubPgm,
+            defaultPreset:  existing?.defaultPreset,
           });
         }
       }
@@ -215,13 +232,13 @@ export function Scheduler() {
       isAdmin={isAdminOrEngineer}
       isSchedulerRunning={schedulerState === 'RUNNING'}
       onOpenFolderBrowser={(pathKey) => { setEditingPathKey(pathKey); setFolderBrowserOpen(true); }}
-      onSave={(paths, mainMode, subMode, defaults) => {
+      onSave={(paths, mainMode, defaults) => {
         if (!selectedMachineId) return;
         const config: MachineDncConfig = {
           machineId: selectedMachineId,
           pathCount,
           mainMode,
-          subMode,
+          subMode: 'memory',
           dncPaths: paths,
           defaultMainPgm: defaults.mainPgm || undefined,
           defaultSubPgm:  defaults.subPgm  || undefined,
@@ -236,15 +253,21 @@ export function Scheduler() {
           path2: paths.path2,
           path3: paths.path3,
           mainMode,
-          subMode,
+          subMode: 'memory',
         }).catch(() => null);
       }}
     />
   );
 
   return (
-    <div className="p-6 space-y-4">
-      <MachineTopBar pageTitle="스케줄러" pageId="scheduler" settingsContent={dncSettingsContent} />
+    <div
+      className="p-6 lg:p-4 space-y-4 lg:space-y-0 lg:gap-3 lg:h-full lg:flex lg:flex-col lg:overflow-hidden max-lg:landscape:p-1 max-lg:landscape:space-y-1 max-lg:landscape:pl-7"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
+      <div className="lg:shrink-0">
+        <MachineTopBar pageTitle="스케줄러" pageId="scheduler" settingsContent={dncSettingsContent} />
+      </div>
 
       {/* 큐 초기화 확인 모달 */}
       {confirmOpen && (
@@ -293,7 +316,7 @@ export function Scheduler() {
             machineId: selectedMachineId,
             pathCount,
             mainMode: dncConfig?.mainMode ?? 'memory',
-            subMode:  dncConfig?.subMode  ?? 'memory',
+            subMode: 'memory',
             dncPaths: updatedPaths,
             updatedAt: new Date().toISOString(),
             updatedBy: user?.username,
@@ -306,10 +329,28 @@ export function Scheduler() {
 
       {selectedMachineId && (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* 좌측: NC 모니터(탭 숨김) + 알람/메시지 + 탭 바 */}
-            <div className="flex flex-col gap-2 h-[580px]">
-              <div className="flex-1 min-h-0">
+          {/* 모바일 portrait 탭 바 — PC(lg:) 및 landscape에서 숨김 */}
+          <div className="hidden max-lg:portrait:flex rounded-lg overflow-hidden border border-gray-700">
+            {(['monitor', 'scheduler'] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setMobileTab(t)}
+                className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                  mobileTab === t
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                }`}
+              >
+                {t === 'monitor' ? '모니터' : '스케줄러'}
+              </button>
+            ))}
+          </div>
+
+          {/* PC: lg:grid-cols-2 / 모바일 landscape: grid-cols-2 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 max-lg:landscape:grid-cols-2 gap-4 lg:flex-1 lg:min-h-0">
+            {/* 좌측: NC 모니터 + 알람 + 탭 바 */}
+            <div className={`flex flex-col gap-2 overflow-hidden lg:h-full max-lg:portrait:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-22rem)] max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'monitor' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
+              <div className="flex-1 min-h-0 lg:flex-none lg:shrink-0 lg:h-[435px]">
                 <NCMonitor
                   path1={telemetry?.path1}
                   path2={telemetry?.path2}
@@ -320,8 +361,7 @@ export function Scheduler() {
                   hideTabs
                 />
               </div>
-              <AlarmStrip alarms={activeAlarms} pmcMessages={activePmcMessages} />
-              {/* 탭 바 — 리모트 패널과 동일한 위치 */}
+              <div className="shrink-0 h-24 lg:h-auto lg:flex-1 lg:min-h-0"><AlarmStrip alarms={activeAlarms} pmcMessages={activePmcMessages} /></div>
               <div className="shrink-0 flex rounded-lg overflow-hidden border border-gray-700">
                 {TABS.map((tab) => (
                   <button
@@ -337,10 +377,15 @@ export function Scheduler() {
                   </button>
                 ))}
               </div>
+              {/* 모바일 portrait 전용 로그 — PC(lg:) 및 landscape에서 숨김 */}
+              <div className="lg:hidden landscape:hidden shrink-0 h-40 mt-1">
+                <FocasEventLog events={focasEvents} />
+              </div>
             </div>
 
             {/* 우측: 스케줄러 */}
-            <div className="bg-gray-800 text-white rounded-lg shadow p-4 flex flex-col h-[580px]">
+            <div className={`flex flex-col gap-2 lg:h-full max-lg:portrait:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-22rem)] max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'scheduler' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
+            <div className="bg-gray-800 text-white rounded-lg shadow p-4 flex flex-col lg:flex-1 lg:min-h-0 max-lg:flex-1 max-lg:min-h-0">
 
               {/* 현재 실행 상태 + 제어 버튼 (같은 줄, 우측 정렬) */}
               <div className="mb-3 p-3 bg-gray-700 rounded-lg flex items-center gap-2">
@@ -374,12 +419,8 @@ export function Scheduler() {
                   </span>
                   {pathCount >= 2 && <>
                     <span className="text-[10px] text-gray-400 ml-1">서브</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold font-mono ${
-                      (dncConfig?.subMode ?? 'memory') === 'dnc'
-                        ? 'bg-purple-700/60 text-purple-200'
-                        : 'bg-gray-600 text-gray-300'
-                    }`}>
-                      {(dncConfig?.subMode ?? 'memory') === 'dnc' ? 'DNC' : 'MEM'}
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold font-mono bg-gray-600 text-gray-300">
+                      MEM
                     </span>
                   </>}
                 </div>
@@ -473,10 +514,10 @@ export function Scheduler() {
               </div>
 
               {/* 행 추가 / 초기화 */}
-              <div className="mt-3 flex gap-2">
+              <div className="mt-3 flex gap-2 shrink-0">
                 <button
                   onClick={handleAddRow}
-                  disabled={!isAdminOrEngineer || schedulerState === 'RUNNING'}
+                  disabled={!isAdminOrEngineer}
                   className="flex-1 py-2 border-2 border-dashed border-gray-600 rounded-lg text-gray-400 hover:border-blue-500 hover:text-blue-400 transition-colors disabled:opacity-35 disabled:cursor-not-allowed text-sm"
                 >
                   + 행 추가
@@ -490,10 +531,18 @@ export function Scheduler() {
                 </button>
               </div>
             </div>
+
+              {/* 모바일 portrait 전용 로그 — PC(lg:) 및 landscape에서 숨김 */}
+              <div className="lg:hidden landscape:hidden shrink-0 h-40 mt-1">
+                <FocasEventLog events={focasEvents} />
+              </div>
+            </div>
           </div>
 
-          {/* FOCAS 이벤트 로그 */}
-          <FocasEventLog events={focasEvents} />
+          {/* 이벤트 로그 — PC: 고정 h-40, 모바일 landscape: h-40, 모바일 portrait: 숨김(각 탭에 포함) */}
+          <div className="max-lg:portrait:hidden max-lg:landscape:h-40 max-lg:landscape:shrink-0 lg:shrink-0 lg:h-40">
+            <FocasEventLog events={focasEvents} />
+          </div>
           <GCodeViewer />
         </>
       )}
@@ -524,10 +573,13 @@ function SchedulerRowItem({
   const [subPgm, setSubPgm] = useState((row.subProgramNo ?? '').replace(/^O/i, ''));
   const [preset, setPreset] = useState(String(row.preset));
 
-  // row 변경 시 로컬 state 동기화 (WS 업데이트)
-  useEffect(() => { setMainPgm((row.mainProgramNo ?? '').replace(/^O/i, '')); }, [row.mainProgramNo]);
-  useEffect(() => { setSubPgm((row.subProgramNo ?? '').replace(/^O/i, '')); }, [row.subProgramNo]);
-  useEffect(() => { setPreset(String(row.preset)); }, [row.preset]);
+  // 포커스 중 WS 동기화 차단 — onBlur 후에만 서버값 반영
+  const isEditingRef = useRef(false);
+
+  // row 변경 시 로컬 state 동기화 (편집 중이면 건너뜀)
+  useEffect(() => { if (!isEditingRef.current) setMainPgm((row.mainProgramNo ?? '').replace(/^O/i, '')); }, [row.mainProgramNo]);
+  useEffect(() => { if (!isEditingRef.current) setSubPgm((row.subProgramNo ?? '').replace(/^O/i, '')); }, [row.subProgramNo]);
+  useEffect(() => { if (!isEditingRef.current) setPreset(String(row.preset)); }, [row.preset]);
 
   const hasError = row.status === 'PENDING' && !!row.lastError;
 
@@ -546,7 +598,8 @@ function SchedulerRowItem({
             type="text"
             value={mainPgm}
             onChange={(e) => setMainPgm(e.target.value.replace(/\D/g, '').slice(0, 4))}
-            onBlur={() => onBlur(row.id, 'mainProgramNo', mainPgm ? `O${mainPgm}` : '')}
+            onFocus={() => { isEditingRef.current = true; }}
+            onBlur={() => { isEditingRef.current = false; onBlur(row.id, 'mainProgramNo', mainPgm ? `O${mainPgm}` : ''); }}
             disabled={!canEdit}
             className="w-[52px] px-1 py-0.5 border border-gray-600 rounded font-mono text-xs bg-gray-700 text-white disabled:opacity-50 focus:border-blue-500 focus:outline-none"
             placeholder="0001"
@@ -562,10 +615,11 @@ function SchedulerRowItem({
             type="text"
             value={subPgm}
             onChange={(e) => setSubPgm(e.target.value.replace(/\D/g, '').slice(0, 4))}
-            onBlur={() => onBlur(row.id, 'subProgramNo', subPgm ? `O${subPgm}` : null)}
+            onFocus={() => { isEditingRef.current = true; }}
+            onBlur={() => { isEditingRef.current = false; onBlur(row.id, 'subProgramNo', subPgm ? `O${subPgm}` : null); }}
             disabled={!canEdit}
             className="w-[52px] px-1 py-0.5 border border-gray-600 rounded font-mono text-xs bg-gray-700 text-white disabled:opacity-50 focus:border-blue-500 focus:outline-none"
-            placeholder="9001"
+            placeholder="0001"
           />
         </div>
       </td>
@@ -576,7 +630,8 @@ function SchedulerRowItem({
           type="number"
           value={preset}
           onChange={(e) => setPreset(e.target.value)}
-          onBlur={() => onBlur(row.id, 'preset', parseInt(preset) || 1)}
+          onFocus={() => { isEditingRef.current = true; }}
+          onBlur={() => { isEditingRef.current = false; onBlur(row.id, 'preset', parseInt(preset) || 1); }}
           disabled={!canEdit}
           min={1}
           className="w-[52px] px-1 py-0.5 border border-gray-600 rounded text-xs text-center bg-gray-700 text-white disabled:opacity-50 focus:border-blue-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
@@ -663,7 +718,7 @@ function AlarmStrip({ alarms, pmcMessages = [] }: { alarms: Alarm[]; pmcMessages
   const hasAny    = hasAlarms || hasMsgs;
 
   return (
-    <div className={`shrink-0 h-[96px] rounded-lg border px-3 py-2 flex flex-col gap-1 overflow-y-auto transition-colors ${
+    <div className={`h-full rounded-lg border px-3 py-2 flex flex-col gap-1 overflow-y-auto transition-colors ${
       hasAlarms ? 'bg-red-950/40 border-red-700/60' : hasMsgs ? 'bg-yellow-950/30 border-yellow-700/50' : 'bg-gray-900 border-gray-700'
     }`}>
       {hasAny ? (
@@ -922,17 +977,16 @@ function DncSettingsContent({
   isAdmin: boolean;
   isSchedulerRunning: boolean;
   onOpenFolderBrowser: (pathKey: 'path1' | 'path2' | 'path3') => void;
-  onSave: (paths: DncPathConfig, mainMode: 'memory' | 'dnc', subMode: 'memory' | 'dnc', defaults: { mainPgm: string; subPgm: string; preset: number | null }) => void;
+  onSave: (paths: DncPathConfig, mainMode: 'memory' | 'dnc', defaults: { mainPgm: string; subPgm: string; preset: number | null }) => void;
 }) {
   const paths = dncConfig?.dncPaths || { path1: '', path2: '' };
   const [mainMode, setMainMode] = useState<'memory' | 'dnc'>(dncConfig?.mainMode ?? 'memory');
-  const [subMode,  setSubMode]  = useState<'memory' | 'dnc'>(dncConfig?.subMode  ?? 'memory');
   const [defMainPgm, setDefMainPgm] = useState(dncConfig?.defaultMainPgm?.replace(/^O/i, '') ?? '');
   const [defSubPgm,  setDefSubPgm]  = useState(dncConfig?.defaultSubPgm?.replace(/^O/i, '')  ?? '');
   const [defPreset,  setDefPreset]  = useState(dncConfig?.defaultPreset != null ? String(dncConfig.defaultPreset) : '');
   const canEdit = isAdmin && !isSchedulerRunning;
 
-  const needsDnc = mainMode === 'dnc' || subMode === 'dnc';
+  const needsDnc = mainMode === 'dnc';
 
   return (
     <div className="space-y-3">
@@ -947,44 +1001,27 @@ function DncSettingsContent({
         <div className="text-xs text-gray-500 px-1">관리자만 설정을 변경할 수 있습니다 (읽기 전용)</div>
       )}
 
-      {/* Path별 실행 모드 선택 */}
+      {/* 실행 모드 선택 — 메인만 */}
       <div className="space-y-2">
         <div className="text-xs text-gray-500 dark:text-gray-400 font-medium">실행 모드</div>
         <ModeToggle label="메인 (Path1)" value={mainMode} onChange={setMainMode} disabled={!canEdit} />
-        {pathCount >= 2 && (
-          <ModeToggle label="서브 (Path2)" value={subMode} onChange={setSubMode} disabled={!canEdit} />
-        )}
       </div>
 
-      {/* DNC 경로 설정 — DNC 모드인 Path만 표시 */}
+      {/* DNC 경로 설정 — 메인 DNC 모드일 때만 표시 */}
       {needsDnc && (
         <div className="space-y-2">
           <div className="text-xs text-gray-500 dark:text-gray-400 font-medium">DNC 경로 설정</div>
-          {mainMode === 'dnc' && (
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-gray-500 dark:text-gray-400 w-20 flex-shrink-0">메인 (Path1)</span>
-              <div className="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded text-xs font-mono text-gray-700 dark:text-gray-300 truncate min-h-[32px] flex items-center">
-                {paths.path1 || <span className="text-gray-400 italic">미설정</span>}
-              </div>
-              <button onClick={() => onOpenFolderBrowser('path1')} disabled={!canEdit}
-                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0">
-                선택
-              </button>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-500 dark:text-gray-400 w-20 flex-shrink-0">메인 (Path1)</span>
+            <div className="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded text-xs font-mono text-gray-700 dark:text-gray-300 truncate min-h-[32px] flex items-center">
+              {paths.path1 || <span className="text-gray-400 italic">미설정</span>}
             </div>
-          )}
-          {subMode === 'dnc' && pathCount >= 2 && (
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-gray-500 dark:text-gray-400 w-20 flex-shrink-0">서브 (Path2)</span>
-              <div className="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded text-xs font-mono text-gray-700 dark:text-gray-300 truncate min-h-[32px] flex items-center">
-                {paths.path2 || <span className="text-gray-400 italic">미설정</span>}
-              </div>
-              <button onClick={() => onOpenFolderBrowser('path2')} disabled={!canEdit}
-                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0">
-                선택
-              </button>
-            </div>
-          )}
-          {pathCount >= 3 && (mainMode === 'dnc' || subMode === 'dnc') && (
+            <button onClick={() => onOpenFolderBrowser('path1')} disabled={!canEdit}
+              className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0">
+              선택
+            </button>
+          </div>
+          {pathCount >= 3 && (
             <div className="flex items-center gap-3">
               <span className="text-xs text-gray-500 dark:text-gray-400 w-20 flex-shrink-0">Path3</span>
               <div className="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded text-xs font-mono text-gray-700 dark:text-gray-300 truncate min-h-[32px] flex items-center">
@@ -1025,11 +1062,10 @@ function DncSettingsContent({
               value={defSubPgm}
               onChange={(e) => setDefSubPgm(e.target.value.replace(/\D/g, '').slice(0, 4))}
               disabled={!canEdit}
-              placeholder="비어있음"
+              placeholder="0001"
               className="w-16 px-2 py-1 text-xs font-mono border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
-          <span className="text-[10px] text-gray-400">(미입력 시 비어있음)</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500 dark:text-gray-400 w-20 flex-shrink-0">PRESET</span>
@@ -1049,7 +1085,7 @@ function DncSettingsContent({
       <div className="flex justify-end gap-2 pt-1">
         {needsDnc && (
           <button
-            onClick={() => onSave({ path1: '', path2: '', ...(pathCount >= 3 ? { path3: '' } : {}) }, mainMode, subMode, { mainPgm: defMainPgm ? `O${defMainPgm}` : '', subPgm: defSubPgm ? `O${defSubPgm}` : '', preset: defPreset ? parseInt(defPreset) : null })}
+            onClick={() => onSave({ path1: '', path2: '', ...(pathCount >= 3 ? { path3: '' } : {}) }, mainMode, { mainPgm: defMainPgm ? `O${defMainPgm}` : '', subPgm: defSubPgm ? `O${defSubPgm}` : '', preset: defPreset ? parseInt(defPreset) : null })}
             disabled={!canEdit}
             className="px-3 py-1.5 text-xs text-gray-500 hover:text-red-500 border border-gray-300 dark:border-gray-600 rounded disabled:opacity-40 disabled:cursor-not-allowed"
           >
@@ -1057,7 +1093,7 @@ function DncSettingsContent({
           </button>
         )}
         <button
-          onClick={() => onSave(paths, mainMode, subMode, { mainPgm: defMainPgm ? `O${defMainPgm}` : '', subPgm: defSubPgm ? `O${defSubPgm}` : '', preset: defPreset ? parseInt(defPreset) : null })}
+          onClick={() => onSave(paths, mainMode, { mainPgm: defMainPgm ? `O${defMainPgm}` : '', subPgm: defSubPgm ? `O${defSubPgm}` : '', preset: defPreset ? parseInt(defPreset) : null })}
           disabled={!canEdit}
           className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
         >
