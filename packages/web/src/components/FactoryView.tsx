@@ -31,7 +31,15 @@ export function FactoryView({ machines, onSelectMachine, selectedMachineId }: Fa
     setLayout,
     bringForward,
     sendBackward,
+    loadFromServer,
+    saveToServer,
   } = useLayoutStore();
+
+  // 마운트 시 서버에서 레이아웃 로드 (모든 기기 공유)
+  useEffect(() => {
+    loadFromServer();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 선택된 장비 (좌측 패널)
   const selectedMachine = machines.find((m) => m.machineId === selectedMachineId) ?? null;
@@ -91,6 +99,7 @@ export function FactoryView({ machines, onSelectMachine, selectedMachineId }: Fa
     setShowEditPanel(false);
     selectItem(null);
     setLayoutSnapshot(null);
+    void saveToServer();
   };
 
   // 취소

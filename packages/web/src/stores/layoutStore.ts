@@ -2,6 +2,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { layoutApi } from '../lib/api';
 
 // 배치 가능한 요소 타입
 export type LayoutItemType = 'machine' | 'barfeeder' | 'rect' | 'circle';
@@ -56,6 +57,9 @@ interface LayoutState {
   bringForward: (itemId: string) => void;
   sendBackward: (itemId: string) => void;
   duplicateItem: (itemId: string) => void;
+  // Server sync
+  loadFromServer: () => Promise<void>;
+  saveToServer: () => Promise<void>;
 }
 
 // 기본 레이아웃
@@ -221,6 +225,27 @@ export const useLayoutStore = create<LayoutState>()(
           }
           return { layout: { ...state.layout, items, updatedAt: new Date().toISOString() } };
         });
+      },
+
+      loadFromServer: async () => {
+        try {
+          const res = await layoutApi.getFactoryLayout();
+          if (res.success && res.data) {
+            const serverLayout = res.data as FactoryLayout;
+            set({ layout: serverLayout });
+            itemCounter = extractMaxCounter(serverLayout.items);
+          }
+        } catch {
+          // 서버 없으면 localStorage 유지
+        }
+      },
+
+      saveToServer: async () => {
+        try {
+          await layoutApi.saveFactoryLayout(get().layout);
+        } catch {
+          // 저장 실패 시 조용히 무시 (localStorage는 이미 저장됨)
+        }
       },
 
       duplicateItem: (itemId) => {

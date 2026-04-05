@@ -86,4 +86,50 @@ router.put('/registration-codes', authenticate, requireRole(['ADMIN', 'HQ_ENGINE
   }
 });
 
+/**
+ * GET /api/settings/factory-layout
+ * 공장 레이아웃 데이터 조회 (로그인 사용자 누구나)
+ */
+router.get('/factory-layout', authenticate, async (
+  _req: Request,
+  res: Response
+) => {
+  try {
+    const row = await prisma.globalSetting.findUnique({ where: { key: 'factory.layout' } });
+    if (!row) {
+      return res.json({ success: true, data: null });
+    }
+    return res.json({ success: true, data: JSON.parse(row.value as string) });
+  } catch (error) {
+    console.error('Get factory-layout error:', error);
+    return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: '레이아웃 조회 실패' } });
+  }
+});
+
+/**
+ * PUT /api/settings/factory-layout
+ * 공장 레이아웃 데이터 저장 (ADMIN/HQ_ENGINEER만)
+ */
+router.put('/factory-layout', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const layout = req.body;
+    if (!layout || typeof layout !== 'object') {
+      return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: '유효하지 않은 레이아웃 데이터' } });
+    }
+    const updatedBy = req.user?.username ?? 'unknown';
+    await prisma.globalSetting.upsert({
+      where:  { key: 'factory.layout' },
+      update: { value: JSON.stringify(layout), updatedBy },
+      create: { key: 'factory.layout', value: JSON.stringify(layout), updatedBy },
+    });
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Save factory-layout error:', error);
+    return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: '레이아웃 저장 실패' } });
+  }
+});
+
 export default router;

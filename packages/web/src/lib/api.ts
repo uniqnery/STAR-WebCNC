@@ -569,6 +569,13 @@ export const settingsApi = {
     api.put('/api/settings/registration-codes', codes),
 };
 
+export const layoutApi = {
+  getFactoryLayout: () =>
+    api.get<unknown>('/api/settings/factory-layout'),
+  saveFactoryLayout: (layout: unknown) =>
+    api.put('/api/settings/factory-layout', layout),
+};
+
 export const diagnosticsApi = {
   /** 시스템 전체 연결 상태 조회 */
   getStatus: () =>
