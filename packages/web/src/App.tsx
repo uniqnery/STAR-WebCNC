@@ -2,6 +2,7 @@ import { useEffect, Component, ReactNode, useState } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
 import { useMachineStore } from './stores/machineStore';
+import { useCameraStore } from './stores/cameraStore';
 import { Login } from './components/Login';
 import { Register } from './components/Register';
 import { Layout } from './components/Layout';
@@ -143,6 +144,7 @@ function WsConnector() {
     if (isAuthenticated && accessToken) {
       initWebSocket(accessToken);
       void fetchMachines();
+      void (useCameraStore.getState() as unknown as { loadFromServer: () => Promise<void> }).loadFromServer();
     } else {
       destroyWebSocket();
     }
