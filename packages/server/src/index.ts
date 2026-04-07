@@ -28,6 +28,7 @@ import templateRoutes from './routes/templates';
 import fileRoutes from './routes/files';
 import diagnosticsRoutes from './routes/diagnostics';
 import settingsRoutes from './routes/settings';
+import cameraRoutes from './routes/camera';
 import { errorHandler } from './middleware/error';
 
 // Services
@@ -122,6 +123,7 @@ app.use('/api/diagnostics', diagnosticsRoutes);
 
 // Settings Routes (전역 설정)
 app.use('/api/settings', settingsRoutes);
+app.use('/api/camera', cameraRoutes);
 
 // Error Handler (must be last middleware)
 app.use(errorHandler);

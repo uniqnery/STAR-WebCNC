@@ -1,6 +1,7 @@
 // Camera Store - Zustand (옵션 기능)
 
 import { create } from 'zustand';
+import { cameraServerApi } from '../lib/api';
 
 export interface CameraConfig {
   id: string;
@@ -8,7 +9,7 @@ export interface CameraConfig {
   ipAddress: string;
   rtspPort: number;
   username: string;
-  password: string;            // base64 encoded in localStorage
+  password: string;            // 서버 전송 시 평문, localStorage는 base64
   streamPath: string;
   enabled: boolean;
   assignedMachineId?: string;
@@ -27,6 +28,7 @@ interface CameraState {
   updateCamera: (id: string, updates: Partial<CameraConfig>) => void;
   removeCamera: (id: string) => void;
   setStreamStatus: (cameraId: string, status: StreamStatus) => void;
+  syncToServer: () => Promise<void>;
 }
 
 // localStorage
@@ -127,6 +129,20 @@ export const useCameraStore = create<CameraState>((set) => ({
     set((state) => ({
       streamStatuses: { ...state.streamStatuses, [cameraId]: status },
     })),
+
+  syncToServer: async () => {
+    try {
+      const { cameras } = useCameraStore.getState();
+      // localStorage는 base64 패스워드, 서버엔 평문 전송 (서버 내부에서만 사용)
+      const toSync = cameras.map((c) => ({
+        ...c,
+        password: c.password ? (c.password.startsWith('●') ? '' : (() => { try { return atob(c.password); } catch { return c.password; } })()) : '',
+      }));
+      await cameraServerApi.saveConfigs(toSync);
+    } catch {
+      // 서버 연결 실패 시 무시
+    }
+  },
 }));
 
 // Selectors

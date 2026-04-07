@@ -576,6 +576,26 @@ export const layoutApi = {
     api.put('/api/settings/factory-layout', layout),
 };
 
+export const cameraServerApi = {
+  /** 서버에 저장된 카메라 설정 목록 조회 */
+  getConfigs: () =>
+    api.get<unknown[]>('/api/camera/configs'),
+
+  /** 카메라 설정 전체를 서버에 저장 */
+  saveConfigs: (cameras: unknown[]) =>
+    api.put('/api/camera/configs', cameras),
+
+  /** 특정 카메라 스트림 활성 여부 */
+  getStatus: (cameraId: string) =>
+    api.get<{ id: string; streaming: boolean }>(`/api/camera/${cameraId}/status`),
+
+  /** MJPEG 스트림 URL 생성 (token 포함) — <img src> 에 직접 사용 */
+  getStreamUrl: (cameraId: string): string => {
+    const token = useAuthStore.getState().accessToken ?? '';
+    return `/api/camera/${cameraId}/stream?token=${encodeURIComponent(token)}`;
+  },
+};
+
 export const diagnosticsApi = {
   /** 시스템 전체 연결 상태 조회 */
   getStatus: () =>
