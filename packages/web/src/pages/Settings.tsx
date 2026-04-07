@@ -11,7 +11,7 @@ export function Settings() {
   const machines = useMachineStore((state) => state.machines);
   const {
     cameraEnabled, cameras,
-    setCameraEnabled, addCamera, updateCamera, removeCamera,
+    setCameraEnabled, addCamera, updateCamera, removeCamera, syncToServer,
   } = useCameraStore();
   const controlLockDuration = useControlLockDuration();
   const setControlLockDuration = useMachineStore((s) => s.setControlLockDuration);
@@ -69,6 +69,7 @@ export function Settings() {
       updateCamera(editingCamera.id, updates);
     }
     setEditingCamera(null);
+    void syncToServer(); // DB 영속화
   };
 
   const handleDelete = (id: string) => {

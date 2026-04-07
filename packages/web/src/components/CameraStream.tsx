@@ -20,10 +20,27 @@ export function CameraStream({ camera, className = '', showControls = true }: Ca
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryCountRef = useRef(0);
+  const MAX_RETRIES = 5;
+  const RETRY_DELAY_MS = 5000;
 
-  // 스트림 URL 갱신 및 연결 시작
-  useEffect(() => {
+  const startStream = useCallback((cameraId: string) => {
     if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
+    setConnState('connecting');
+    setStreamUrl(null);
+    connectTimeoutRef.current = setTimeout(() => {
+      setConnState((prev) => (prev === 'connecting' ? 'error' : prev));
+    }, 8000);
+    const url = cameraServerApi.getStreamUrl(cameraId) + `&t=${Date.now()}`;
+    setStreamUrl(url);
+  }, []);
+
+  // 카메라 변경 시 retry 카운터 리셋 후 스트림 시작
+  useEffect(() => {
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
+    retryCountRef.current = 0;
 
     if (!camera || !camera.enabled) {
       setConnState(camera ? 'disabled' : 'idle');
@@ -31,50 +48,40 @@ export function CameraStream({ camera, className = '', showControls = true }: Ca
       return;
     }
 
-    setConnState('connecting');
-    setStreamUrl(null);
-
-    // 연결 타임아웃 8초 — 첫 프레임이 오지 않으면 error
-    connectTimeoutRef.current = setTimeout(() => {
-      setConnState((prev) => (prev === 'connecting' ? 'error' : prev));
-    }, 8000);
-
-    // 서버에 설정 sync 후 스트림 URL 세팅
-    const url = cameraServerApi.getStreamUrl(camera.id);
-    setStreamUrl(url);
-
+    startStream(camera.id);
     return () => {
       if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     };
-  }, [camera?.id, camera?.enabled]);
+  }, [camera?.id, camera?.enabled, startStream]);
 
-  // img onLoad — 첫 프레임 수신 = 연결 성공
+  // img onLoad — 첫 프레임 수신 = 연결 성공, retry 카운터 리셋
   const handleLoad = useCallback(() => {
     if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
+    retryCountRef.current = 0;
     setConnState('live');
   }, []);
 
-  // img onError — 연결 실패 (네트워크/인증/ffmpeg 오류)
+  // img onError — 자동 재연결 (최대 MAX_RETRIES회, RETRY_DELAY_MS 간격)
   const handleError = useCallback(() => {
     if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
-    setConnState('error');
     setStreamUrl(null);
-  }, []);
+    if (!camera?.enabled) return;
+    if (retryCountRef.current < MAX_RETRIES) {
+      retryCountRef.current += 1;
+      setConnState('connecting');
+      retryTimerRef.current = setTimeout(() => startStream(camera.id), RETRY_DELAY_MS);
+    } else {
+      setConnState('error');
+    }
+  }, [camera, startStream]);
 
-  // 재연결
+  // 수동 재연결 — retry 카운터 리셋
   const handleRetry = useCallback(() => {
     if (!camera?.enabled) return;
-    setConnState('connecting');
-    setStreamUrl(null);
-
-    connectTimeoutRef.current = setTimeout(() => {
-      setConnState((prev) => (prev === 'connecting' ? 'error' : prev));
-    }, 8000);
-
-    // cache busting으로 브라우저 캐시 우회
-    const url = cameraServerApi.getStreamUrl(camera.id) + `&t=${Date.now()}`;
-    setStreamUrl(url);
-  }, [camera]);
+    retryCountRef.current = 0;
+    startStream(camera.id);
+  }, [camera, startStream]);
 
   // 전체화면
   const toggleFullscreen = useCallback(() => {

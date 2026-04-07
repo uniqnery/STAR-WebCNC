@@ -136,44 +136,54 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
       activeStreams.delete(id);
     }
 
-    // RTSP URL 구성 (인증 포함)
-    const auth = camera.username ? `${encodeURIComponent(camera.username)}:${encodeURIComponent(camera.password)}@` : '';
+    // RTSP URL 구성 (인증 포함, URL 인코딩으로 특수문자 처리)
+    const auth = camera.username
+      ? `${encodeURIComponent(camera.username)}:${encodeURIComponent(camera.password)}@`
+      : '';
     const rtspUrl = `rtsp://${auth}${camera.ipAddress}:${camera.rtspPort}${camera.streamPath}`;
+    // 로그에는 비밀번호 마스킹
+    const rtspUrlSafe = `rtsp://${camera.username ? camera.username + ':●●●@' : ''}${camera.ipAddress}:${camera.rtspPort}${camera.streamPath}`;
 
-    // FFmpeg 옵션:
-    // -rtsp_transport tcp : NAT/라우터 뒤에서 안정적
-    // -f mpjpeg : multipart/x-mixed-replace 호환 MJPEG 출력
-    // -vf scale=640:-1 : 640px 너비로 축소 (전시용 부하 절감)
-    // -r 10 : 10fps (CNC 모니터링에 충분)
-    // -q:v 5 : JPEG 품질 (1=최고, 31=최저)
-    // -reconnect_at_eof -reconnect_streamed : 스트림 끊겼을 때 재연결 시도
     const ffmpegArgs = [
       '-loglevel', 'warning',
-      '-rtsp_transport', 'tcp',
+      '-rtsp_transport', 'tcp',    // TCP 모드: NAT/공유기 환경에서 안정적
       '-i', rtspUrl,
-      '-f', 'mpjpeg',
-      '-vf', 'scale=640:-1',
-      '-r', '10',
-      '-q:v', '5',
+      '-f', 'mpjpeg',              // multipart/x-mixed-replace MJPEG 출력
+      '-vf', 'scale=640:-1',       // 640px 너비 축소 (부하 절감)
+      '-r', '10',                   // 10fps
+      '-q:v', '5',                  // JPEG 품질 (1=최고, 31=최저)
       'pipe:1',
     ];
 
-    console.log(`[Camera] Starting stream: ${id} (${camera.ipAddress}:${camera.rtspPort}${camera.streamPath})`);
+    console.log(`[Camera] Starting stream: ${id} → ${rtspUrlSafe}`);
 
     const ff = spawn(ffmpegPath, ffmpegArgs);
     activeStreams.set(id, ff);
 
-    // MJPEG multipart 응답 헤더 — boundary는 ffmpeg mpjpeg 기본값 "ffmpeg"
+    // MJPEG multipart 응답 헤더
+    // X-Accel-Buffering: no — nginx/프록시 버퍼링 비활성화 (스트림 지연 방지)
     res.setHeader('Content-Type', 'multipart/x-mixed-replace; boundary=ffmpeg');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Accel-Buffering', 'no');
 
     ff.stdout.pipe(res);
 
+    // stderr 파싱 — 인증 실패 감지 (401 Unauthorized)
+    let stderrBuf = '';
     ff.stderr.on('data', (data: Buffer) => {
-      const msg = data.toString().trim();
-      if (msg) console.log(`[Camera:${id}] ${msg}`);
+      const msg = data.toString();
+      stderrBuf += msg;
+      const trimmed = msg.trim();
+      if (trimmed) console.log(`[Camera:${id}] ${trimmed}`);
+
+      // 인증 실패 감지 후 응답 헤더 미전송 상태면 401 반환
+      if ((stderrBuf.includes('401') || stderrBuf.includes('Unauthorized') || stderrBuf.includes('Authorization')) && !res.headersSent) {
+        ff.kill('SIGTERM');
+        activeStreams.delete(id);
+        res.status(401).json({ success: false, error: { code: 'AUTH_ERROR', message: '카메라 인증 실패 (ID/PW 확인)' } });
+      }
     });
 
     ff.on('exit', (code, signal) => {
@@ -182,7 +192,7 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
       if (!res.writableEnded) res.end();
     });
 
-    // 클라이언트 연결 종료 시 ffmpeg 종료
+    // 클라이언트 연결 종료 시 ffmpeg 정리
     req.on('close', () => {
       console.log(`[Camera] Client disconnected: ${id}`);
       ff.kill('SIGTERM');
