@@ -36,8 +36,11 @@ export function FactoryView({ machines, onSelectMachine, selectedMachineId }: Fa
   } = useLayoutStore();
 
   // 마운트 시 서버에서 레이아웃 로드 (모든 기기 공유)
+  // 서버에 데이터 없으면 로컬 데이터를 서버에 push (첫 동기화)
   useEffect(() => {
-    loadFromServer();
+    loadFromServer().then((loaded) => {
+      if (!loaded) void saveToServer();
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

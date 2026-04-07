@@ -58,7 +58,7 @@ interface LayoutState {
   sendBackward: (itemId: string) => void;
   duplicateItem: (itemId: string) => void;
   // Server sync
-  loadFromServer: () => Promise<void>;
+  loadFromServer: () => Promise<boolean>;
   saveToServer: () => Promise<void>;
 }
 
@@ -227,17 +227,19 @@ export const useLayoutStore = create<LayoutState>()(
         });
       },
 
-      loadFromServer: async () => {
+      loadFromServer: async (): Promise<boolean> => {
         try {
           const res = await layoutApi.getFactoryLayout();
           if (res.success && res.data) {
             const serverLayout = res.data as FactoryLayout;
             set({ layout: serverLayout });
             itemCounter = extractMaxCounter(serverLayout.items);
+            return true;
           }
         } catch {
           // 서버 없으면 localStorage 유지
         }
+        return false;
       },
 
       saveToServer: async () => {
