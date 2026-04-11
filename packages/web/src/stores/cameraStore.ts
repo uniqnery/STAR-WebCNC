@@ -17,6 +17,7 @@ export interface CameraConfig {
   streamPath: string;
   enabled: boolean;
   assignedMachineId?: string;
+  defaultZoom?: number; // 기본 배율 (1.0 ~ 4.0, 기본값 1.0)
 }
 
 export type StreamStatus = 'connecting' | 'live' | 'error' | 'offline';

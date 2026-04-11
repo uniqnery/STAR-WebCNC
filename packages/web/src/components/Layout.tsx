@@ -94,7 +94,7 @@ export function Layout({ children }: LayoutProps) {
         >
           <div className="flex items-center gap-3">
             <img
-              src="https://sktasdb.web.app/star.png"
+              src="/star.png"
               alt="Star"
               className="h-12 max-lg:h-16 w-auto object-contain brightness-0 invert cursor-pointer"
               onClick={() => window.location.reload()}

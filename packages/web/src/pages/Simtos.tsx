@@ -20,8 +20,8 @@ const PRODUCTS = [
 
 const PATH2_PROGRAM = 1111;
 const LONG_PRESS_MS = 1500;
-const CYCLE_START_RETRIES = 5;
-const CYCLE_START_INTERVAL_MS = 2000;
+const CYCLE_START_RETRIES = 4;
+const CYCLE_START_INTERVAL_MS = 1000;
 
 // ─── 타입 ────────────────────────────────────────────────────────────────────
 
@@ -73,7 +73,9 @@ function ProductCard({ product, isRunning, canOperate, interlockSatisfied, isExe
     setRunningImgError(false);
   }, [isRunning]);
 
-  const disabled = !canOperate || !interlockSatisfied || isExecuting;
+  // 롱프레스는 실행 중일 때만 완전 비활성 — 제어권/인터록 미충족은 눌러서 팝업 표시
+  const pressDisabled = isExecuting;
+  const fullyEnabled = canOperate && interlockSatisfied && !isExecuting;
 
   const onPressProgressRef = useRef(onPressProgress);
   onPressProgressRef.current = onPressProgress;
@@ -83,7 +85,7 @@ function ProductCard({ product, isRunning, canOperate, interlockSatisfied, isExe
     onComplete: () => { onPressEnd(); onSelect(product); },
     onStart: () => onPressStart(product.programNo),
     onCancel: () => onPressEnd(),
-    disabled,
+    disabled: pressDisabled,
   });
 
   useEffect(() => {
@@ -106,14 +108,14 @@ function ProductCard({ product, isRunning, canOperate, interlockSatisfied, isExe
         ${isRunning
           ? 'border-green-500 shadow-lg shadow-green-900/20'
           : 'border-gray-600 dark:border-gray-600'}
-        ${!disabled
+        ${!isExecuting
           ? 'cursor-pointer hover:border-blue-500 hover:shadow-md hover:shadow-blue-900/20'
           : 'cursor-not-allowed'}
         bg-white dark:bg-gray-700
       `}
     >
       {/* 이미지 영역 */}
-      <div className="relative w-full aspect-video bg-gray-200 dark:bg-gray-600 overflow-hidden">
+      <div className="relative w-full aspect-[4/3] xl:aspect-video bg-gray-200 dark:bg-gray-600 overflow-hidden">
         {mainImgError ? (
           // 플레이스홀더
           <div className="w-full h-full flex flex-col items-center justify-center gap-2">
@@ -127,7 +129,9 @@ function ProductCard({ product, isRunning, canOperate, interlockSatisfied, isExe
           <img
             src={imgSrc}
             alt={product.programNo}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-contain xl:object-cover pointer-events-none"
+            draggable={false}
+            onContextMenu={(e) => e.preventDefault()}
             onError={() => {
               if (isRunning && !runningImgError) {
                 setRunningImgError(true); // running.gif 없음 → main.jpg 폴백
@@ -153,13 +157,13 @@ function ProductCard({ product, isRunning, canOperate, interlockSatisfied, isExe
           <p className="text-gray-900 dark:text-white font-bold text-base font-mono">{product.programNo}</p>
           <p className="text-gray-500 dark:text-gray-400 text-xs mt-0.5">Path2 · O{PATH2_PROGRAM}</p>
         </div>
-        {!disabled && (
+        {fullyEnabled && (
           <p className="text-gray-400 dark:text-gray-500 text-[11px]">꾹 눌러 실행</p>
         )}
-        {disabled && !canOperate && (
+        {!canOperate && (
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-600 text-gray-500 dark:text-gray-400">제어권 필요</span>
         )}
-        {disabled && canOperate && !interlockSatisfied && (
+        {canOperate && !interlockSatisfied && (
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">인터록</span>
         )}
       </div>
@@ -178,6 +182,7 @@ export function Simtos() {
 
   const [isExecuting, setIsExecuting] = useState(false);
   const [confirmProduct, setConfirmProduct] = useState<(typeof PRODUCTS)[number] | null>(null);
+  const [alertMessage, setAlertMessage] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [activePressId, setActivePressId] = useState<string | null>(null);
   const [activeProgress, setActiveProgress] = useState(0);
@@ -271,8 +276,10 @@ export function Simtos() {
 
   const handleCardSelect = useCallback((product: (typeof PRODUCTS)[number]) => {
     if (isExecuting) return;
+    if (!canOperate) { setAlertMessage('제어권 획득이 필요합니다.'); return; }
+    if (!interlockSatisfied) { setAlertMessage('인터록 조건이 만족되지 않았습니다.'); return; }
     setConfirmProduct(product);
-  }, [isExecuting]);
+  }, [isExecuting, canOperate, interlockSatisfied]);
 
   const handleConfirm = useCallback(async () => {
     if (!confirmProduct) return;
@@ -315,8 +322,9 @@ export function Simtos() {
       />
 
       {/* ── 제품 카드 영역 ── */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-        <div className="max-w-[80%] mx-auto space-y-4">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 xl:p-6">
+        {/* PC: max-w-[80%] 중앙, 태블릿: 전체 폭 */}
+        <div className="space-y-4 xl:max-w-[80%] xl:mx-auto">
           {/* 상단 3개 */}
           <div className="grid grid-cols-3 gap-4">
             {PRODUCTS.slice(0, 3).map((p) => (
@@ -335,8 +343,27 @@ export function Simtos() {
             ))}
           </div>
 
-          {/* 하단 2개 중앙 정렬 (6컬럼 그리드 활용) */}
-          <div className="grid grid-cols-6 gap-4">
+          {/* 하단 2개 — 태블릿: flex 중앙 정렬 / PC: 6col grid 원본 */}
+          {/* 태블릿 전용 */}
+          <div className="flex justify-center gap-4 xl:hidden">
+            {[PRODUCTS[3], PRODUCTS[4]].map((p) => (
+              <div key={p.programNo} className="w-1/3">
+                <ProductCard
+                  product={p}
+                  isRunning={isAnyRunning && (currentProgramNo === p.programNo || currentProgramNo === `O${p.path1}`)}
+                  canOperate={canOperate}
+                  interlockSatisfied={interlockSatisfied}
+                  isExecuting={isExecuting}
+                  onSelect={handleCardSelect}
+                  onPressStart={(id) => { setActivePressId(id); setActiveLabel(id); setActiveProgress(0); }}
+                  onPressProgress={setActiveProgress}
+                  onPressEnd={() => { setActivePressId(null); setActiveProgress(0); setActiveLabel(''); }}
+                />
+              </div>
+            ))}
+          </div>
+          {/* PC 전용 (원본 6col grid) */}
+          <div className="hidden xl:grid xl:grid-cols-6 gap-4">
             <div className="col-start-2 col-span-2">
               <ProductCard
                 product={PRODUCTS[3]}
@@ -397,6 +424,28 @@ export function Simtos() {
       {/* ── 롱프레스 중앙 오버레이 ── */}
       {activePressId && (
         <SimtosLongPressOverlay progress={activeProgress} label={activeLabel} />
+      )}
+
+      {/* ── 알림 팝업 (제어권/인터록 미충족) ── */}
+      {alertMessage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-[2px]">
+          <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-8 w-80 shadow-2xl">
+            <div className="flex justify-center mb-4">
+              <span className="w-12 h-12 rounded-full bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center">
+                <svg className="w-6 h-6 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                </svg>
+              </span>
+            </div>
+            <p className="text-gray-700 dark:text-gray-200 text-center font-medium mb-6">{alertMessage}</p>
+            <button
+              onClick={() => setAlertMessage(null)}
+              className="w-full py-2.5 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors"
+            >
+              확인
+            </button>
+          </div>
+        </div>
       )}
 
       {/* ── 확인 팝업 ── */}

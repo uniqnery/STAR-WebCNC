@@ -16,7 +16,7 @@ export function Settings() {
   const controlLockDuration = useControlLockDuration();
   const setControlLockDuration = useMachineStore((s) => s.setControlLockDuration);
 
-  const isAdmin = user?.role === 'ADMIN';
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER';
 
   const [editingCamera, setEditingCamera] = useState<CameraConfig | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -662,6 +662,26 @@ function CameraModal({
                 <option key={m.machineId} value={m.machineId}>{m.name}</option>
               ))}
             </select>
+          </div>
+
+          {/* 기본 배율 */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-medium text-gray-500">기본 배율</label>
+              <span className="text-xs font-mono text-blue-400">{(camera.defaultZoom ?? 1.0).toFixed(1)}x</span>
+            </div>
+            <input
+              type="range"
+              min={1.0}
+              max={4.0}
+              step={0.1}
+              value={camera.defaultZoom ?? 1.0}
+              onChange={(e) => update('defaultZoom', parseFloat(e.target.value))}
+              className="w-full accent-blue-500"
+            />
+            <div className="flex justify-between text-xs text-gray-400 mt-0.5">
+              <span>1.0x</span><span>2.0x</span><span>3.0x</span><span>4.0x</span>
+            </div>
           </div>
 
           {/* 활성화 */}
