@@ -1,0 +1,18 @@
+{
+  "name": "Star-WebCNC",
+  "short_name": "StarCNC",
+  "description": "CNC 스마트팩토리 시스템",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1f2937",
+  "theme_color": "#1f2937",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

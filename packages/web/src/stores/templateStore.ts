@@ -254,10 +254,11 @@ export interface TopBarInterlockPageConfig {
 }
 
 export interface TopBarInterlockConfig {
-  remote:    TopBarInterlockPageConfig;  // 원격 조작반 페이지
-  scheduler: TopBarInterlockPageConfig;  // 스케줄러 페이지
-  transfer:  TopBarInterlockPageConfig;  // 파일 전송 페이지
-  backup:    TopBarInterlockPageConfig;  // 백업 페이지
+  remote:      TopBarInterlockPageConfig;  // 원격 조작반 페이지
+  scheduler:   TopBarInterlockPageConfig;  // 스케줄러 페이지
+  monitoring:  TopBarInterlockPageConfig;  // 모니터링 페이지
+  transfer:    TopBarInterlockPageConfig;  // 파일 전송 페이지
+  backup:      TopBarInterlockPageConfig;  // 백업 페이지
 }
 
 // ── Section 9: Capabilities ──────────────────────────────
@@ -300,6 +301,28 @@ export interface CncTemplate {
 // ── Store ─────────────────────────────────────────────────
 const STORAGE_KEY = 'star-webcnc-templates';
 
+// 서버 create 중복 방지 — 로컬 id 기준으로 진행 중인 create 추적
+const _pendingServerCreates = new Set<string>();
+
+function syncCreateToServer(
+  localId: string,
+  tpl: CncTemplate,
+  onSuccess: (serverId: string) => void
+) {
+  if (_pendingServerCreates.has(localId)) return;
+  _pendingServerCreates.add(localId);
+  templateApi.create(tpl as unknown as Record<string, unknown>)
+    .then((res) => {
+      _pendingServerCreates.delete(localId);
+      const serverTpl = res.data as { id: string } | null;
+      if (res.success && serverTpl?.id) onSuccess(serverTpl.id);
+    })
+    .catch((err) => {
+      _pendingServerCreates.delete(localId);
+      console.error('[TemplateStore] Server create failed:', err);
+    });
+}
+
 interface TemplateState {
   templates: CncTemplate[];
   selectedTemplateId: string | null;
@@ -324,10 +347,11 @@ const EMPTY_PAGE_CONFIG: TopBarInterlockPageConfig = { interlockEnabled: true, f
 
 function migrateTopBarInterlock(raw: unknown): TopBarInterlockConfig {
   const def = {
-    remote:    { ...EMPTY_PAGE_CONFIG },
-    scheduler: { ...EMPTY_PAGE_CONFIG },
-    transfer:  { ...EMPTY_PAGE_CONFIG },
-    backup:    { ...EMPTY_PAGE_CONFIG },
+    remote:     { ...EMPTY_PAGE_CONFIG },
+    scheduler:  { ...EMPTY_PAGE_CONFIG },
+    monitoring: { ...EMPTY_PAGE_CONFIG },
+    transfer:   { ...EMPTY_PAGE_CONFIG },
+    backup:     { ...EMPTY_PAGE_CONFIG },
   };
   if (!raw || typeof raw !== 'object') return def;
   const r = raw as Record<string, unknown>;
@@ -341,10 +365,11 @@ function migrateTopBarInterlock(raw: unknown): TopBarInterlockConfig {
     return { interlockEnabled: true, fields: [] };
   };
   return {
-    remote:    migratePageOrArray(r.remote),
-    scheduler: migratePageOrArray(r.scheduler),
-    transfer:  migratePageOrArray(r.transfer),
-    backup:    migratePageOrArray(r.backup) ?? { ...EMPTY_PAGE_CONFIG },
+    remote:     migratePageOrArray(r.remote),
+    scheduler:  migratePageOrArray(r.scheduler),
+    monitoring: migratePageOrArray(r.monitoring),
+    transfer:   migratePageOrArray(r.transfer),
+    backup:     migratePageOrArray(r.backup) ?? { ...EMPTY_PAGE_CONFIG },
   };
 }
 
@@ -482,10 +507,11 @@ function createDefaultTemplate(): CncTemplate {
     },
     panelLayout: [],
     topBarInterlock: {
-      remote:    { interlockEnabled: true, fields: [] },
-      scheduler: { interlockEnabled: true, fields: [] },
-      transfer:  { interlockEnabled: true, fields: [] },
-      backup:    { interlockEnabled: true, fields: [] },
+      remote:     { interlockEnabled: true, fields: [] },
+      scheduler:  { interlockEnabled: true, fields: [] },
+      monitoring: { interlockEnabled: true, fields: [] },
+      transfer:   { interlockEnabled: true, fields: [] },
+      backup:     { interlockEnabled: true, fields: [] },
     },
     offsetConfig: { toolCount: 64, pageSize: 16 },
     counterConfig: { fields: [] },
@@ -666,8 +692,9 @@ const _MOCK_SB20R2_STUB: Partial<CncTemplate> = {
       { id: 'sc-door',  label: '도어 닫힘',   pmcAddr: 'R6001.3', contact: 'A', enabled: true },
       { id: 'sc-estop', label: '비상정지 해제', pmcAddr: 'R6001.2', contact: 'B', enabled: true },
     ]},
-    transfer:  { interlockEnabled: false, fields: [] },
-    backup:    { interlockEnabled: false, fields: [] },
+    monitoring: { interlockEnabled: false, fields: [] },
+    transfer:   { interlockEnabled: false, fields: [] },
+    backup:     { interlockEnabled: false, fields: [] },
   },
   offsetConfig: { toolCount: 64, pageSize: 16 },
 
@@ -773,10 +800,11 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     const src = get().templates.find(t => t.id === id);
     if (!src) return '';
     const now = new Date().toISOString();
+    const localId = `tpl-${Date.now()}`;
     const dup: CncTemplate = {
       ...structuredClone(src),
-      id: `tpl-${Date.now()}`,
-      templateId: src.templateId + '-copy',
+      id: localId,
+      templateId: `${src.templateId}-copy-${Date.now().toString().slice(-6)}`,
       name: src.name + ' (복제)',
       createdAt: now,
       updatedAt: now,
@@ -784,6 +812,18 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     const updated = [...get().templates, dup];
     saveToStorage(updated);
     set({ templates: updated, selectedTemplateId: dup.id });
+
+    syncCreateToServer(localId, dup, (serverId) => {
+      set((s) => {
+        const templates = s.templates.map(t => t.id === localId ? { ...t, id: serverId } : t);
+        saveToStorage(templates);
+        return {
+          templates,
+          selectedTemplateId: s.selectedTemplateId === localId ? serverId : s.selectedTemplateId,
+        };
+      });
+    });
+
     return dup.id;
   },
 
@@ -794,9 +834,25 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     saveToStorage(updated);
     set({ templates: updated });
 
-    // 서버 DB에 즉시 반영 후 Agent에 reload 알림
     const tpl = updated.find(t => t.id === id);
-    if (tpl) {
+    if (!tpl) return;
+
+    if (id.startsWith('tpl-')) {
+      // 로컬 전용 템플릿 — 필수 필드가 채워지면 서버에 신규 생성
+      if (tpl.templateId && tpl.name && tpl.systemInfo?.cncType && tpl.systemInfo?.seriesName) {
+        syncCreateToServer(id, tpl, (serverId) => {
+          set((s) => {
+            const templates = s.templates.map(t => t.id === id ? { ...t, id: serverId } : t);
+            saveToStorage(templates);
+            return {
+              templates,
+              selectedTemplateId: s.selectedTemplateId === id ? serverId : s.selectedTemplateId,
+            };
+          });
+        });
+      }
+    } else {
+      // 서버에 이미 존재하는 템플릿 — 업데이트
       templateApi.update(id, tpl as unknown as Record<string, unknown>)
         .then(() => templateApi.reload(id))
         .catch((err) => console.error('[TemplateStore] Server update failed:', err));

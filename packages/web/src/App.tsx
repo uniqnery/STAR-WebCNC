@@ -21,6 +21,7 @@ import { MachineAdmin } from './pages/MachineAdmin';
 import { InterlockEditor } from './pages/InterlockEditor';
 import { SchedulerConfig } from './pages/SchedulerConfig';
 import { Simtos } from './pages/Simtos';
+import { Monitoring } from './pages/Monitoring';
 
 // ── Copy Button ───────────────────────────────────────────
 function CopyButton({ text }: { text: string }) {
@@ -232,6 +233,15 @@ function App() {
         element={
           <ProtectedRoute>
             <Scheduler />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/monitoring"
+        element={
+          <ProtectedRoute>
+            <Monitoring />
           </ProtectedRoute>
         }
       />

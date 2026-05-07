@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { prisma } from '../lib/prisma';
 import { redisService, REDIS_KEYS } from '../lib/redis';
 import { mqttService } from '../lib/mqtt';
+import { wsService } from '../lib/websocket';
 import { commandWaiter } from '../lib/commandWaiter';
 import { authenticate, authorize } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error';
@@ -40,41 +41,65 @@ async function sendNcCommand(
 router.use(authenticate);
 
 /**
+ * GET /machines/next-id
+ * Returns the next auto-generated machineId (preview before registration)
+ */
+router.get('/next-id',
+  authorize(UserRole.HQ_ENGINEER, UserRole.ADMIN),
+  asyncHandler(async (_req: Request, res: Response<ApiResponse>) => {
+    const activeMachines = await prisma.machine.findMany({ where: { isActive: true }, select: { machineId: true } });
+    const maxNum = activeMachines.reduce((max, m) => {
+      const match = m.machineId.match(/^MC-(\d{3})$/);
+      return match ? Math.max(max, parseInt(match[1])) : max;
+    }, 0);
+    const nextId = `MC-${String(maxNum + 1).padStart(3, '0')}`;
+    return res.json({ success: true, data: { nextId } });
+  })
+);
+
+/**
  * POST /machines
  * Register a new machine (HQ_ENGINEER only)
  */
 router.post('/',
   authorize(UserRole.HQ_ENGINEER, UserRole.ADMIN),
   asyncHandler(async (req: Request, res: Response<ApiResponse>) => {
-    const { machineId, name, ipAddress, port, serialNumber, location, templateId } = req.body as {
-      machineId: string;
+    const { name, ipAddress, port, modelName, serialNumber, location, templateId } = req.body as {
       name: string;
       ipAddress: string;
       port: number;
+      modelName?: string;
       serialNumber?: string;
       location?: string;
       templateId: string;
     };
 
-    if (!machineId?.trim()) return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: '설비 번호가 필요합니다.' } });
     if (!name?.trim())      return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: '설비명이 필요합니다.' } });
     if (!ipAddress?.trim()) return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: 'IP 주소가 필요합니다.' } });
     if (!templateId)        return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: '템플릿을 선택하세요.' } });
-
-    // machineId 중복 확인
-    const existing = await prisma.machine.findUnique({ where: { machineId } });
-    if (existing) return res.status(409).json({ success: false, error: { code: 'DUPLICATE_MACHINE_ID', message: '이미 사용 중인 설비 번호입니다.' } });
 
     // templateId 존재 확인
     const template = await prisma.template.findUnique({ where: { id: templateId } });
     if (!template) return res.status(400).json({ success: false, error: { code: 'TEMPLATE_NOT_FOUND', message: '선택한 템플릿을 찾을 수 없습니다.' } });
 
+    // machineId 서버 채번 — 활성 레코드 기준 MAX+1 (삭제된 번호 재사용)
+    const activeMachines = await prisma.machine.findMany({ where: { isActive: true }, select: { machineId: true } });
+    const maxNum = activeMachines.reduce((max, m) => {
+      const match = m.machineId.match(/^MC-(\d{3})$/);
+      return match ? Math.max(max, parseInt(match[1])) : max;
+    }, 0);
+    const machineId = `MC-${String(maxNum + 1).padStart(3, '0')}`;
+
+    // unique 제약 충돌 방지 — 동일 machineId의 soft-deleted 레코드 선제 삭제
+    await prisma.machine.deleteMany({ where: { machineId, isActive: false } });
+
     const machine = await prisma.machine.create({
       data: {
-        machineId: machineId.trim(),
+        machineId,
         name: name.trim(),
         ipAddress: ipAddress.trim(),
         port: port ?? 8193,
+        modelName: modelName?.trim() || null,
         serialNumber: serialNumber?.trim() || null,
         location: location?.trim() || null,
         templateId,
@@ -98,10 +123,11 @@ router.put('/:id',
   authorize(UserRole.HQ_ENGINEER, UserRole.ADMIN),
   asyncHandler(async (req: Request, res: Response<ApiResponse>) => {
     const { id } = req.params;
-    const { name, ipAddress, port, serialNumber, location, templateId } = req.body as {
+    const { name, ipAddress, port, modelName, serialNumber, location, templateId } = req.body as {
       name?: string;
       ipAddress?: string;
       port?: number;
+      modelName?: string;
       serialNumber?: string;
       location?: string;
       templateId?: string;
@@ -123,6 +149,7 @@ router.put('/:id',
         ...(name        !== undefined && { name: name.trim() }),
         ...(ipAddress   !== undefined && { ipAddress: ipAddress.trim() }),
         ...(port        !== undefined && { port }),
+        ...(modelName   !== undefined && { modelName: modelName?.trim() || null }),
         ...(serialNumber !== undefined && { serialNumber: serialNumber?.trim() || null }),
         ...(location    !== undefined && { location: location?.trim() || null }),
         ...(templateId  !== undefined && { templateId }),
@@ -512,6 +539,8 @@ router.post('/:id/control/acquire', asyncHandler(async (
     },
   });
 
+  wsService.sendUserActivity(machine.machineId, 'control', { username: req.user!.username, role: req.user!.role }, '제어권 획득');
+
   return res.json({
     success: true,
     data: {
@@ -561,6 +590,7 @@ router.post('/:id/control/release', asyncHandler(async (
         sessionId: '',
       },
     });
+    wsService.sendUserActivity(machine.machineId, 'control', { username: req.user!.username, role: req.user!.role }, '제어권 해제');
   }
 
   return res.json({

@@ -13,7 +13,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useTemplateStore, type TopBarInterlockField } from '../stores/templateStore';
 import { machineApi } from '../lib/api';
 
-export type TopBarPageId = 'remote' | 'scheduler' | 'transfer' | 'backup';
+export type TopBarPageId = 'remote' | 'scheduler' | 'monitoring' | 'transfer' | 'backup';
 
 interface MachineTopBarProps {
   pageTitle: string;
@@ -257,15 +257,10 @@ export function MachineTopBar({ pageTitle, pageId, settingsContent, rightSlot, l
               </option>
             ))}
           </select>
-          {machine && (
-            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 truncate min-w-0">
-              <span className="font-mono">{machine.machineId}</span>
-              {machine.template && (
-                <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs flex-shrink-0">
-                  {machine.template.seriesName}
-                </span>
-              )}
-            </div>
+          {machine?.modelName && (
+            <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
+              {machine.modelName}
+            </span>
           )}
           {/* 경광등 */}
           <div className="flex items-center gap-1.5 ml-auto flex-shrink-0">

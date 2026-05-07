@@ -206,6 +206,24 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
 
     ff.stdout.pipe(res);
 
+    // ── stdout 워치독: 10초간 데이터 없으면 FFmpeg 강제 종료 ──────────────
+    // → ff.on('exit') → res.end() → 브라우저 onError → 클라이언트 자동 재시도
+    const WATCHDOG_MS = 10_000;
+    let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+    const resetWatchdog = () => {
+      if (watchdogTimer) clearTimeout(watchdogTimer);
+      watchdogTimer = setTimeout(() => {
+        if (activeStreams.get(id)?.process === ff) {
+          console.log(`[Camera] Watchdog: no data for ${WATCHDOG_MS / 1000}s — killing FFmpeg (${id})`);
+          ff.kill('SIGTERM');
+          activeStreams.delete(id);
+        }
+      }, WATCHDOG_MS);
+    };
+    resetWatchdog(); // 스트림 시작 시 워치독 가동
+    ff.stdout.on('data', resetWatchdog);
+    ff.on('exit', () => { if (watchdogTimer) clearTimeout(watchdogTimer); });
+
     let stderrBuf = '';
     ff.stderr.on('data', (data: Buffer) => {
       const msg = data.toString();

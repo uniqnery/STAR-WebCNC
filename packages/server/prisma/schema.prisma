@@ -75,6 +75,7 @@ model Machine {
   updatedAt    DateTime      @updatedAt @map("updated_at")
 
   // Machine identity
+  modelName        String?       @map("model_name")      // 장비 모델명 (예: SR-20J2B)
   serialNumber     String?       @map("serial_number")   // CNC 시리얼번호
   location         String?                               // 설비 위치/라인명
 

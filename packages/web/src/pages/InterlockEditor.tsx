@@ -10,22 +10,24 @@ import {
   type TopBarInterlockField,
 } from '../stores/templateStore';
 
-type TabId = 'remote' | 'scheduler' | 'transfer' | 'backup';
+type TabId = 'remote' | 'scheduler' | 'monitoring' | 'transfer' | 'backup';
 
 const TABS: { id: TabId; label: string; desc: string }[] = [
-  { id: 'remote',    label: '원격 조작반', desc: '원격 조작반 탑바 우측 인터록 pills' },
-  { id: 'scheduler', label: '스케줄러',    desc: '스케줄러 탑바 우측 인터록 pills' },
-  { id: 'transfer',  label: '파일 전송',   desc: '파일 전송 탑바 우측 인터록 pills' },
-  { id: 'backup',    label: '백업',        desc: '백업 탑바 우측 인터록 pills' },
+  { id: 'remote',     label: '원격 조작반', desc: '원격 조작반 탑바 우측 인터록 pills' },
+  { id: 'scheduler',  label: '스케줄러',    desc: '스케줄러 탑바 우측 인터록 pills' },
+  { id: 'monitoring', label: '모니터링',    desc: '모니터링 탑바 우측 인터록 pills' },
+  { id: 'transfer',   label: '파일 전송',   desc: '파일 전송 탑바 우측 인터록 pills' },
+  { id: 'backup',     label: '백업',        desc: '백업 탑바 우측 인터록 pills' },
 ];
 
 const EMPTY_PAGE: TopBarInterlockPageConfig = { interlockEnabled: true, fields: [] };
 
 const EMPTY_CONFIG: TopBarInterlockConfig = {
-  remote:    { ...EMPTY_PAGE },
-  scheduler: { ...EMPTY_PAGE },
-  transfer:  { ...EMPTY_PAGE },
-  backup:    { ...EMPTY_PAGE },
+  remote:     { ...EMPTY_PAGE },
+  scheduler:  { ...EMPTY_PAGE },
+  monitoring: { ...EMPTY_PAGE },
+  transfer:   { ...EMPTY_PAGE },
+  backup:     { ...EMPTY_PAGE },
 };
 
 function uid() {
@@ -57,10 +59,11 @@ export function InterlockEditor() {
     if (tpl) {
       const tbi = tpl.topBarInterlock;
       setConfig(structuredClone({
-        remote:    tbi?.remote    ?? { ...EMPTY_PAGE },
-        scheduler: tbi?.scheduler ?? { ...EMPTY_PAGE },
-        transfer:  tbi?.transfer  ?? { ...EMPTY_PAGE },
-        backup:    tbi?.backup    ?? { ...EMPTY_PAGE },
+        remote:     tbi?.remote     ?? { ...EMPTY_PAGE },
+        scheduler:  tbi?.scheduler  ?? { ...EMPTY_PAGE },
+        monitoring: tbi?.monitoring ?? { ...EMPTY_PAGE },
+        transfer:   tbi?.transfer   ?? { ...EMPTY_PAGE },
+        backup:     tbi?.backup     ?? { ...EMPTY_PAGE },
       }));
       setDirty(false);
     }

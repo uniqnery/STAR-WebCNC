@@ -46,6 +46,19 @@ export interface InterlockStatus {
   extra2?: boolean;            // 기타2 (확장용)
 }
 
+// 사용자 기록
+export type UserActivityPage = 'scheduler' | 'control';
+
+export interface UserActivity {
+  id: string;
+  machineId: string;
+  page: UserActivityPage;
+  actor: { username: string; role: string } | null;
+  action: string;
+  detail?: string;
+  timestamp: string;
+}
+
 // FOCAS 이벤트 타입
 export type FocasEventType =
   | 'PROGRAM_SELECT'         // 프로그램 선택
@@ -249,7 +262,8 @@ export interface Machine {
   ipAddress: string;
   port: number;
   isActive: boolean;
-  pathCount?: number;  // 지원 Path 수 (기본 2, 최대 3)
+  pathCount?: number;     // 지원 Path 수 (기본 2, 최대 3)
+  modelName?: string;     // 장비 모델명 (예: SR-20J2B)
   serialNumber?: string;  // CNC 시리얼번호
   location?: string;      // 설비 위치/라인명
   template?: {
@@ -291,6 +305,7 @@ interface MachineState {
   telemetryMap: Record<string, TelemetryData>;
   activeAlarms: Record<string, Alarm[]>;
   focasEvents: Record<string, FocasEvent[]>;  // FOCAS 이벤트 로그
+  userActivities: Record<string, UserActivity[]>;  // 사용자 기록 (machineId:page 키)
   schedulerRows: Record<string, SchedulerRow[]>;      // 스케줄러 큐 (장비별)
   schedulerState: Record<string, SchedulerState>;     // 장비별 Scheduler 상태 머신
   schedulerError: Record<string, SchedulerErrorPayload | null>;  // 최근 에러
@@ -311,6 +326,7 @@ interface MachineState {
   clearAlarm: (machineId: string, alarmNo: number) => void;
   addFocasEvent: (machineId: string, event: FocasEvent) => void;
   clearFocasEvents: (machineId: string) => void;
+  addUserActivity: (machineId: string, activity: UserActivity) => void;
   setSchedulerRows: (machineId: string, rows: SchedulerRow[]) => void;
   setSchedulerState: (machineId: string, state: SchedulerState) => void;
   updateSchedulerCount: (machineId: string, rowId: string, count: number) => void;
@@ -434,6 +450,7 @@ export const useMachineStore = create<MachineState>((set, get) => ({
   telemetryMap: {},
   activeAlarms: {},
   focasEvents: {},
+  userActivities: {},
   schedulerRows: loadSchedulerRows(),
   schedulerState: {},
   schedulerError: {},
@@ -552,6 +569,18 @@ export const useMachineStore = create<MachineState>((set, get) => ({
         [machineId]: [],
       },
     })),
+
+  addUserActivity: (machineId, activity) =>
+    set((state) => {
+      const key = `${machineId}:${activity.page}`;
+      const current = state.userActivities[key] || [];
+      return {
+        userActivities: {
+          ...state.userActivities,
+          [key]: [activity, ...current].slice(0, 100),
+        },
+      };
+    }),
 
   setSchedulerRows: (machineId, rows) =>
     set((state) => {
@@ -857,6 +886,26 @@ export const useMachineStore = create<MachineState>((set, get) => ({
             }
             break;
           }
+          case 'user_activity': {
+            const p = msg.payload as {
+              machineId: string;
+              page: UserActivityPage;
+              actor: { username: string; role: string } | null;
+              action: string;
+              detail?: string;
+            };
+            if (!p?.machineId) break;
+            store.addUserActivity(p.machineId, {
+              id: `ua-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              machineId: p.machineId,
+              page: p.page,
+              actor: p.actor,
+              action: p.action,
+              detail: p.detail,
+              timestamp: msg.timestamp,
+            });
+            break;
+          }
           case 'scheduler_update': {
             const p = msg.payload as { machineId: string; rows: SchedulerRow[] };
             if (p?.machineId) store.setSchedulerRows(p.machineId, p.rows ?? []);
@@ -960,6 +1009,10 @@ export const useMachineAlarms = (machineId: string) => {
 
 export const useFocasEvents = (machineId: string) => {
   return useMachineStore((state) => state.focasEvents[machineId] || []);
+};
+
+export const useUserActivities = (machineId: string, page: UserActivityPage) => {
+  return useMachineStore((state) => state.userActivities[`${machineId}:${page}`] || []);
 };
 
 export const useSchedulerRows = (machineId: string) => {

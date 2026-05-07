@@ -24,6 +24,7 @@ import { DEFAULT_PANEL_GROUPS } from '../config/pmcTemplate';
 import { commandApi } from '../lib/api';
 import { NCMonitor } from '../components/NCMonitor';
 import { FocasEventLog } from '../components/FocasEventLog';
+import { UserActivityFeed } from '../components/UserActivityFeed';
 import { MachineTopBar } from '../components/MachineTopBar';
 import { useLongPress } from '../hooks/useLongPress';
 
@@ -250,7 +251,7 @@ export function RemoteControl() {
               </div>
               {/* 모바일 portrait 전용 로그 — PC(lg:) 및 landscape에서 숨김 */}
               <div className="lg:hidden landscape:hidden shrink-0 h-40 mt-1">
-                <FocasEventLog events={focasEvents} />
+                <FocasEventLog events={focasEvents} userActivityContent={<UserActivityFeed machineId={selectedMachineId || ''} page="control" />} />
               </div>
             </div>
 
@@ -271,14 +272,14 @@ export function RemoteControl() {
               </div>
               {/* 모바일 portrait 전용 로그 — PC(lg:) 및 landscape에서 숨김 */}
               <div className="lg:hidden landscape:hidden shrink-0 h-40 mt-1">
-                <FocasEventLog events={focasEvents} />
+                <FocasEventLog events={focasEvents} userActivityContent={<UserActivityFeed machineId={selectedMachineId || ''} page="control" />} />
               </div>
             </div>
           </div>
 
           {/* 이벤트 로그 — PC: 고정 h-40, 모바일 landscape: h-40, 모바일 portrait: 숨김(각 탭에 포함) */}
           <div className="max-lg:portrait:hidden max-lg:landscape:h-40 max-lg:landscape:shrink-0 lg:shrink-0 lg:h-40">
-            <FocasEventLog events={focasEvents} />
+            <FocasEventLog events={focasEvents} userActivityContent={<UserActivityFeed machineId={selectedMachineId || ''} page="control" />} />
           </div>
 
           {/* 롱프레스 중앙 오버레이 */}

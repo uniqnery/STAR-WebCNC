@@ -22,6 +22,7 @@ import { useAuthStore } from '../stores/authStore';
 import { schedulerApi, dncApi } from '../lib/api';
 import { NCMonitor, TABS, type MonitorTab } from '../components/NCMonitor';
 import { FocasEventLog } from '../components/FocasEventLog';
+import { UserActivityFeed } from '../components/UserActivityFeed';
 import { FolderBrowser } from '../components/FolderBrowser';
 import { GCodeViewer } from '../components/filemanager/GCodeViewer';
 import { MachineTopBar } from '../components/MachineTopBar';
@@ -379,7 +380,7 @@ export function Scheduler() {
               </div>
               {/* 모바일 portrait 전용 로그 — PC(lg:) 및 landscape에서 숨김 */}
               <div className="lg:hidden landscape:hidden shrink-0 h-40 mt-1">
-                <FocasEventLog events={focasEvents} />
+                <FocasEventLog events={focasEvents} userActivityContent={<UserActivityFeed machineId={selectedMachineId || ''} page="scheduler" />} />
               </div>
             </div>
 
@@ -534,14 +535,14 @@ export function Scheduler() {
 
               {/* 모바일 portrait 전용 로그 — PC(lg:) 및 landscape에서 숨김 */}
               <div className="lg:hidden landscape:hidden shrink-0 h-40 mt-1">
-                <FocasEventLog events={focasEvents} />
+                <FocasEventLog events={focasEvents} userActivityContent={<UserActivityFeed machineId={selectedMachineId || ''} page="scheduler" />} />
               </div>
             </div>
           </div>
 
           {/* 이벤트 로그 — PC: 고정 h-40, 모바일 landscape: h-40, 모바일 portrait: 숨김(각 탭에 포함) */}
           <div className="max-lg:portrait:hidden max-lg:landscape:h-40 max-lg:landscape:shrink-0 lg:shrink-0 lg:h-40">
-            <FocasEventLog events={focasEvents} />
+            <FocasEventLog events={focasEvents} userActivityContent={<UserActivityFeed machineId={selectedMachineId || ''} page="scheduler" />} />
           </div>
           <GCodeViewer />
         </>

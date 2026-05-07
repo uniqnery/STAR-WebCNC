@@ -423,6 +423,23 @@ class WebSocketService {
   }
 
   /**
+   * Send user activity event (user-triggered or system actions)
+   */
+  sendUserActivity(
+    machineId: string,
+    page: 'scheduler' | 'control',
+    actor: { username: string; role: string } | null,
+    action: string,
+    detail?: string
+  ): void {
+    this.broadcastToMachine(machineId, {
+      type: 'user_activity',
+      timestamp: new Date().toISOString(),
+      payload: { machineId, page, actor, action, detail },
+    });
+  }
+
+  /**
    * Send M20 event (parts count increment)
    */
   sendM20Event(machineId: string, data: { programNo: string; count: number }): void {

@@ -356,6 +356,7 @@ router.post('/start', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, 
     });
 
     wsService.sendSchedulerState(machineId, 'RUNNING');
+    wsService.sendUserActivity(machineId, 'scheduler', { username: req.user!.username, role: req.user!.role }, '스케줄러 시작');
 
     res.json({ success: true });
   } catch (err) {
@@ -391,6 +392,7 @@ router.post('/resume', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request,
     });
 
     wsService.sendSchedulerState(machineId, 'RUNNING');
+    wsService.sendUserActivity(machineId, 'scheduler', { username: req.user!.username, role: req.user!.role }, '스케줄러 재개');
 
     res.json({ success: true });
   } catch (err) {
@@ -470,6 +472,7 @@ router.post('/cancel', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request,
     });
     wsService.sendSchedulerUpdate(machineId, allRows.map(r => rowToDto(r, machineId)));
     wsService.sendSchedulerState(machineId, 'IDLE');
+    wsService.sendUserActivity(machineId, 'scheduler', { username: req.user!.username, role: req.user!.role }, '스케줄러 취소');
 
     res.json({ success: true });
   } catch (err) {
@@ -626,6 +629,7 @@ export async function handleSchedulerCompleted(machineId: string): Promise<void>
     await redisService.set(REDIS_KEYS.SCHEDULER_STATE(machineId), 'IDLE', 86400);
     await redisService.del(REDIS_KEYS.SCHEDULER_RUNNING(machineId));
     wsService.sendSchedulerState(machineId, 'IDLE');
+    wsService.sendUserActivity(machineId, 'scheduler', null, '스케줄러 완료');
     console.log(`[Scheduler] Queue completed: ${machineId}`);
   } catch (err) {
     console.error('[Scheduler] handleSchedulerCompleted error:', err);
@@ -668,6 +672,9 @@ export async function handleSchedulerPaused(
 
     if (code && message) {
       wsService.sendSchedulerError(machineId, code, message, rowId);
+      wsService.sendUserActivity(machineId, 'scheduler', null, '인터록 조건에 의한 일시정지', `${code}: ${message}`);
+    } else {
+      wsService.sendUserActivity(machineId, 'scheduler', null, '스케줄러 일시정지');
     }
   } catch (err) {
     console.error('[Scheduler] handleSchedulerPaused error:', err);
@@ -687,6 +694,7 @@ export async function handleSchedulerControlDenied(
     await redisService.set(REDIS_KEYS.SCHEDULER_STATE(machineId), 'IDLE', 86400);
     wsService.sendSchedulerState(machineId, 'IDLE');
     wsService.sendSchedulerError(machineId, code, message, undefined);
+    wsService.sendUserActivity(machineId, 'scheduler', null, '인터록 조건에 의한 제어 거부', `${code}: ${message}`);
     console.log(`[Scheduler] CONTROL DENIED: ${machineId} code=${code}: ${message}`);
   } catch (err) {
     console.error('[Scheduler] handleSchedulerControlDenied error:', err);
@@ -731,6 +739,7 @@ export async function handleSchedulerError(
     await redisService.set(REDIS_KEYS.SCHEDULER_STATE(machineId), 'IDLE', 86400);
     wsService.sendSchedulerState(machineId, 'IDLE');
     wsService.sendSchedulerError(machineId, code, message, rowId);
+    wsService.sendUserActivity(machineId, 'scheduler', null, '스케줄러 오류 정지', `${code}: ${message}`);
 
     console.log(`[Scheduler] ERROR: ${machineId} code=${code} row=${rowId ?? '-'}: ${message}`);
   } catch (err) {

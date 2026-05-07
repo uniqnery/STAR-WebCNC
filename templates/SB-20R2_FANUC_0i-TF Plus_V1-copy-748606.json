@@ -1,8 +1,8 @@
 {
-  "templateId": "FANUC_0i-TF Plus_SB-20R2_V1",
+  "templateId": "SB-20R2_FANUC_0i-TF Plus_V1-copy-748606",
   "version": "1.0.0",
-  "name": "Star SB-20R2 (FANUC 0i-TF Plus)",
-  "description": "Star SB-20R2 2계통 자동선반, FANUC 0i-TF Plus 컨트롤러",
+  "name": "Star SR-20J2B (FANUC 32i-B)",
+  "description": "",
   "cncType": "FANUC",
   "seriesName": "0i-TF Plus",
   "systemInfo": {
@@ -129,33 +129,7 @@
       }
     }
   },
-  "interlockConfig": {
-    "enabled": true,
-    "controlAllowed": {
-      "conditions": [
-        {
-          "id": "doorClosed",
-          "name": "안전 도어 닫힘",
-          "pmcKey": "interlock.doorClosed",
-          "expected": true,
-          "required": true,
-          "description": "안전 도어가 닫혀 있어야 원격 제어 가능"
-        }
-      ]
-    },
-    "scheduleAllowed": {
-      "conditions": [
-        {
-          "id": "doorClosed",
-          "name": "안전 도어 닫힘",
-          "pmcKey": "interlock.doorClosed",
-          "expected": true,
-          "required": true,
-          "description": "안전 도어가 닫혀 있어야 스케줄러 실행 가능"
-        }
-      ]
-    }
-  },
+  "interlockConfig": {},
   "interlockModules": {
     "scheduler": {
       "enabled": true,

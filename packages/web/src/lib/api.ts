@@ -183,17 +183,30 @@ export const machineApi = {
   extendControl: (id: string) =>
     api.post(`/api/machines/${id}/control/extend`),
 
+  getNextId: () =>
+    api.get<{ nextId: string }>('/api/machines/next-id'),
+
   create: (payload: {
-    machineId: string;
     name: string;
     ipAddress: string;
     port: number;
-    serialNumber: string;
+    modelName?: string;
+    serialNumber?: string;
     location?: string;
     templateId: string;
   }) => api.post<{ id: string; machineId: string }>('/api/machines', payload),
 
   delete: (id: string) => api.delete(`/api/machines/${id}`),
+
+  update: (id: string, payload: {
+    name?: string;
+    ipAddress?: string;
+    port?: number;
+    modelName?: string;
+    serialNumber?: string;
+    location?: string;
+    templateId?: string;
+  }) => api.put(`/api/machines/${id}`, payload),
 };
 
 // Command API

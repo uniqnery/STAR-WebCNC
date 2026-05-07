@@ -1,6 +1,6 @@
-// FOCAS 이벤트 로그 공용 컴포넌트
-// Scheduler, RemoteControl 하단에서 동일하게 사용
+// FOCAS 이벤트 로그 + 사용자 기록 탭 공용 컴포넌트
 
+import { useState } from 'react';
 import { FocasEvent } from '../stores/machineStore';
 
 function getEventIcon(type: FocasEvent['type']): string {
@@ -43,26 +43,68 @@ function getImpliedLevel(type: FocasEvent['type']): 'error' | 'warn' | 'info' {
   return 'info';
 }
 
-export function FocasEventLog({ events }: { events: FocasEvent[] }) {
+interface FocasEventLogProps {
+  events: FocasEvent[];
+  userActivityContent?: React.ReactNode;
+}
+
+export function FocasEventLog({ events, userActivityContent }: FocasEventLogProps) {
+  const hasUserActivity = userActivityContent !== undefined;
+  const [activeTab, setActiveTab] = useState<'user' | 'event'>('user');
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow flex flex-col h-full">
-      <h3 className="text-sm font-semibold text-gray-900 dark:text-white px-4 py-2 border-b border-gray-200 dark:border-gray-700 shrink-0">이벤트 로그</h3>
-      <div className="flex-1 overflow-y-auto font-mono text-xs">
-        {events.length === 0 ? (
-          <div className="text-center text-gray-500 py-4">이벤트 대기 중...</div>
-        ) : (
-          [...events].reverse().map((event) => (
-            <div
-              key={event.id}
-              className={`flex items-center gap-2 px-1.5 h-6 shrink-0 ${getRowStyle(event)}`}
+      {/* 헤더 / 탭 */}
+      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-gray-200 dark:border-gray-700 shrink-0">
+        {hasUserActivity ? (
+          <>
+            <button
+              onClick={() => setActiveTab('user')}
+              className={`text-xs font-semibold px-2.5 py-0.5 rounded transition-colors ${
+                activeTab === 'user'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+              }`}
             >
-              <span className="text-gray-500 tabular-nums w-[72px] shrink-0">
-                {new Date(event.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-              </span>
-              <span className="w-5 text-center shrink-0 opacity-70">{getEventIcon(event.type)}</span>
-              <span className="flex-1 truncate">{event.message}</span>
-            </div>
-          ))
+              사용자 기록
+            </button>
+            <button
+              onClick={() => setActiveTab('event')}
+              className={`text-xs font-semibold px-2.5 py-0.5 rounded transition-colors ${
+                activeTab === 'event'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+              }`}
+            >
+              이벤트 로그
+            </button>
+          </>
+        ) : (
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">이벤트 로그</h3>
+        )}
+      </div>
+
+      {/* 콘텐츠 */}
+      <div className="flex-1 overflow-y-auto font-mono text-xs">
+        {hasUserActivity && activeTab === 'user' ? (
+          userActivityContent
+        ) : (
+          events.length === 0 ? (
+            <div className="text-center text-gray-500 py-4">이벤트 대기 중...</div>
+          ) : (
+            [...events].reverse().map((event) => (
+              <div
+                key={event.id}
+                className={`flex items-center gap-2 px-1.5 h-6 shrink-0 ${getRowStyle(event)}`}
+              >
+                <span className="text-gray-500 tabular-nums w-[72px] shrink-0">
+                  {new Date(event.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+                <span className="w-5 text-center shrink-0 opacity-70">{getEventIcon(event.type)}</span>
+                <span className="flex-1 truncate">{event.message}</span>
+              </div>
+            ))
+          )
         )}
       </div>
     </div>
