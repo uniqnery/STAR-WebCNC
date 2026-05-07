@@ -12,8 +12,8 @@ echo [2/4] Starting server...
 cscript //nologo "%~dp0start-server.vbs"
 timeout /t 6 /nobreak >nul
 
-echo [3/4] Starting agent...
-cscript //nologo "%~dp0start-agent.vbs"
+echo [3/4] Starting agents (dynamic)...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0_runner-agents-dynamic.ps1"
 timeout /t 2 /nobreak >nul
 
 echo [4/4] Starting Vite...
@@ -22,5 +22,5 @@ timeout /t 8 /nobreak >nul
 
 echo.
 echo Done! Open: http://localhost:5173
-echo Logs: C:\temp\server.log / vite.log / agent_prod.log
+echo Logs: C:\temp\server.log / vite.log / agent_MC001.log / agent_MC002.log ...
 echo.
