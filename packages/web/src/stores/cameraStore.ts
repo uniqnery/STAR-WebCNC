@@ -143,3 +143,9 @@ export const useCameraForMachine = (machineId: string) =>
     if (!state.cameraEnabled) return undefined;
     return state.cameras.find((c) => c.assignedMachineId === machineId && c.enabled);
   });
+
+export const useCamerasForMachine = (machineId: string) =>
+  useCameraStore((state) => {
+    if (!state.cameraEnabled) return [];
+    return state.cameras.filter((c) => c.assignedMachineId === machineId && c.enabled);
+  });

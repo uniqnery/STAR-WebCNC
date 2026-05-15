@@ -138,6 +138,8 @@ router.get('/:id/status', authenticateStream, (req: Request, res: Response) => {
 router.get('/:id/stream', authenticateStream, async (req: Request, res: Response) => {
   const { id } = req.params;
   const clientIp = req.ip ?? 'unknown';
+  const isThumb = req.query.thumb === '1';
+  const streamKey = isThumb ? `${id}:thumb` : id;
 
   if (!ffmpegPath) {
     return res.status(500).json({ success: false, error: { code: 'FFMPEG_ERROR' as CameraErrorCode, message: 'ffmpeg를 찾을 수 없습니다' } });
@@ -158,7 +160,7 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
     res.setHeader('X-Accel-Buffering', 'no');
 
     // 이미 실행 중인 스트림이 있으면 구독자로만 추가
-    const existing = activeStreams.get(id);
+    const existing = activeStreams.get(streamKey);
     if (existing) {
       existing.subscribers.add(res);
       console.log(`[Camera] Subscriber joined: ${id} (${clientIp}) — total: ${existing.subscribers.size}`);
@@ -166,10 +168,10 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
       req.on('close', () => {
         existing.subscribers.delete(res);
         console.log(`[Camera] Subscriber left: ${id} (${clientIp}) — remaining: ${existing.subscribers.size}`);
-        if (existing.subscribers.size === 0 && activeStreams.get(id) === existing) {
+        if (existing.subscribers.size === 0 && activeStreams.get(streamKey) === existing) {
           console.log(`[Camera] Last subscriber left — killing FFmpeg: ${id}`);
           existing.process.kill('SIGTERM');
-          activeStreams.delete(id);
+          activeStreams.delete(streamKey);
         }
       });
       return;
@@ -182,8 +184,8 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
     const rtspUrl     = `rtsp://${auth}${camera.ipAddress}:${camera.rtspPort}${camera.streamPath}`;
     const rtspUrlSafe = `rtsp://${camera.username ? `${camera.username}:●●●@` : ''}${camera.ipAddress}:${camera.rtspPort}${camera.streamPath}`;
 
-    const width = camera.width ?? 1280;
-    const fps   = camera.fps   ?? 20;
+    const width = isThumb ? 320 : (camera.width ?? 1280);
+    const fps   = isThumb ? 1   : (camera.fps   ?? 20);
 
     const ffmpegArgs = [
       '-loglevel', 'warning',
@@ -196,7 +198,7 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
       'pipe:1',
     ];
 
-    console.log(`[Camera] Starting stream: ${id} → ${rtspUrlSafe} (${width}px / ${fps}fps)`);
+    console.log(`[Camera] Starting stream: ${streamKey} → ${rtspUrlSafe} (${width}px / ${fps}fps)`);
 
     const ff = spawn(ffmpegPath, ffmpegArgs);
     const stream: ActiveStream = {
@@ -204,7 +206,7 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
       subscribers: new Set([res]),
       startedAt: Date.now(),
     };
-    activeStreams.set(id, stream);
+    activeStreams.set(streamKey, stream);
 
     // ── Watchdog: 10초간 데이터 없으면 FFmpeg 강제 종료
     const WATCHDOG_MS = 10_000;
@@ -212,10 +214,10 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
     const resetWatchdog = () => {
       if (watchdogTimer) clearTimeout(watchdogTimer);
       watchdogTimer = setTimeout(() => {
-        if (activeStreams.get(id) === stream) {
+        if (activeStreams.get(streamKey) === stream) {
           console.log(`[Camera] Watchdog: no data for ${WATCHDOG_MS / 1000}s — killing FFmpeg (${id})`);
           ff.kill('SIGTERM');
-          activeStreams.delete(id);
+          activeStreams.delete(streamKey);
           for (const sub of stream.subscribers) {
             if (!sub.writableEnded) sub.end();
           }
@@ -266,7 +268,7 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
     // ── FFmpeg 종료 시 전체 구독자 스트림 종료
     ff.on('exit', (code, signal) => {
       console.log(`[Camera] Stream ended: ${id} (code=${code}, signal=${signal})`);
-      if (activeStreams.get(id) === stream) activeStreams.delete(id);
+      if (activeStreams.get(streamKey) === stream) activeStreams.delete(streamKey);
       for (const sub of stream.subscribers) {
         if (!sub.writableEnded) sub.end();
       }
@@ -277,10 +279,10 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
     req.on('close', () => {
       stream.subscribers.delete(res);
       console.log(`[Camera] Subscriber left: ${id} (${clientIp}) — remaining: ${stream.subscribers.size}`);
-      if (stream.subscribers.size === 0 && activeStreams.get(id) === stream) {
+      if (stream.subscribers.size === 0 && activeStreams.get(streamKey) === stream) {
         console.log(`[Camera] Last subscriber left — killing FFmpeg: ${id}`);
         ff.kill('SIGTERM');
-        activeStreams.delete(id);
+        activeStreams.delete(streamKey);
       }
     });
 

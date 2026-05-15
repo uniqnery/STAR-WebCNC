@@ -14,6 +14,7 @@ interface CameraStreamProps {
   camera?: CameraConfig;
   className?: string;
   showControls?: boolean;
+  thumb?: boolean;
 }
 
 type ConnectionState =
@@ -34,7 +35,7 @@ function getBackoffDelay(retryCount: number): number {
   return BACKOFF_DELAYS[Math.min(retryCount, BACKOFF_DELAYS.length - 1)];
 }
 
-export function CameraStream({ camera, className = '', showControls = true }: CameraStreamProps) {
+export function CameraStream({ camera, className = '', showControls = true, thumb = false }: CameraStreamProps) {
   const [connState, setConnState] = useState<ConnectionState>('idle');
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [retryCount, setRetryCount] = useState(0);
@@ -59,8 +60,8 @@ export function CameraStream({ camera, className = '', showControls = true }: Ca
 
   const buildStreamUrl = useCallback((cameraId: string) => {
     const base = cameraServerApi.getStreamUrl(cameraId);
-    return `${base}&t=${Date.now()}`;
-  }, []);
+    return `${base}&t=${Date.now()}${thumb ? '&thumb=1' : ''}`;
+  }, [thumb]);
 
   const startStream = useCallback((cameraId: string) => {
     clearTimers();
@@ -146,6 +147,23 @@ export function CameraStream({ camera, className = '', showControls = true }: Ca
     document.addEventListener('fullscreenchange', handler);
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (!cameraIdRef.current) return;
+      if (document.hidden) {
+        clearTimers();
+        setStreamUrl(null);
+        setConnState('idle');
+      } else {
+        retryCountRef.current = 0;
+        setRetryCount(0);
+        startStream(cameraIdRef.current);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [clearTimers, startStream]);
 
   if (!camera) {
     return (

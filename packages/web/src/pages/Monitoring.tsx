@@ -7,9 +7,9 @@ import {
   useFocasEvents, type Alarm,
 } from '../stores/machineStore';
 import { useTemplateStore, type PmcMessageEntry } from '../stores/templateStore';
-import { useCameraForMachine, useCameraStore } from '../stores/cameraStore';
+import { useCamerasForMachine, useCameraStore } from '../stores/cameraStore';
 import { NCMonitor, TABS, type MonitorTab } from '../components/NCMonitor';
-import { CameraStream } from '../components/CameraStream';
+import { CameraMultiView } from '../components/CameraMultiView';
 import { FocasEventLog } from '../components/FocasEventLog';
 import { MachineTopBar } from '../components/MachineTopBar';
 
@@ -62,8 +62,8 @@ export function Monitoring() {
   const activePmcMessages: PmcMessageEntry[] = (selectedTemplate?.pmcMessages ?? [])
     .filter((m) => m.pmcAddr && pmcBits[m.pmcAddr] === 1);
 
-  const cameraEnabled    = useCameraStore((s) => s.cameraEnabled);
-  const cameraForMachine = useCameraForMachine(selectedMachineId || '');
+  const cameraEnabled      = useCameraStore((s) => s.cameraEnabled);
+  const camerasForMachine  = useCamerasForMachine(selectedMachineId || '');
 
   const [monitorTab, setMonitorTab] = useState<MonitorTab>('monitor');
   const [mobileTab, setMobileTab]   = useState<'monitor' | 'camera'>('monitor');
@@ -137,8 +137,8 @@ export function Monitoring() {
 
         {/* 우측: 카메라 */}
         <div className={`flex flex-col lg:h-full max-lg:portrait:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-16rem)] max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'camera' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
-          {cameraEnabled && cameraForMachine ? (
-            <CameraStream camera={cameraForMachine} className="flex-1 min-h-0 rounded-lg overflow-hidden" />
+          {cameraEnabled && camerasForMachine.length > 0 ? (
+            <CameraMultiView cameras={camerasForMachine} className="flex-1 min-h-0 rounded-lg overflow-hidden" />
           ) : (
             <div className="flex-1 min-h-0 rounded-lg bg-gray-900 border border-gray-700 flex flex-col items-center justify-center gap-3 text-gray-500">
               <svg className="w-12 h-12 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">

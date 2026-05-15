@@ -3,8 +3,8 @@
 
 import { useState } from 'react';
 import { PathData } from '../stores/machineStore';
-import { useCameraForMachine, useCameraStore } from '../stores/cameraStore';
-import { CameraStream } from './CameraStream';
+import { useCamerasForMachine, useCameraStore } from '../stores/cameraStore';
+import { CameraMultiView } from './CameraMultiView';
 import { OffsetView } from './ncmonitor/OffsetView';
 import { CountView } from './ncmonitor/CountView';
 import { ToolLifeView } from './ncmonitor/ToolLifeView';
@@ -39,7 +39,7 @@ export function NCMonitor({ path1, path2, machineMode, machineId, activeTab: ext
     onTabChange?.(tab);
   };
   const cameraEnabled = useCameraStore((s) => s.cameraEnabled);
-  const cameraForMachine = useCameraForMachine(machineId || '');
+  const camerasForMachine = useCamerasForMachine(machineId || '');
 
   return (
     <div className="bg-gray-900 rounded-lg shadow overflow-hidden flex flex-col h-full">
@@ -49,8 +49,8 @@ export function NCMonitor({ path1, path2, machineMode, machineId, activeTab: ext
           <MonitorView path1={path1} path2={path2} machineMode={machineMode} />
         )}
         {activeTab === 'camera' && (
-          cameraEnabled && machineId ? (
-            <CameraStream camera={cameraForMachine} className="h-full" />
+          cameraEnabled && camerasForMachine.length > 0 ? (
+            <CameraMultiView cameras={camerasForMachine} className="h-full" />
           ) : (
             <PlaceholderView title="카메라" description="카메라 옵션 추가 시 실시간 화면이 표시됩니다" />
           )
