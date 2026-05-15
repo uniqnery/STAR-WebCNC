@@ -1,12 +1,10 @@
-// CameraStream — RTSP→MJPEG 실시간 스트림 뷰어
-// 서버 /api/camera/:id/stream (FFmpeg 프록시) → <img> 태그
+// CameraStream — RTSP→MJPEG 실시간 스트림 뷰어 (브로드캐스트 방식)
+// 서버 /api/camera/:id/stream (FFmpeg 브로드캐스트 프록시) → <img> 태그
 //
-// [자동 복구 정책 — 전시 모드]
-// - 최초 접속 / 수동 재연결: force=true (기존 스트림 교체)
-// - 자동 재시도: force=false → 409 BUSY 수신 시 "다른 기기 시청 중" 표시 후 재시도 중단
-//   → 핑퐁 루프 방지: 두 기기가 서로 상대방 스트림을 죽이는 현상 차단
+// [자동 복구 정책]
 // - 오류 시 지수 백오프 무제한 재시도 (3s → 5s → 10s → 20s → 최대 30s)
 // - 카메라 재부팅/LAN 탈착/공유기 재시작 모두 자동 복구
+// - 다중 접속 가능 (서버 브로드캐스트) — BUSY 개념 없음
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { CameraConfig } from '../stores/cameraStore';
@@ -22,19 +20,15 @@ type ConnectionState =
   | 'idle'
   | 'connecting'
   | 'live'
-  | 'error'         // 일반 연결 오류 (재시도 중)
-  | 'auth_error'    // 인증 실패 (재시도 없음)
-  | 'network_error' // 네트워크 도달 불가 (재시도)
-  | 'timeout'       // 프레임 미수신 타임아웃 (재시도)
-  | 'stream_ended'  // 서버 측 스트림 종료 (재시도)
-  | 'busy'          // 다른 기기가 시청 중 (재시도 없음 — 수동만)
+  | 'error'
+  | 'auth_error'
+  | 'network_error'
+  | 'timeout'
+  | 'stream_ended'
   | 'disabled';
 
-// 지수 백오프 지연 시간 (ms) — 재시도 횟수에 따라 증가, 최대 30s
 const BACKOFF_DELAYS = [3000, 5000, 10000, 20000, 30000];
-const CONNECT_TIMEOUT_MS = 25000; // 첫 프레임 수신 타임아웃 (고화질 재접속 여유)
-// 자동 재시도(force=false) 후 이 시간 이내에 onError → 409 BUSY로 간주
-const BUSY_DETECT_MS = 2000;
+const CONNECT_TIMEOUT_MS = 25000;
 
 function getBackoffDelay(retryCount: number): number {
   return BACKOFF_DELAYS[Math.min(retryCount, BACKOFF_DELAYS.length - 1)];
@@ -48,38 +42,31 @@ export function CameraStream({ camera, className = '', showControls = true }: Ca
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(camera?.defaultZoom ?? 1.0);
 
-  // 카메라 변경 시 기본 배율 리셋
   useEffect(() => {
     setZoom(camera?.defaultZoom ?? 1.0);
   }, [camera?.id, camera?.defaultZoom]);
 
-  const containerRef       = useRef<HTMLDivElement>(null);
-  const connectTimeoutRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const retryTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const retryCountRef      = useRef(0);
-  const cameraIdRef        = useRef<string | undefined>(undefined);
-  const connectStartRef    = useRef<number>(0); // onError 발생 시점 비교용
-  const lastForceRef       = useRef<boolean>(true); // 마지막 요청이 force였는지
+  const containerRef      = useRef<HTMLDivElement>(null);
+  const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryCountRef     = useRef(0);
+  const cameraIdRef       = useRef<string | undefined>(undefined);
 
   const clearTimers = useCallback(() => {
     if (connectTimeoutRef.current) { clearTimeout(connectTimeoutRef.current); connectTimeoutRef.current = null; }
     if (retryTimerRef.current)     { clearTimeout(retryTimerRef.current);     retryTimerRef.current = null; }
   }, []);
 
-  const buildStreamUrl = useCallback((cameraId: string, force: boolean) => {
+  const buildStreamUrl = useCallback((cameraId: string) => {
     const base = cameraServerApi.getStreamUrl(cameraId);
-    return `${base}&t=${Date.now()}${force ? '&force=true' : ''}`;
+    return `${base}&t=${Date.now()}`;
   }, []);
 
-  // force=true: 최초 접속 / 수동 재연결 (기존 스트림 교체)
-  // force=false: 자동 재시도 (409 수신 시 busy 상태로 전환, 핑퐁 방지)
-  const startStream = useCallback((cameraId: string, force: boolean) => {
+  const startStream = useCallback((cameraId: string) => {
     clearTimers();
     setConnState('connecting');
     setErrorMsg('');
     setStreamUrl(null);
-    lastForceRef.current = force;
-    connectStartRef.current = Date.now();
 
     connectTimeoutRef.current = setTimeout(() => {
       setConnState('timeout');
@@ -87,10 +74,9 @@ export function CameraStream({ camera, className = '', showControls = true }: Ca
       setStreamUrl(null);
     }, CONNECT_TIMEOUT_MS);
 
-    setStreamUrl(buildStreamUrl(cameraId, force));
+    setStreamUrl(buildStreamUrl(cameraId));
   }, [clearTimers, buildStreamUrl]);
 
-  // 카메라 변경 시 — 최초 접속은 force=true
   useEffect(() => {
     clearTimers();
     retryCountRef.current = 0;
@@ -103,11 +89,10 @@ export function CameraStream({ camera, className = '', showControls = true }: Ca
       return;
     }
 
-    startStream(camera.id, true); // 최초 접속: force=true
+    startStream(camera.id);
     return clearTimers;
   }, [camera?.id, camera?.enabled, startStream, clearTimers]);
 
-  // 오류 후 지수 백오프 재시도 — force=false로 재시도
   const scheduleRetry = useCallback((state: ConnectionState, msg: string) => {
     if (!cameraIdRef.current) return;
     const delay = getBackoffDelay(retryCountRef.current);
@@ -116,9 +101,8 @@ export function CameraStream({ camera, className = '', showControls = true }: Ca
     setConnState(state);
     setErrorMsg(msg);
     setStreamUrl(null);
-    console.log(`[CameraStream] Retry #${retryCountRef.current} in ${delay}ms (${state})`);
     retryTimerRef.current = setTimeout(() => {
-      if (cameraIdRef.current) startStream(cameraIdRef.current, false); // 재시도: force=false
+      if (cameraIdRef.current) startStream(cameraIdRef.current);
     }, delay);
   }, [startStream]);
 
@@ -131,22 +115,9 @@ export function CameraStream({ camera, className = '', showControls = true }: Ca
   }, [clearTimers]);
 
   const handleError = useCallback(() => {
-    const elapsed = Date.now() - connectStartRef.current;
-
-    // force=false 재시도에서 빠르게 실패 → 409 BUSY로 간주, 자동 재시도 중단
-    if (!lastForceRef.current && elapsed < BUSY_DETECT_MS) {
-      clearTimers();
-      setConnState('busy');
-      setErrorMsg('다른 기기에서 시청 중입니다');
-      setStreamUrl(null);
-      console.log('[CameraStream] Detected BUSY (409) — stopping auto-retry');
-      return;
-    }
-
     scheduleRetry('error', '연결 오류 — 자동 재시도 중');
-  }, [scheduleRetry, clearTimers]);
+  }, [scheduleRetry]);
 
-  // 타임아웃 발생 후 자동 재시도
   useEffect(() => {
     if (connState === 'timeout' && cameraIdRef.current) {
       scheduleRetry('timeout', '카메라 응답 없음 — 자동 재시도 중');
@@ -154,12 +125,11 @@ export function CameraStream({ camera, className = '', showControls = true }: Ca
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connState]);
 
-  // 수동 재연결 — force=true로 기존 스트림 강제 교체
   const handleRetry = useCallback(() => {
     if (!cameraIdRef.current) return;
     retryCountRef.current = 0;
     setRetryCount(0);
-    startStream(cameraIdRef.current, true); // 수동: force=true
+    startStream(cameraIdRef.current);
   }, [startStream]);
 
   const toggleFullscreen = useCallback(() => {
@@ -197,7 +167,6 @@ export function CameraStream({ camera, className = '', showControls = true }: Ca
       ref={containerRef}
       className={`relative bg-black overflow-hidden ${className} ${isFullscreen ? 'w-screen h-screen' : ''}`}
     >
-      {/* MJPEG 스트림 */}
       {streamUrl && (
         <img
           src={streamUrl}
@@ -220,7 +189,7 @@ export function CameraStream({ camera, className = '', showControls = true }: Ca
         </div>
       )}
 
-      {/* 오류 오버레이 (재시도 대기 중) */}
+      {/* 오류 오버레이 */}
       {(connState === 'error' || connState === 'network_error' || connState === 'timeout' || connState === 'stream_ended') && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/90">
           <div className="text-center px-4">
@@ -229,9 +198,9 @@ export function CameraStream({ camera, className = '', showControls = true }: Ca
                 d="M12 9v2m0 4h.01M5.07 19H19a2 2 0 001.75-2.75L13.75 4a2 2 0 00-3.5 0L3.25 16.25A2 2 0 005.07 19z" />
             </svg>
             <p className="text-sm font-medium text-yellow-400">
-              {connState === 'timeout'      ? '타임아웃'      :
-               connState === 'stream_ended' ? '스트림 종료'   :
-               connState === 'network_error'? '네트워크 오류' : '연결 오류'}
+              {connState === 'timeout'       ? '타임아웃'      :
+               connState === 'stream_ended'  ? '스트림 종료'   :
+               connState === 'network_error' ? '네트워크 오류' : '연결 오류'}
             </p>
             {errorMsg && <p className="text-xs mt-1 text-gray-400">{errorMsg}</p>}
             <p className="text-xs mt-1 text-gray-600">{camera.ipAddress}:{camera.rtspPort}</p>
@@ -243,26 +212,6 @@ export function CameraStream({ camera, className = '', showControls = true }: Ca
               className="mt-3 px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
             >
               지금 재연결
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* BUSY 오버레이 — 다른 기기 시청 중 */}
-      {connState === 'busy' && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/90">
-          <div className="text-center px-4">
-            <svg className="w-10 h-10 mx-auto mb-2 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
-            <p className="text-sm font-medium text-orange-400">다른 기기에서 시청 중</p>
-            <p className="text-xs mt-1 text-gray-400">강제 연결하면 상대방 화면이 끊깁니다</p>
-            <button
-              onClick={handleRetry}
-              className="mt-3 px-3 py-1 text-xs bg-orange-700 hover:bg-orange-600 text-white rounded transition-colors"
-            >
-              강제 연결
             </button>
           </div>
         </div>

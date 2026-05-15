@@ -18,6 +18,8 @@ export interface CameraConfig {
   enabled: boolean;
   assignedMachineId?: string;
   defaultZoom?: number; // 기본 배율 (1.0 ~ 4.0, 기본값 1.0)
+  width?: number;       // FFmpeg 출력 가로 해상도 (기본 1280)
+  fps?: number;         // FFmpeg 출력 FPS (기본 20)
 }
 
 export type StreamStatus = 'connecting' | 'live' | 'error' | 'offline';

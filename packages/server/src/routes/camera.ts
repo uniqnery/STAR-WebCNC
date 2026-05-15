@@ -1,10 +1,10 @@
-// Camera Routes — RTSP → MJPEG 프록시 스트림
+// Camera Routes — RTSP → MJPEG 브로드캐스트
 //
 // [설계 정책]
-// - 카메라 ID당 FFmpeg 프로세스 1개 (단일 뷰어)
-// - force=true: 기존 스트림 강제 종료 후 새 스트림 시작
-// - force 없음: 409 BUSY 반환
-// - 기존 클라이언트 res를 명시적으로 destroy — onError 확실히 발동
+// - 카메라 ID당 FFmpeg 프로세스 1개
+// - 구독자(시청자) 무제한 — Set<Response> 브로드캐스트
+// - 마지막 구독자 퇴장 시 FFmpeg 자동 종료
+// - 해상도/FPS: CameraConfig.width / fps 설정값 사용 (기본 1280px / 20fps)
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
@@ -26,6 +26,9 @@ export interface CameraConfig {
   password: string;
   enabled: boolean;
   assignedMachineId?: string;
+  defaultZoom?: number;
+  width?: number;  // FFmpeg 출력 가로 해상도 (기본 1280)
+  fps?: number;    // FFmpeg 출력 FPS (기본 20)
 }
 
 export type CameraErrorCode =
@@ -33,29 +36,27 @@ export type CameraErrorCode =
   | 'NETWORK_ERROR'
   | 'TIMEOUT'
   | 'STREAM_ENDED'
-  | 'BUSY'
   | 'NOT_FOUND'
   | 'FFMPEG_ERROR'
   | 'INTERNAL_ERROR';
 
-// ──────────────────────────────────────────────
-// Active stream 관리 — res 참조 보유로 강제 종료 가능
-// ──────────────────────────────────────────────
+// ── Active stream 관리
 interface ActiveStream {
   process: ChildProcessWithoutNullStreams;
-  res: Response;          // 현재 스트림을 수신 중인 HTTP 응답
+  subscribers: Set<Response>;
   startedAt: number;
-  clientIp: string;
 }
 const activeStreams = new Map<string, ActiveStream>();
 
 process.on('SIGTERM', cleanupAllStreams);
-process.on('SIGINT',  cleanupAllStreams);
+process.on('SIGINT', cleanupAllStreams);
 function cleanupAllStreams() {
   console.log(`[Camera] Server shutdown: cleaning up ${activeStreams.size} active stream(s)`);
   for (const [id, stream] of activeStreams) {
     stream.process.kill('SIGTERM');
-    if (!stream.res.writableEnded) stream.res.destroy();
+    for (const sub of stream.subscribers) {
+      if (!sub.writableEnded) sub.destroy();
+    }
     activeStreams.delete(id);
   }
 }
@@ -64,17 +65,6 @@ async function getCameraConfigs(): Promise<CameraConfig[]> {
   const row = await prisma.globalSetting.findUnique({ where: { key: 'camera.configs' } });
   if (!row) return [];
   return JSON.parse(row.value as string) as CameraConfig[];
-}
-
-// 기존 스트림 강제 종료 — res.destroy()로 클라이언트 연결 끊음 → onError 확실히 발동
-function killStream(id: string) {
-  const existing = activeStreams.get(id);
-  if (!existing) return;
-  existing.process.stdout.unpipe(existing.res);
-  existing.process.kill('SIGTERM');
-  if (!existing.res.writableEnded) existing.res.destroy();
-  activeStreams.delete(id);
-  console.log(`[Camera] Killed stream: ${id} (was running ${Date.now() - existing.startedAt}ms)`);
 }
 
 function authenticateStream(req: Request, res: Response, next: NextFunction): void {
@@ -135,19 +125,18 @@ router.get('/:id/status', authenticateStream, (req: Request, res: Response) => {
     data: {
       id,
       streaming: !!stream,
+      subscriberCount: stream?.subscribers.size ?? 0,
       startedAt: stream?.startedAt ?? null,
-      clientIp: stream?.clientIp ?? null,
-      totalActiveStreams: activeStreams.size,
     },
   });
 });
 
 // ──────────────────────────────────────────────
-// GET /api/camera/:id/stream?token=xxx[&force=true]
+// GET /api/camera/:id/stream?token=xxx
+// 다중 구독자 지원 — 이미 실행 중인 FFmpeg에 구독자로 추가
 // ──────────────────────────────────────────────
 router.get('/:id/stream', authenticateStream, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const force = req.query.force === 'true';
   const clientIp = req.ip ?? 'unknown';
 
   if (!ffmpegPath) {
@@ -161,69 +150,97 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND' as CameraErrorCode, message: '카메라를 찾을 수 없거나 비활성 상태입니다' } });
     }
 
-    const existing = activeStreams.get(id);
-    if (existing) {
-      if (!force) {
-        console.log(`[Camera] BUSY: ${id} already streaming to ${existing.clientIp}, rejected ${clientIp}`);
-        return res.status(409).json({
-          success: false,
-          error: { code: 'BUSY' as CameraErrorCode, message: '이미 다른 클라이언트가 이 카메라를 시청 중입니다.' },
-        });
-      }
-      // force=true: 기존 클라이언트 강제 종료 후 RTSP 연결 해제 대기
-      console.log(`[Camera] Force-replacing stream: ${id} (${existing.clientIp} → ${clientIp})`);
-      killStream(id);
-      await new Promise<void>((r) => setTimeout(r, 500));
-    }
-
-    const auth = camera.username
-      ? `${encodeURIComponent(camera.username)}:${encodeURIComponent(camera.password)}@`
-      : '';
-    const rtspUrl     = `rtsp://${auth}${camera.ipAddress}:${camera.rtspPort}${camera.streamPath}`;
-    const rtspUrlSafe = `rtsp://${camera.username ? `${camera.username}:●●●@` : ''}${camera.ipAddress}:${camera.rtspPort}${camera.streamPath}`;
-
-    const ffmpegArgs = [
-      '-loglevel', 'warning',
-      '-rtsp_transport', 'tcp',
-      '-i', rtspUrl,
-      '-vf', 'scale=1280:-2,fps=20',
-      '-q:v', '3',
-      '-threads', '4',
-      '-f', 'mpjpeg',
-      'pipe:1',
-    ];
-
-    console.log(`[Camera] Starting stream: ${id} → ${rtspUrlSafe} (client: ${clientIp})`);
-
-    const ff = spawn(ffmpegPath, ffmpegArgs);
-    activeStreams.set(id, { process: ff, res, startedAt: Date.now(), clientIp });
-
+    // 응답 헤더 설정 (write 전까지 실제 전송되지 않음)
     res.setHeader('Content-Type', 'multipart/x-mixed-replace; boundary=ffmpeg');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Accel-Buffering', 'no');
 
-    ff.stdout.pipe(res);
+    // 이미 실행 중인 스트림이 있으면 구독자로만 추가
+    const existing = activeStreams.get(id);
+    if (existing) {
+      existing.subscribers.add(res);
+      console.log(`[Camera] Subscriber joined: ${id} (${clientIp}) — total: ${existing.subscribers.size}`);
 
-    // ── stdout 워치독: 10초간 데이터 없으면 FFmpeg 강제 종료 ──────────────
-    // → ff.on('exit') → res.end() → 브라우저 onError → 클라이언트 자동 재시도
+      req.on('close', () => {
+        existing.subscribers.delete(res);
+        console.log(`[Camera] Subscriber left: ${id} (${clientIp}) — remaining: ${existing.subscribers.size}`);
+        if (existing.subscribers.size === 0 && activeStreams.get(id) === existing) {
+          console.log(`[Camera] Last subscriber left — killing FFmpeg: ${id}`);
+          existing.process.kill('SIGTERM');
+          activeStreams.delete(id);
+        }
+      });
+      return;
+    }
+
+    // 새 FFmpeg 프로세스 시작
+    const auth = camera.username
+      ? `${encodeURIComponent(camera.username)}:${encodeURIComponent(camera.password)}@`
+      : '';
+    const rtspUrl     = `rtsp://${auth}${camera.ipAddress}:${camera.rtspPort}${camera.streamPath}`;
+    const rtspUrlSafe = `rtsp://${camera.username ? `${camera.username}:●●●@` : ''}${camera.ipAddress}:${camera.rtspPort}${camera.streamPath}`;
+
+    const width = camera.width ?? 1280;
+    const fps   = camera.fps   ?? 20;
+
+    const ffmpegArgs = [
+      '-loglevel', 'warning',
+      '-rtsp_transport', 'tcp',
+      '-i', rtspUrl,
+      '-vf', `scale=${width}:-2,fps=${fps}`,
+      '-q:v', '3',
+      '-threads', '4',
+      '-f', 'mpjpeg',
+      'pipe:1',
+    ];
+
+    console.log(`[Camera] Starting stream: ${id} → ${rtspUrlSafe} (${width}px / ${fps}fps)`);
+
+    const ff = spawn(ffmpegPath, ffmpegArgs);
+    const stream: ActiveStream = {
+      process: ff,
+      subscribers: new Set([res]),
+      startedAt: Date.now(),
+    };
+    activeStreams.set(id, stream);
+
+    // ── Watchdog: 10초간 데이터 없으면 FFmpeg 강제 종료
     const WATCHDOG_MS = 10_000;
     let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
     const resetWatchdog = () => {
       if (watchdogTimer) clearTimeout(watchdogTimer);
       watchdogTimer = setTimeout(() => {
-        if (activeStreams.get(id)?.process === ff) {
+        if (activeStreams.get(id) === stream) {
           console.log(`[Camera] Watchdog: no data for ${WATCHDOG_MS / 1000}s — killing FFmpeg (${id})`);
           ff.kill('SIGTERM');
           activeStreams.delete(id);
+          for (const sub of stream.subscribers) {
+            if (!sub.writableEnded) sub.end();
+          }
+          stream.subscribers.clear();
         }
       }, WATCHDOG_MS);
     };
-    resetWatchdog(); // 스트림 시작 시 워치독 가동
-    ff.stdout.on('data', resetWatchdog);
+    resetWatchdog();
     ff.on('exit', () => { if (watchdogTimer) clearTimeout(watchdogTimer); });
 
+    // ── stdout → 전체 구독자 브로드캐스트
+    ff.stdout.on('data', (chunk: Buffer) => {
+      resetWatchdog();
+      for (const sub of stream.subscribers) {
+        try {
+          if (!sub.writableEnded && !sub.destroyed) {
+            sub.write(chunk);
+          }
+        } catch {
+          stream.subscribers.delete(sub);
+        }
+      }
+    });
+
+    // ── stderr 오류 감지 (첫 프레임 수신 전 — headersSent=false 상태)
     let stderrBuf = '';
     ff.stderr.on('data', (data: Buffer) => {
       const msg = data.toString();
@@ -236,26 +253,32 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
       if (stderrBuf.includes('401') || stderrBuf.includes('Unauthorized')) {
         ff.kill('SIGTERM');
         activeStreams.delete(id);
+        stream.subscribers.clear();
         res.status(401).json({ success: false, error: { code: 'AUTH_ERROR' as CameraErrorCode, message: '카메라 인증 실패 (ID/PW 확인)' } });
       } else if (stderrBuf.includes('Connection refused') || stderrBuf.includes('No route to host') || stderrBuf.includes('Connection timed out')) {
         ff.kill('SIGTERM');
         activeStreams.delete(id);
+        stream.subscribers.clear();
         res.status(502).json({ success: false, error: { code: 'NETWORK_ERROR' as CameraErrorCode, message: '카메라에 접속할 수 없습니다 (IP/포트 확인)' } });
       }
     });
 
+    // ── FFmpeg 종료 시 전체 구독자 스트림 종료
     ff.on('exit', (code, signal) => {
       console.log(`[Camera] Stream ended: ${id} (code=${code}, signal=${signal})`);
-      // 맵에 이 프로세스가 그대로 있을 때만 제거 (force 교체 후 덮어쓰인 경우 스킵)
-      if (activeStreams.get(id)?.process === ff) activeStreams.delete(id);
-      if (!res.writableEnded) res.end();
+      if (activeStreams.get(id) === stream) activeStreams.delete(id);
+      for (const sub of stream.subscribers) {
+        if (!sub.writableEnded) sub.end();
+      }
+      stream.subscribers.clear();
     });
 
-    // 클라이언트가 먼저 연결 끊으면 FFmpeg 정리
+    // ── 첫 구독자 연결 종료 처리
     req.on('close', () => {
-      // 맵에 이 프로세스가 그대로 있을 때만 정리 (force 교체 후면 스킵)
-      if (activeStreams.get(id)?.process === ff) {
-        console.log(`[Camera] Client disconnected: ${id} (${clientIp}) — killing FFmpeg`);
+      stream.subscribers.delete(res);
+      console.log(`[Camera] Subscriber left: ${id} (${clientIp}) — remaining: ${stream.subscribers.size}`);
+      if (stream.subscribers.size === 0 && activeStreams.get(id) === stream) {
+        console.log(`[Camera] Last subscriber left — killing FFmpeg: ${id}`);
         ff.kill('SIGTERM');
         activeStreams.delete(id);
       }

@@ -684,6 +684,34 @@ function CameraModal({
             </div>
           </div>
 
+          {/* 해상도 / FPS */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">출력 가로 해상도 (px)</label>
+              <input
+                type="number"
+                min={320}
+                max={3840}
+                step={160}
+                value={camera.width ?? 1280}
+                onChange={(e) => update('width', parseInt(e.target.value) || 1280)}
+                className="w-full px-3 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">FPS</label>
+              <input
+                type="number"
+                min={1}
+                max={60}
+                step={1}
+                value={camera.fps ?? 20}
+                onChange={(e) => update('fps', parseInt(e.target.value) || 20)}
+                className="w-full px-3 py-1.5 text-sm bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white"
+              />
+            </div>
+          </div>
+
           {/* 활성화 */}
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-700 dark:text-gray-300">카메라 활성화</span>
