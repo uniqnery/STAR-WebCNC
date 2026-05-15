@@ -73,7 +73,7 @@ interface FileState {
   setSelectedShareFiles: (names: string[]) => void;
   setSelectedCncFiles: (names: string[]) => void;
   uploadToShare: (fileName: string, size: number) => void;
-  deleteFromShare: (fileNames: string[]) => void;
+  deleteFromShare: (fileNames: string[]) => Promise<void>;
   startTransfer: (direction: TransferDirection, fileNames: string[], machineId: string, userName: string) => void;
   completeTransfer: (jobId: string) => void;
   clearCompletedTransfers: () => void;
@@ -234,11 +234,16 @@ export const useFileStore = create<FileState>((set, get) => ({
     }));
   },
 
-  deleteFromShare: (fileNames) => {
+  deleteFromShare: async (fileNames) => {
     set((state) => ({
       shareFiles: state.shareFiles.filter((f) => !fileNames.includes(f.name)),
       selectedShareFiles: state.selectedShareFiles.filter((n) => !fileNames.includes(n)),
     }));
+    try {
+      await fileApi.deleteFiles('TRANSFER_SHARE', '', fileNames);
+    } catch (err) {
+      console.error('[fileStore] deleteFromShare failed:', err);
+    }
   },
 
   startTransfer: (direction, fileNames, machineId, userName) => {

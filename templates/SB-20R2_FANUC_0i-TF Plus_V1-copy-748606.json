@@ -499,7 +499,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6136.0",
-          "lampAddr": "R6036.0"
+          "lampAddr": "F3.6"
         },
         {
           "id": "MEMORY",
@@ -513,7 +513,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6137.0",
-          "lampAddr": "R6037.0"
+          "lampAddr": "F3.5"
         },
         {
           "id": "MDI",
@@ -527,7 +527,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6138.0",
-          "lampAddr": "R6038.0"
+          "lampAddr": "F3.3"
         },
         {
           "id": "JOG",
@@ -541,7 +541,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6140.0",
-          "lampAddr": "R6040.0"
+          "lampAddr": "F3.1"
         },
         {
           "id": "DNC",

@@ -1,9 +1,9 @@
 # 서버 API에서 활성 설비 목록을 읽어 설비별 에이전트 프로세스를 동적으로 실행
 
 param(
-    [string]$ServerUrl = "http://localhost:3000",
-    [string]$Username  = "admin",
-    [string]$Password  = "admin123!",
+    [string]$ServerUrl  = "http://localhost:3000",
+    [string]$Username   = "admin",
+    [string]$Password   = "admin123!",
     [string]$PublishDir = "C:\Star-WebCNC\packages\agent\StarWebCNC.Agent\publish",
     [string]$LogDir     = "C:\temp"
 )
@@ -36,6 +36,8 @@ if ($machines.Count -eq 0) {
 
 Write-Host "[agents] Starting $($machines.Count) agent(s)..."
 
+$dotnet = "C:\Program Files\dotnet\dotnet.exe"
+
 foreach ($m in $machines) {
     $machineId = $m.machineId
     $ip        = $m.ipAddress
@@ -43,20 +45,22 @@ foreach ($m in $machines) {
     $agentId   = "AGENT-" + $machineId.Replace("MC-", "")
     $logFile   = "$LogDir\agent_$($machineId -replace '-','').log"
 
-    # 호기별 임시 배치 파일 생성 (env 오버라이드 후 dotnet 실행)
-    $tempBat = "$env:TEMP\start_agent_$machineId.bat"
+    # 호기별 PS1 스크립트 생성 — 독립 powershell 프로세스로 실행
+    $psScript = "$LogDir\start_agent_$machineId.ps1"
     @"
-@echo off
-set ASPNETCORE_ENVIRONMENT=Production
-set Agent__AgentId=$agentId
-set Agent__MachineId=$machineId
-set Agent__Cnc__IpAddress=$ip
-set Agent__Cnc__Port=$port
-cd /d $PublishDir
-dotnet StarWebCNC.Agent.dll >> $logFile 2>&1
-"@ | Out-File -FilePath $tempBat -Encoding ascii
+`$env:ASPNETCORE_ENVIRONMENT = 'Production'
+`$env:Agent__AgentId         = '$agentId'
+`$env:Agent__MachineId       = '$machineId'
+`$env:Agent__Cnc__IpAddress  = '$ip'
+`$env:Agent__Cnc__Port       = '$port'
+Set-Location '$PublishDir'
+& '$dotnet' StarWebCNC.Agent.dll *>> '$logFile'
+"@ | Out-File -FilePath $psScript -Encoding utf8
 
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$tempBat`"" -WindowStyle Hidden
+    Start-Process -FilePath "powershell.exe" `
+        -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$psScript`"" `
+        -WindowStyle Hidden
+
     Write-Host "  [$machineId] IP=$ip Port=$port  log=$logFile"
 }
 
