@@ -197,6 +197,30 @@ function MonitorView({ path1, path2, machineMode }: { path1?: PathData; path2?: 
         </div>
       </div>
 
+      {/* Feed / Spindle 실속도 */}
+      <div className="grid grid-cols-2 gap-0 border border-gray-700 border-t-0">
+        <div className="px-2 py-1 text-[10px] border-r border-gray-700 space-y-0.5">
+          <div className="flex justify-between text-gray-400">
+            <span>F</span>
+            <span>{path1?.modal?.feedActual ?? 0} MM/MIN</span>
+          </div>
+          <div className="flex justify-between text-gray-400">
+            <span>S1</span>
+            <span className="text-white">{path1?.modal?.spindleActual ?? 0} /MIN</span>
+          </div>
+        </div>
+        <div className="px-2 py-1 text-[10px] space-y-0.5">
+          <div className="flex justify-between text-gray-400">
+            <span>F</span>
+            <span>{path2?.modal?.feedActual ?? 0} MM/MIN</span>
+          </div>
+          <div className="flex justify-between text-gray-400">
+            <span>S2</span>
+            <span className="text-white">{path2?.modal?.spindleActual ?? 0} /MIN</span>
+          </div>
+        </div>
+      </div>
+
       {/* Path 상태바 */}
       <div className="grid grid-cols-2 gap-0 border border-gray-700 border-t-0">
         <div className="bg-gray-800 px-2 py-1 text-[10px] text-green-400 border-r border-gray-700">
