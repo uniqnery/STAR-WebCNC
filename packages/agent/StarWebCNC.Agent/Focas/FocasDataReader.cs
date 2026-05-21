@@ -440,7 +440,7 @@ public class FocasDataReader
                             .Where(l => !string.IsNullOrEmpty(l)
                                 && l != "%"
                                 && !System.Text.RegularExpressions.Regex.IsMatch(l, @"^O\d+%?$"))
-                            .Take(6)
+                            .Take(11)
                             .ToArray();
 
                         if (lines.Length > 0)

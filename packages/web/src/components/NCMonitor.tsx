@@ -123,7 +123,7 @@ function MonitorView({ path1, path2, machineMode }: { path1?: PathData; path2?: 
             <span className="text-cyan-300">PATH1</span>
             <span className="text-white">{path1?.programNo || '-'} {path1?.blockNo || ''}</span>
           </div>
-          <div className="px-2 py-1 h-24 overflow-hidden max-lg:text-sm">
+          <div className="px-2 py-1 h-40 overflow-hidden max-lg:text-sm">
             {path1?.programContent?.map((line, i) => (
               <div key={i} className={line.startsWith('>') ? 'text-cyan-300 font-bold' : 'text-green-400'}>
                 {line || '\u00A0'}
@@ -137,7 +137,7 @@ function MonitorView({ path1, path2, machineMode }: { path1?: PathData; path2?: 
             <span className="text-cyan-300">PATH2</span>
             <span className="text-white">{path2?.programNo || '-'} {path2?.blockNo || ''}</span>
           </div>
-          <div className="px-2 py-1 h-24 overflow-hidden max-lg:text-sm">
+          <div className="px-2 py-1 h-40 overflow-hidden max-lg:text-sm">
             {path2?.programContent?.map((line, i) => (
               <div key={i} className={line.startsWith('>') ? 'text-cyan-300 font-bold' : 'text-green-400'}>
                 {line || '\u00A0'}
@@ -197,12 +197,6 @@ function MonitorView({ path1, path2, machineMode }: { path1?: PathData; path2?: 
         </div>
       </div>
 
-      {/* 모달 G코드 그리드 (Path1 | Path2) */}
-      <div className="grid grid-cols-2 gap-0 border border-gray-700 border-t-0">
-        <ModalGCodeGrid modal={path1?.modal} pathLabel="S1" />
-        <ModalGCodeGrid modal={path2?.modal} pathLabel="S2" isRight />
-      </div>
-
       {/* Path 상태바 */}
       <div className="grid grid-cols-2 gap-0 border border-gray-700 border-t-0">
         <div className="bg-gray-800 px-2 py-1 text-[10px] text-green-400 border-r border-gray-700">
@@ -216,44 +210,6 @@ function MonitorView({ path1, path2, machineMode }: { path1?: PathData; path2?: 
   );
 }
 
-// ============================================================
-// 모달 G코드 그리드
-// ============================================================
-function ModalGCodeGrid({ modal, pathLabel, isRight }: {
-  modal?: PathData['modal'];
-  pathLabel: string;
-  isRight?: boolean;
-}) {
-  const grid = modal?.gCodeGrid ?? [['','','',''],['','','',''],['','','',''],['','','',''],['','','','']];
-  const hasAnyCode = grid.some((row) => row.some((cell) => cell.trim() !== ''));
-
-  return (
-    <div className={`px-1 py-1 text-[10px] max-lg:text-[9px] ${isRight ? '' : 'border-r border-gray-700'}`}>
-      {grid.map((row, i) => (
-        <div key={i} className="flex gap-1">
-          {row.map((cell, j) => (
-            <span
-              key={j}
-              className={`w-8 ${cell.trim() ? 'text-green-400' : hasAnyCode ? 'text-gray-700' : 'text-gray-600'}`}
-            >
-              {cell.trim() || '---'}
-            </span>
-          ))}
-        </div>
-      ))}
-      {/* Feed Actual */}
-      <div className="flex justify-between mt-0.5 text-gray-400">
-        <span>F</span>
-        <span>{modal?.feedActual ?? 0}MM/MIN</span>
-      </div>
-      {/* Spindle Actual */}
-      <div className="flex justify-between text-gray-400">
-        <span>{pathLabel}</span>
-        <span className="text-white">{modal?.spindleActual ?? 0}/MIN</span>
-      </div>
-    </div>
-  );
-}
 
 // ============================================================
 // Placeholder 뷰 (카메라, OFFSET, COUNT, TOOL-LIFE)
