@@ -65,6 +65,8 @@ export function OffsetView({ machineId }: OffsetViewProps) {
   const [writeError, setWriteError] = useState<string | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  // 쓰기 후 CNC 반영 대기 — 이 시각 이전에 오는 폴링 결과는 무시
+  const writeCooldownUntilRef = useRef<number>(0);
 
   // 데이터 로드 함수
   const loadOffsets = useCallback((showLoading = false) => {
@@ -75,6 +77,8 @@ export function OffsetView({ machineId }: OffsetViewProps) {
       .readOffsets(machineId, activePath)
       .then((res) => {
         if (cancelled) return;
+        // 쓰기 후 쿨다운 중이면 무시 (CNC 가 아직 반영 전인 값으로 덮어쓰기 방지)
+        if (Date.now() < writeCooldownUntilRef.current) return;
         const raw: { no: number; x?: number; y?: number; z?: number; r?: number }[] =
           (res as any)?.data?.tools ?? (res as any)?.data?.entries ?? [];
         const mapped: WearEntry[] = Array.from({ length: toolCount }, (_, i) => {
@@ -92,6 +96,7 @@ export function OffsetView({ machineId }: OffsetViewProps) {
 
   // 초기 로드 + Path/장비 변경 시 리셋
   useEffect(() => {
+    writeCooldownUntilRef.current = 0;
     setFocusCell(null);
     setInputValue('');
     const cancel = loadOffsets(true);
@@ -182,6 +187,8 @@ export function OffsetView({ machineId }: OffsetViewProps) {
       setEntries((prev) =>
         prev.map((e, i) => (i === toolIdx ? { ...e, [axis.key]: newValue } : e)),
       );
+      // 정지 중 쓰기 시 CNC가 싸이클 스타트 후 반영 — 15초간 폴링 덮어쓰기 방지
+      writeCooldownUntilRef.current = Date.now() + 15_000;
       setInputValue('');
     } catch (err: any) {
       const msg = err?.message ?? '네트워크 오류';

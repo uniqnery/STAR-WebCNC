@@ -1031,21 +1031,28 @@ public class FocasDataReader
             const int BaseZ = 2101;
             const int BaseR = 2201;
 
+            // 배치 읽기: 축당 cnc_rdmacror2 1회 (256회 → 4회 호출)
+            // 실패 시 null 반환 → 개별 ReadMacroVariableSafe 폴백
+            var xVals = ReadMacroBlock(BaseX, toolCount);
+            var zVals = ReadMacroBlock(BaseZ, toolCount);
+            var rVals = ReadMacroBlock(BaseR, toolCount);
+            var yVals = ReadMacroBlock(BaseY, toolCount);
+
+            if (pathNo > 1)
+                Focas1.cnc_setpath(_connection.Handle, 1);
+
             var result = new List<WearOffsetEntry>(toolCount);
             for (int t = 0; t < toolCount; t++)
             {
                 result.Add(new WearOffsetEntry
                 {
                     No = t + 1,
-                    X  = ReadMacroVariableSafe(BaseX + t),
-                    Y  = ReadMacroVariableSafe(BaseY + t),
-                    Z  = ReadMacroVariableSafe(BaseZ + t),
-                    R  = ReadMacroVariableSafe(BaseR + t),
+                    X  = xVals != null ? NormalizeMacro(xVals[t]) : ReadMacroVariableSafe(BaseX + t),
+                    Y  = yVals != null ? NormalizeMacro(yVals[t]) : ReadMacroVariableSafe(BaseY + t),
+                    Z  = zVals != null ? NormalizeMacro(zVals[t]) : ReadMacroVariableSafe(BaseZ + t),
+                    R  = rVals != null ? NormalizeMacro(rVals[t]) : ReadMacroVariableSafe(BaseR + t),
                 });
             }
-
-            if (pathNo > 1)
-                Focas1.cnc_setpath(_connection.Handle, 1);
 
             return result;
         }
@@ -1055,6 +1062,28 @@ public class FocasDataReader
             return null;
         }
     }
+
+    // cnc_rdmacror2: 연속 매크로 변수 배치 읽기 (IEEE double 포맷)
+    // 실패 또는 예외 시 null 반환 — 호출자가 개별 읽기로 폴백
+    private double[]? ReadMacroBlock(int startNo, int count)
+    {
+        try
+        {
+            var buf = new double[count];
+            int cnt = count;
+            short ret = Focas1.cnc_rdmacror2(_connection.Handle, startNo, ref cnt, buf);
+            return ret == Focas1.EW_OK ? buf : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    // FANUC 미정의 매크로 변수 sentinel 처리
+    // 미설정 변수는 -1.0E+38 등 극소 음수 → 0.0 으로 정규화
+    private static double NormalizeMacro(double val)
+        => double.IsNaN(val) || double.IsInfinity(val) || val < -1e30 ? 0.0 : val;
 
     /// <summary>
     /// 마모 오프셋 쓰기 (단일 항목)
