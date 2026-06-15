@@ -257,7 +257,12 @@ public class CommandHandler
     /// </summary>
     private Task<CommandResultMessage> ExecuteListProgramsAsync(CommandMessage command)
     {
-        var programs = _dataReader.ListPrograms();
+        int pathNo = 1;
+        if (command.Params?.TryGetValue("path", out var pObj) == true &&
+            int.TryParse(pObj?.ToString(), out int parsedPath) && parsedPath >= 1)
+            pathNo = parsedPath;
+
+        var programs = _dataReader.ListPrograms(pathNo);
         if (programs == null)
             return Task.FromResult(CreateFailureResult(command, "CNC_NOT_CONNECTED", "CNC에 연결되어 있지 않습니다."));
 
@@ -315,7 +320,7 @@ public class CommandHandler
 
     /// <summary>
     /// DOWNLOAD_PROGRAM: CNC → PC 프로그램 수신
-    /// params: { fileName: string }  (fileName = "O0001" or "O0001.nc")
+    /// params: { fileName: string, path?: 1|2|3 }
     /// </summary>
     private async Task<CommandResultMessage> ExecuteDownloadProgramAsync(CommandMessage command)
     {
@@ -331,17 +336,30 @@ public class CommandHandler
         if (!int.TryParse(raw, out int programNo))
             return CreateFailureResult(command, "INVALID_PARAMS", $"O번호를 파싱할 수 없습니다: {fileName}");
 
-        _logger.LogInformation("DOWNLOAD_PROGRAM: O{ProgramNo:D4}", programNo);
+        int pathNo = 1;
+        if (command.Params.TryGetValue("path", out var pObj) &&
+            int.TryParse(pObj?.ToString(), out int parsedPath) && parsedPath >= 1)
+            pathNo = parsedPath;
+
+        _logger.LogInformation("DOWNLOAD_PROGRAM: O{ProgramNo:D4} (path={Path})", programNo, pathNo);
 
         string? content;
         try
         {
-            content = await _dataReader.DownloadProgramAsync(programNo);
+            content = await _dataReader.DownloadProgramAsync(programNo, pathNo);
         }
-        catch (InvalidOperationException ioe) when (ioe.Message.StartsWith("EW_FUNC:5"))
+        catch (InvalidOperationException ioe)
         {
-            return CreateFailureResult(command, "CNC_NOT_IN_EDIT_MODE",
-                "CNC를 EDIT 모드로 전환한 후 다시 시도하세요.");
+            return ioe.Message switch
+            {
+                "EW_DATA"   => CreateFailureResult(command, "PROGRAM_NOT_FOUND",
+                                   $"O{programNo:D4} 프로그램을 찾을 수 없습니다 (PATH{pathNo} 확인)."),
+                "EW_MODE"   => CreateFailureResult(command, "CNC_NOT_IN_EDIT_MODE",
+                                   "CNC를 EDIT 모드로 전환한 후 다시 시도하세요."),
+                "EW_REJECT" => CreateFailureResult(command, "CNC_BUSY",
+                                   "CNC가 자동운전 중이거나 백그라운드 편집 중입니다."),
+                _           => CreateFailureResult(command, "DOWNLOAD_FAILED", ioe.Message),
+            };
         }
         catch (Exception ex)
         {

@@ -524,8 +524,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6136.0",
-          "lampAddr": "R6036.0"
+          "reqAddr": "X52.1",
+          "lampAddr": "Y52.1"
         },
         {
           "id": "MEMORY",
@@ -538,8 +538,8 @@
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R6137.0",
-          "lampAddr": "R6037.0"
+          "reqAddr": "X52.2",
+          "lampAddr": "Y52.2"
         },
         {
           "id": "MDI",

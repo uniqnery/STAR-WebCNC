@@ -20,7 +20,7 @@ import schedulerRoutes, {
 } from './routes/scheduler';
 import alarmRoutes, { storeAlarm } from './routes/alarms';
 import transferRoutes from './routes/transfer';
-import backupRoutes from './routes/backup';
+import backupRoutes, { updateBackupStatus } from './routes/backup';
 import productionRoutes from './routes/production';
 import workOrderRoutes from './routes/workOrder';
 import auditRoutes from './routes/audit';
@@ -227,7 +227,8 @@ function setupMqttHandlers(): void {
     commandWaiter.notify(correlationId, { status, result, errorCode, errorMessage });
 
     // ── 3. DOWNLOAD_PROGRAM 결과: share/ 폴더에 파일 저장 ────────
-    if (status === 'success' && result && typeof result === 'object') {
+    // preview-로 시작하는 correlationId는 더블클릭 미리보기용 — share/ 저장 제외
+    if (!correlationId.startsWith('preview-') && status === 'success' && result && typeof result === 'object') {
       const r = result as Record<string, unknown>;
       if (r['content'] && r['fileName']) {
         const fileName = r['fileName'] as string;
@@ -250,21 +251,30 @@ function setupMqttHandlers(): void {
       }
     }
 
-    // ── 4. CREATE_BACKUP 완료 시 WS broadcast ────────────────────
-    if (correlationId?.startsWith('backup-') && status === 'success' && result) {
-      const r = result as Record<string, unknown>;
-      wsService.broadcast({
-        type: 'backup_completed',
-        timestamp: new Date().toISOString(),
-        payload: {
-          machineId,
-          backupId:     correlationId,
-          fileName:     r['fileName'],
-          fileSize:     r['fileSize'],
-          programCount: r['programCount'],
-          editMode:     r['editMode'],
-        },
-      });
+    // ── 4. CREATE_BACKUP 완료/실패 시 WS broadcast ───────────────
+    if (correlationId?.startsWith('backup-')) {
+      if (status === 'success' && result) {
+        const r = result as Record<string, unknown>;
+        wsService.broadcast({
+          type: 'backup_completed',
+          timestamp: new Date().toISOString(),
+          payload: {
+            machineId,
+            backupId:     correlationId,
+            fileName:     r['fileName'],
+            fileSize:     r['fileSize'],
+            programCount: r['programCount'],
+            editMode:     r['editMode'],
+          },
+        });
+      } else if (status !== 'success') {
+        updateBackupStatus(correlationId, 'FAILED', { errorMessage: errorMessage ?? errorCode ?? '에이전트 오류' });
+        wsService.broadcast({
+          type: 'backup_failed',
+          timestamp: new Date().toISOString(),
+          payload: { machineId, backupId: correlationId, errorCode, errorMessage },
+        });
+      }
     }
 
     // ── 5. 모든 WebSocket 클라이언트에 결과 브로드캐스트 ─────────

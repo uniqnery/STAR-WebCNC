@@ -47,6 +47,35 @@ internal static class FocasDllPreloader
 }
 
 /// <summary>
+/// cnc_rdpdf_line 명시적 P/Invoke (UnmanagedType.AsAny 마샬링 문제 우회)
+/// 30/31/32i 시리즈 전용 — NC 메모리 파일을 FOCAS 연결을 통해 직접 읽음 (DNC/FTP 불필요)
+/// </summary>
+internal static class FocasPdfLine
+{
+    [DllImport("FWLIB64.dll", EntryPoint = "cnc_rdpdf_line", CharSet = CharSet.Ansi, BestFitMapping = false)]
+    public static extern short Read(
+        ushort handle,
+        [MarshalAs(UnmanagedType.LPStr)] string path,
+        uint bufSize,
+        [Out] byte[] buf,
+        ref uint bytesRead,
+        ref uint endFlag);
+}
+
+/// <summary>
+/// cnc_upload3 명시적 P/Invoke (UnmanagedType.AsAny 마샬링 문제 우회)
+/// .NET 8에서 AsAny+Object는 byte[]를 올바르게 포인터로 전달하지 못할 수 있음
+/// </summary>
+internal static class FocasUpload3
+{
+    [DllImport("FWLIB64.dll", EntryPoint = "cnc_upload3")]
+    public static extern short Read(
+        ushort handle,
+        ref int size,
+        [Out] byte[] buf);
+}
+
+/// <summary>
 /// cnc_allclibhndl3 명시적 P/Invoke (UnmanagedType.AsAny 마샬링 문제 우회)
 /// fwlib64.cs의 AsAny는 .NET 8에서 IP 문자열을 잘못 전달할 수 있음
 /// </summary>
@@ -74,6 +103,7 @@ public class FocasConnection : IDisposable
 
     public bool IsConnected => _isConnected;
     public ushort Handle => _handle;
+    public string IpAddress => _settings.IpAddress;
 
     /// <summary>
     /// FOCAS API 직렬화 락 — FocasDataReader에서 모든 Focas1.xxx() 호출 시 사용

@@ -547,7 +547,7 @@
           "id": "DNC",
           "size": "normal",
           "color": "gray",
-          "label": "DNC",
+          "label": "DNCCC",
           "timing": {
             "holdMs": 300,
             "timeoutMs": 2000,

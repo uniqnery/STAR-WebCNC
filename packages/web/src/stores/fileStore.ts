@@ -74,7 +74,7 @@ interface FileState {
   setSelectedCncFiles: (names: string[]) => void;
   uploadToShare: (fileName: string, size: number) => void;
   deleteFromShare: (fileNames: string[]) => Promise<void>;
-  startTransfer: (direction: TransferDirection, fileNames: string[], machineId: string, userName: string) => void;
+  startTransfer: (direction: TransferDirection, fileNames: string[], machineId: string, userName: string, path?: number) => void;
   completeTransfer: (jobId: string) => void;
   clearCompletedTransfers: () => void;
 
@@ -181,10 +181,11 @@ export const useFileStore = create<FileState>((set, get) => ({
     set({ shareFiles: [], shareLoading: false });
   },
 
-  loadCncFiles: async (machineId, _pathKey) => {
+  loadCncFiles: async (machineId, pathKey) => {
     set({ cncLoading: true, cncError: null });
     try {
-      const res = await fileApi.listCncFiles(machineId);
+      const pathNo = pathKey === 'path2' ? 2 : pathKey === 'path3' ? 3 : 1;
+      const res = await fileApi.listCncFiles(machineId, pathNo);
       if (res.success) {
         // Agent 응답: { programs: [...], count: N } 또는 직접 배열
         const data = res.data as { programs?: FileEntry[] } | FileEntry[] | null;
@@ -206,8 +207,13 @@ export const useFileStore = create<FileState>((set, get) => ({
       const code = errData?.error?.code ?? 'UNKNOWN';
       const msg  = errData?.error?.message ?? '';
       let userMsg = `CNC 프로그램 목록 조회 실패 (${code})`;
-      if (code === 'COMMAND_TIMEOUT') userMsg = 'Agent 응답 없음 — Agent가 실행 중인지 확인하세요';
-      else if (code === 'CNC_NOT_CONNECTED') userMsg = 'CNC 미연결 — Agent의 FOCAS 연결 상태를 확인하세요';
+      if (code === 'COMMAND_TIMEOUT') {
+        // DOWNLOAD_PROGRAM 실행 중 FOCAS 스레드가 점유된 경우 기존 목록 유지
+        userMsg = 'Agent 처리 중 — 전송 완료 후 자동 복구됩니다';
+        console.warn('[CNC] LIST_PROGRAMS timeout (probably busy with transfer)');
+        set((s) => ({ cncLoading: false, cncError: userMsg, cncFiles: s.cncFiles }));
+        return;
+      } else if (code === 'CNC_NOT_CONNECTED') userMsg = 'CNC 미연결 — Agent의 FOCAS 연결 상태를 확인하세요';
       else if (code === 'UNKNOWN_COMMAND') userMsg = 'Agent 버전이 낮습니다 — Agent를 재빌드 후 재시작하세요';
       else if (msg) userMsg = `${userMsg}: ${msg}`;
       console.warn('[CNC] LIST_PROGRAMS failed:', code, msg);
@@ -246,7 +252,7 @@ export const useFileStore = create<FileState>((set, get) => ({
     }
   },
 
-  startTransfer: (direction, fileNames, machineId, userName) => {
+  startTransfer: (direction, fileNames, machineId, userName, path = 1) => {
     const now = new Date().toISOString();
     const jobs: TransferJob[] = fileNames.map((fileName) => ({
       id: `transfer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -273,7 +279,7 @@ export const useFileStore = create<FileState>((set, get) => ({
 
     // Try real API
     void fileApi
-      .transfer(machineId, direction, fileNames, 'OVERWRITE')
+      .transfer(machineId, direction, fileNames, 'OVERWRITE', path)
       .then((res) => {
         if (res.success) {
           if (direction === 'PC_TO_CNC') {

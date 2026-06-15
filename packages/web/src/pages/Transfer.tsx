@@ -189,6 +189,7 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
   const [confirmDialog, setConfirmDialog] = useState<{
     direction: TransferDirection;
     fileNames: string[];
+    cncPath?: 'path1' | 'path2' | 'path3';
   } | null>(null);
 
   // CNC Path 경로 텍스트
@@ -215,8 +216,8 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
   // → (오른쪽): CNC → PC — 확인 다이얼로그 표시
   const handleTransferRight = useCallback(() => {
     if (selectedCncFiles.length === 0) return;
-    setConfirmDialog({ direction: 'CNC_TO_PC', fileNames: selectedCncFiles });
-  }, [selectedCncFiles]);
+    setConfirmDialog({ direction: 'CNC_TO_PC', fileNames: selectedCncFiles, cncPath });
+  }, [selectedCncFiles, cncPath]);
 
   // ← (왼쪽): PC → CNC — 확인 다이얼로그 표시
   const handleTransferLeft = useCallback(() => {
@@ -228,7 +229,8 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
   const handleConfirmTransfer = useCallback(() => {
     if (!confirmDialog) return;
     const userName = user?.username || 'unknown';
-    startTransfer(confirmDialog.direction, confirmDialog.fileNames, machineId, userName);
+    const pathNo = confirmDialog.cncPath === 'path2' ? 2 : confirmDialog.cncPath === 'path3' ? 3 : 1;
+    startTransfer(confirmDialog.direction, confirmDialog.fileNames, machineId, userName, pathNo);
     setConfirmDialog(null);
   }, [confirmDialog, machineId, startTransfer, user]);
 
@@ -252,15 +254,38 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
     deleteFromShare(fileNames);
   }, [deleteFromShare]);
 
-  const handleShareDoubleClick = useCallback((file: FileEntry) => {
-    const content = MOCK_GCODE_CONTENT[file.name] || '';
-    openViewer(file.name, content, false, 'TRANSFER_SHARE', machineId);
+  const handleShareDoubleClick = useCallback(async (file: FileEntry) => {
+    openViewer(file.name, '파일을 읽는 중...', false, 'TRANSFER_SHARE', machineId);
+    try {
+      const res = await fileApi.readFile('TRANSFER_SHARE', '', file.name);
+      if (!res.success) {
+        const fallback = MOCK_GCODE_CONTENT[file.name] ?? '';
+        openViewer(file.name, fallback || `오류: ${(res as { error?: { message?: string } }).error?.message ?? '파일 읽기 실패'}`, false, 'TRANSFER_SHARE', machineId);
+        return;
+      }
+      const content = (res.data as { content?: string })?.content ?? '';
+      openViewer(file.name, content || '(내용 없음)', false, 'TRANSFER_SHARE', machineId);
+    } catch {
+      const fallback = MOCK_GCODE_CONTENT[file.name] ?? '';
+      openViewer(file.name, fallback || '파일을 읽을 수 없습니다', false, 'TRANSFER_SHARE', machineId);
+    }
   }, [openViewer, machineId]);
 
-  const handleCncDoubleClick = useCallback((file: FileEntry) => {
-    const content = MOCK_GCODE_CONTENT[file.name] || '';
-    openViewer(file.name, content, true, 'CNC_LOCAL', machineId);
-  }, [openViewer, machineId]);
+  const handleCncDoubleClick = useCallback(async (file: FileEntry) => {
+    const match = file.name.match(/O?(\d+)/i);
+    if (!match) return;
+    const programNo = parseInt(match[1], 10);
+    const pathNo = cncPath === 'path2' ? 2 : cncPath === 'path3' ? 3 : 1;
+
+    openViewer(file.name, '프로그램을 읽는 중...', true, 'CNC_LOCAL', machineId);
+    const res = await fileApi.readCncProgram(machineId, programNo, pathNo);
+    if (!res.success) {
+      openViewer(file.name, `오류: ${res.error?.message ?? '프로그램 읽기 실패'}`, true, 'CNC_LOCAL', machineId);
+      return;
+    }
+    const content = (res.data as { content?: string })?.content ?? '';
+    openViewer(file.name, content || '(내용 없음)', true, 'CNC_LOCAL', machineId);
+  }, [openViewer, machineId, cncPath]);
 
   const pathTabs: { key: 'path1' | 'path2' | 'path3'; label: string }[] = [
     { key: 'path1', label: 'PATH1' },
@@ -382,13 +407,19 @@ function BackupSection({ machineId, canTransfer }: { machineId: string; canTrans
     loadBackups();
   }, [loadBackups]);
 
-  // WS: backup_completed 이벤트 수신 시 이력 갱신
+  // WS: backup_completed / backup_failed 이벤트 수신 시 이력 갱신
   const loadBackupsRef = useRef(loadBackups);
   loadBackupsRef.current = loadBackups;
+  const setErrorRef = useRef(setError);
+  setErrorRef.current = setError;
   useEffect(() => {
     return wsClient.onMessage((msg) => {
-      if (msg.type === 'backup_completed') {
+      if (msg.type === 'backup_completed' || msg.type === 'backup_failed') {
         void loadBackupsRef.current();
+      }
+      if (msg.type === 'backup_failed') {
+        const p = msg.payload as { errorMessage?: string; errorCode?: string } | undefined;
+        setErrorRef.current(p?.errorMessage || p?.errorCode || '백업 처리 중 오류가 발생했습니다');
       }
     });
   }, []);
@@ -424,6 +455,8 @@ function BackupSection({ machineId, canTransfer }: { machineId: string; canTrans
         a.download = fileName;
         a.click();
         URL.revokeObjectURL(url);
+      } else {
+        setError('백업 파일을 찾을 수 없습니다 (서버 재시작 후 이력이 초기화되었을 수 있습니다)');
       }
     } catch {
       setError('백업 다운로드 실패');

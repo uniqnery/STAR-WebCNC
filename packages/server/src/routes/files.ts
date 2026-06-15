@@ -278,11 +278,12 @@ router.post('/delete', async (req: Request, res: Response, next: NextFunction) =
 // ─────────────────────────────────────────────────────────────
 router.post('/transfer', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { machineId, direction, fileNames, conflictPolicy = 'OVERWRITE' } = req.body as {
+    const { machineId, direction, fileNames, conflictPolicy = 'OVERWRITE', path: pathNo = 1 } = req.body as {
       machineId: string;
       direction: 'PC_TO_CNC' | 'CNC_TO_PC';
       fileNames: string[];
       conflictPolicy: string;
+      path: number;
     };
 
     if (!machineId || !isSafe(machineId)) {
@@ -324,7 +325,7 @@ router.post('/transfer', async (req: Request, res: Response, next: NextFunction)
           timestamp: new Date().toISOString(),
           command: 'DOWNLOAD_PROGRAM',
           correlationId: jobCid,
-          params: { fileName, conflictPolicy },
+          params: { fileName, conflictPolicy, path: pathNo },
         });
         jobs.push({ fileName, correlationId: jobCid });
       }

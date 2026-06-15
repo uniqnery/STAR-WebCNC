@@ -1,3 +1,4 @@
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Extensions.Logging;
@@ -13,6 +14,7 @@ public class FocasDataReader
 {
     private readonly ILogger<FocasDataReader> _logger;
     private readonly FocasConnection _connection;
+    private bool _fsdiagDone = false;
 
     public FocasDataReader(
         ILogger<FocasDataReader> logger,
@@ -218,6 +220,19 @@ public class FocasDataReader
             return null;
         }
     }
+
+    // ── cnc_rdprogline 커스텀 P/Invoke (raw IntPtr) ─────────────────────────
+    // cnc_upstart3/upload3가 I/O 채널(Parameter 20) 미설정으로 EW_DATA를 반환할 때
+    // 폴백으로 사용. 이 함수는 DNC 채널에 무관하게 CNC 메모리를 직접 읽는다.
+    [DllImport("FWLIB64.dll", EntryPoint = "cnc_rdprogline")]
+    private static extern short CncRdProgLine(
+        ushort handle,
+        int    prog_no,    // O번호
+        uint   line_no,    // 시작 라인 번호 (0=첫 줄)
+        IntPtr buff,       // OUT: NC 코드 텍스트 (ASCII, LF 구분)
+        ref uint num_line, // IN: 읽을 라인 수, OUT: 실제 읽은 라인 수
+        ref uint line_len  // IN: 버퍼 크기(bytes), OUT: 실제 읽은 바이트 수
+    );
 
     // ── cnc_rdexecprog 커스텀 P/Invoke ──────────────────────────────────────
     // UnmanagedType.AsAny는 .NET 8 미지원 → byte[] 직접 마샬링
@@ -1267,22 +1282,34 @@ public class FocasDataReader
     /// CNC 메모리 내 프로그램 목록 조회 (cnc_rdprogdir V1)
     /// V2(cnc_rdprogdir2)는 일부 CNC 모델에서 응답 없이 무한 블로킹되므로
     /// V1을 사용한다. V1은 ASCII 텍스트("O0001 O0002 ...") 형식으로 반환.
+    /// pathNo: 1=PATH1(기본), 2=PATH2, 3=PATH3
     /// </summary>
-    public List<ProgramDirectoryEntry>? ListPrograms()
+    public List<ProgramDirectoryEntry>? ListPrograms(int pathNo = 1)
     {
         if (!_connection.IsConnected)
             return null;
 
         const int BufSize = 8192; // V1 최대 반환 크기 (여유있게)
         IntPtr buf = IntPtr.Zero;
+        bool pathSwitched = false;
         try
         {
+            // 멀티-패스: PATH2/3 조회 시 cnc_setpath로 경로 전환 후 복원
+            if (pathNo > 1)
+            {
+                short sp = Focas1.cnc_setpath(_connection.Handle, (short)pathNo);
+                if (sp == Focas1.EW_OK)
+                    pathSwitched = true;
+                else
+                    _logger.LogWarning("cnc_setpath({Path}) failed: EW={Ret} — PATH1로 조회", pathNo, sp);
+            }
+
             buf = Marshal.AllocHGlobal(BufSize);
             // 버퍼 클리어
             for (int z = 0; z < BufSize; z++)
                 Marshal.WriteByte(buf, z, 0);
 
-            _logger.LogInformation("cnc_rdprogdir V1 calling...");
+            _logger.LogInformation("cnc_rdprogdir V1 calling... (path={Path})", pathNo);
 
             // type=0(O번호 순), no_s=0(처음부터), no_e=9999(O9999까지)
             short ret = CncRdProgDirV1Raw(
@@ -1344,6 +1371,9 @@ public class FocasDataReader
         {
             if (buf != IntPtr.Zero)
                 Marshal.FreeHGlobal(buf);
+            // PATH 전환 복원 (pathSwitched가 true일 때만)
+            if (pathSwitched)
+                Focas1.cnc_setpath(_connection.Handle, 1);
         }
     }
 
@@ -1499,87 +1529,452 @@ public class FocasDataReader
     /// <summary>
     /// NC 프로그램 수신 (CNC → PC, FOCAS "upload")
     /// </summary>
-    public Task<string?> DownloadProgramAsync(int programNo) => Task.FromResult(DownloadProgramSync(programNo));
+    public Task<string?> DownloadProgramAsync(int programNo, int pathNo = 1) => Task.FromResult(DownloadProgramSync(programNo, pathNo));
 
     /// <summary>
-    /// 백업용: 예외 없이 프로그램 내용을 반환 (EDIT 모드 아닐 경우 null 반환)
+    /// 백업용: 예외 없이 프로그램 내용을 반환
     /// </summary>
     public string? TryDownloadProgram(int programNo)
     {
-        try { return DownloadProgramSync(programNo); }
+        try { return DownloadProgramSync(programNo, 1); }
         catch { return null; }
     }
 
-    private string? DownloadProgramSync(int programNo)
+    private string? DownloadProgramSync(int programNo, int pathNo = 1)
     {
         if (!_connection.IsConnected)
             return null;
 
+        // 1순위: cnc_upstart3 → cnc_upload3 → cnc_upend (DNC 업로드 시퀀스)
+        string? upContent = ReadProgramViaUpload3(programNo, pathNo);
+        if (upContent != null)
+            return upContent;
+
+        // 2순위: cnc_rdpdf_line (30/32i NC 파일시스템 직접 읽기)
+        string? pdfContent = ReadProgramViaPdfLine(programNo);
+        if (pdfContent != null)
+            return pdfContent;
+
+        throw new InvalidOperationException("EW_DATA");
+    }
+
+    /// <summary>
+    /// CNC 파일시스템 구조 진단 — 드라이브 목록과 PATH1/PATH2 파일 목록을 로깅
+    /// cnc_rdpdf_line의 올바른 경로를 파악하기 위한 1회성 진단 호출
+    /// </summary>
+    private void DiagnoseCncFileSystem()
+    {
+        ushort h = _connection.Handle;
+
+        // 1. 드라이브 목록
         try
         {
-            // 업로드 시작 (type=0: CNC 메모리)
-            short ret = Focas1.cnc_upstart3(_connection.Handle, 0, programNo, 0);
-            if (ret != Focas1.EW_OK)
+            var drv = new Focas1.ODBPDFDRV();
+            short ret = Focas1.cnc_rdpdf_drive(h, drv);
+            if (ret == Focas1.EW_OK)
             {
-                string hint = ret == 5 ? " (EW_FUNC: CNC가 EDIT 모드가 아닌 경우 발생)" : "";
-                _logger.LogWarning("cnc_upstart3 failed: EW={ErrorCode}{Hint} for O{ProgramNo:D4}",
-                    ret, hint, programNo);
-                throw new InvalidOperationException($"EW_FUNC:{ret}"); // CommandHandler에서 에러코드로 변환
+                var drives = new[] { drv.drive1, drv.drive2, drv.drive3, drv.drive4,
+                                     drv.drive5, drv.drive6, drv.drive7, drv.drive8 }
+                    .Where(d => !string.IsNullOrWhiteSpace(d?.Trim()))
+                    .Select(d => d.Trim());
+                _logger.LogInformation("CNC 드라이브 목록 (max={Max}): [{Drives}]", drv.max_num, string.Join(", ", drives));
             }
+            else _logger.LogWarning("cnc_rdpdf_drive ret={Ret}", ret);
+        }
+        catch (Exception ex) { _logger.LogWarning("cnc_rdpdf_drive 예외: {Msg}", ex.Message); }
 
-            var sb      = new System.Text.StringBuilder(4096);
-            var buf     = new char[256];
-            int retries = 0;
-            const int MaxRetries = 500;
-
-            while (true)
+        // 2. PATH1 / PATH2 파일 목록
+        foreach (var dir in new[] { "//CNC_MEM/USER/PATH1/", "//CNC_MEM/USER/PATH2/", "//CNC_MEM/" })
+        {
+            try
             {
-                int length = buf.Length;
-                ret = Focas1.cnc_upload3(_connection.Handle, ref length, buf);
-
-                if (ret == Focas1.EW_OK)
+                var sb = new System.Text.StringBuilder();
+                for (short i = 0; i < 50; i++)
                 {
-                    if (length > 0)
-                        sb.Append(buf, 0, length);
-
-                    retries = 0;
-
-                    // % で始まり % で終わる NC プログラム全体を受信したか確認
-                    string text     = sb.ToString();
-                    int firstPct    = text.IndexOf('%');
-                    int secondPct   = firstPct >= 0 ? text.IndexOf('%', firstPct + 1) : -1;
-                    if (secondPct >= 0)
-                        break;
+                    var inp = new Focas1.IDBPDFADIR { path = dir, req_num = i, size_kind = 0, type = 0 };
+                    var out_ = new Focas1.ODBPDFADIR();
+                    short num = i;
+                    short ret = Focas1.cnc_rdpdf_alldir(h, ref num, inp, out_);
+                    if (ret != Focas1.EW_OK) break;
+                    string name = (out_.d_f ?? "").Trim();
+                    if (!string.IsNullOrEmpty(name)) sb.Append($"[{name}]");
                 }
-                else if (ret == 10) // EW_BUFFER: CNC 데이터 준비 중
+                _logger.LogInformation("cnc_rdpdf_alldir({Dir}) 파일 목록: {Files}", dir, sb.Length > 0 ? sb.ToString() : "(없음 또는 오류)");
+            }
+            catch (Exception ex) { _logger.LogWarning("cnc_rdpdf_alldir({Dir}) 예외: {Msg}", dir, ex.Message); }
+        }
+    }
+
+    /// <summary>
+    /// cnc_upstart3 → cnc_upload3(반복) → cnc_upend 시퀀스로 CNC 메모리에서 프로그램을 읽는다.
+    /// type=-1: CNC 파라미터 No.20 설정값 사용 (Ethernet DNC 채널)
+    /// </summary>
+    private string? ReadProgramViaUpload3(int programNo, int pathNo = 1)
+    {
+        ushort h = _connection.Handle;
+        bool pathSwitched = false;
+
+        // 멀티-패스: PATH2/3 조회 시 cnc_setpath로 경로 전환
+        if (pathNo > 1)
+        {
+            short sp = Focas1.cnc_setpath(h, (short)pathNo);
+            if (sp == Focas1.EW_OK)
+                pathSwitched = true;
+            else
+                _logger.LogWarning("ReadProgramViaUpload3: cnc_setpath({Path}) failed EW={Ret}", pathNo, sp);
+        }
+
+        try
+        {
+
+        // type=17: 32i-B Ethernet DNC (Embedded Ethernet)
+        // type=0:  RS-232 채널 1 (폴백)
+        // type=-1: 유효하지 않음 (ret=4 EW_ATTRIB 확인됨)
+        foreach (short type in new short[] { 17, 0 })
+        {
+            short ret = Focas1.cnc_upstart3(h, type, programNo, programNo);
+            _logger.LogInformation("cnc_upstart3(type={Type}, O{Prog:D4}) ret={Ret}", type, programNo, ret);
+
+            if (ret != Focas1.EW_OK)
+                continue;
+
+            var    sb       = new System.Text.StringBuilder();
+            byte[] buf      = new byte[512];
+            int    size;
+            var    deadline = DateTime.UtcNow.AddSeconds(20);
+
+            try
+            {
+                while (DateTime.UtcNow < deadline)
                 {
-                    if (++retries >= MaxRetries)
+                    size = buf.Length;
+                    ret  = FocasUpload3.Read(h, ref size, buf);
+
+                    if (ret == Focas1.EW_OK && size > 0)
                     {
-                        _logger.LogWarning("cnc_upload3: timeout for O{ProgramNo:D4}", programNo);
+                        sb.Append(Encoding.ASCII.GetString(buf, 0, size));
+                        // NC 프로그램 종료 마커(%) 수신 시 완료
+                        if (sb.ToString().TrimEnd().EndsWith("%"))
+                            break;
+                    }
+                    else if (ret == (short)Focas1.focas_ret.EW_BUFFER ||
+                             (ret == Focas1.EW_OK && size == 0))
+                    {
+                        // EW_BUFFER(10): 버퍼 비어있음 — 데이터 아직 미준비, 재시도
+                        System.Threading.Thread.Sleep(50);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("cnc_upload3 ret={Ret} size={Size} (완료 또는 오류)", ret, size);
                         break;
                     }
-                    Thread.Sleep(10); // FOCAS 스레드 유지 (Task.Delay 쓰면 ThreadPool로 이탈)
-                }
-                else
-                {
-                    _logger.LogWarning("cnc_upload3 ended with: {ErrorCode}", ret);
-                    break;
                 }
             }
+            finally
+            {
+                Focas1.cnc_upend(h);
+            }
 
-            Focas1.cnc_upend3(_connection.Handle);
-
-            return sb.Length > 0 ? sb.ToString() : null;
+            string content = sb.ToString();
+            if (!string.IsNullOrWhiteSpace(content))
+            {
+                _logger.LogInformation("cnc_upload3 읽기 성공(type={Type}): O{Prog:D4} ({Len}chars)", type, programNo, content.Length);
+                return content;
+            }
         }
-        catch (InvalidOperationException)
+
+        _logger.LogWarning("cnc_upload3 실패: O{Prog:D4}", programNo);
+        return null;
+
+        } // end try
+        finally
         {
-            throw; // CommandHandler에서 에러코드로 변환 (예: CNC_NOT_IN_EDIT_MODE)
+            if (pathSwitched)
+                Focas1.cnc_setpath(h, 1);
+        }
+    }
+
+    /// <summary>
+    /// cnc_rdpdf_line으로 NC 메모리 파일을 직접 읽는다 (30/31/32i 전용)
+    /// ret=5(EW_DATA) = 함수 지원됨, 경로/파일명 형식 틀림
+    /// </summary>
+    private string? ReadProgramViaPdfLine(int programNo)
+    {
+        // FANUC 파일명 규칙: 프로그램 목록에는 "O336" 형태로 표시됨 (zero-pad 없음)
+        // 하지만 파일시스템 실제 이름은 기종마다 다를 수 있으므로 다양한 형식 시도
+        string[] names = {
+            $"O{programNo}",        // O336  (zero-pad 없음, 실제 목록 표시 형식)
+            $"O{programNo:D4}",     // O0336 (4자리 zero-pad)
+            $"{programNo}",         // 336   (O 접두사 없음)
+            $"{programNo:D4}",      // 0336
+        };
+
+        string[] dirs = {
+            "//CNC_MEM/USER/PATH1/",
+            "//CNC_MEM/USER/PATH2/",
+        };
+
+        const uint BufSize = 65535;
+        byte[] buf = new byte[BufSize];
+
+        foreach (var dir in dirs)
+        {
+            foreach (var name in names)
+            {
+                string path = dir + name;
+                try
+                {
+                    Array.Clear(buf, 0, buf.Length);
+                    uint bytesRead = 0;
+                    uint endFlag   = 0;
+
+                    short ret = FocasPdfLine.Read(_connection.Handle, path, BufSize, buf, ref bytesRead, ref endFlag);
+                    _logger.LogInformation("cnc_rdpdf_line({Path}) ret={Ret} bytes={Bytes} end={End}", path, ret, bytesRead, endFlag);
+
+                    if (ret != Focas1.EW_OK)
+                        continue;
+
+                    var sb = new System.Text.StringBuilder();
+                    if (bytesRead > 0)
+                        sb.Append(Encoding.ASCII.GetString(buf, 0, (int)bytesRead));
+
+                    while (endFlag == 0)
+                    {
+                        bytesRead = 0;
+                        endFlag   = 0;
+                        ret = FocasPdfLine.Read(_connection.Handle, path, BufSize, buf, ref bytesRead, ref endFlag);
+                        if (ret != Focas1.EW_OK) break;
+                        if (bytesRead > 0)
+                            sb.Append(Encoding.ASCII.GetString(buf, 0, (int)bytesRead));
+                    }
+
+                    string content = sb.ToString();
+                    if (!string.IsNullOrWhiteSpace(content))
+                    {
+                        _logger.LogInformation("cnc_rdpdf_line 읽기 성공: {Path} ({Len}chars)", path, content.Length);
+                        return content;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("cnc_rdpdf_line 예외: {Path} — {Msg}", path, ex.Message);
+                }
+            }
+        }
+
+        _logger.LogWarning("cnc_rdpdf_line 실패: O{Num:D4} — 모든 경로 시도 완료", programNo);
+        return null;
+    }
+
+    /// <summary>
+    /// FANUC CNC 내장 FTP 서버에서 프로그램을 직접 읽어온다.
+    /// 표준 경로(PATH1/PATH2)와 루트 경로를 순서대로 시도한다.
+    /// </summary>
+    private string? ReadProgramViaFtp(int programNo)
+    {
+        string ip   = _connection.IpAddress;
+        string oNum = $"O{programNo:D4}";
+
+        string[] candidates = {
+            $"/CNC_MEM/USER/PATH1/{oNum}",
+            $"/CNC_MEM/USER/PATH1/{oNum}.NC",
+            $"/CNC_MEM/USER/PATH2/{oNum}",
+            $"/CNC_MEM/USER/PATH2/{oNum}.NC",
+            $"/{oNum}",
+            $"/{oNum}.NC",
+        };
+
+        // FANUC 기본 자격증명 → 익명 순서로 시도
+        (string user, string pass)[] creds = [
+            ("FANUC", "FANUC"),
+            ("",      ""),
+        ];
+
+        foreach (var (user, pass) in creds)
+        {
+            foreach (var path in candidates)
+            {
+                try
+                {
+#pragma warning disable SYSLIB0014
+                    var req = (FtpWebRequest)WebRequest.Create(new Uri($"ftp://{ip}{path}"));
+#pragma warning restore SYSLIB0014
+                    req.Method          = WebRequestMethods.Ftp.DownloadFile;
+                    req.Credentials     = new NetworkCredential(user, pass);
+                    req.UsePassive      = true;
+                    req.UseBinary       = false;
+                    req.Timeout         = 8_000;
+                    req.ReadWriteTimeout = 8_000;
+
+                    using var resp   = (FtpWebResponse)req.GetResponse();
+                    using var stream = resp.GetResponseStream();
+                    using var reader = new StreamReader(stream, Encoding.ASCII);
+                    string content = reader.ReadToEnd();
+
+                    if (!string.IsNullOrWhiteSpace(content))
+                    {
+                        _logger.LogInformation("FTP 읽기 성공: {Path} ({Bytes}bytes)", path, content.Length);
+                        return content;
+                    }
+                }
+                catch (WebException wex)
+                {
+                    var code = (wex.Response as FtpWebResponse)?.StatusCode;
+                    if (code == FtpStatusCode.ActionNotTakenFileUnavailable ||
+                        code == FtpStatusCode.ActionNotTakenFilenameNotAllowed)
+                    {
+                        _logger.LogWarning("FTP 경로 없음 (550): {Path}", path);
+                        continue;
+                    }
+                    // 접속 자체 실패(로그인 오류, 연결 거부 등) → 다음 자격증명 시도
+                    _logger.LogWarning("FTP WebException (code={Code}): user={User} path={Path} — {Msg}", code, user, path, wex.Message);
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("FTP 예외: user={User} path={Path} — {Msg}", user, path, ex.Message);
+                }
+            }
+        }
+
+        _logger.LogWarning("FTP 읽기 실패: O{ProgramNo:D4} — 모든 경로/자격증명 시도 완료", programNo);
+        return null;
+    }
+
+    /// <summary>
+    /// cnc_rdprogline을 사용한 프로그램 직접 읽기 (I/O 채널 파라미터 무관)
+    /// cnc_upstart3가 EW_DATA를 반환할 때 폴백으로 사용
+    /// </summary>
+    private string? ReadProgramByLine(int programNo)
+    {
+        const int  BufSize  = 65536; // 64KB
+        const uint MaxLines = 500;   // 1회 최대 요청 라인 수
+
+        IntPtr buf = System.Runtime.InteropServices.Marshal.AllocHGlobal(BufSize);
+        try
+        {
+            var sb     = new System.Text.StringBuilder(BufSize);
+            uint lineNo = 0;
+            int  loops  = 0;
+            const int MaxLoops = 200; // 무한루프 방지
+
+            while (loops++ < MaxLoops)
+            {
+                uint numLine = MaxLines;
+                uint lineLen = (uint)BufSize - 1;
+
+                short ret = CncRdProgLine(_connection.Handle, programNo, lineNo, buf, ref numLine, ref lineLen);
+
+                if (ret != Focas1.EW_OK)
+                {
+                    _logger.LogWarning("cnc_rdprogline EW={Ret} for O{ProgNo:D4} lineNo={L}", ret, programNo, lineNo);
+                    break;
+                }
+
+                if (lineLen == 0 || numLine == 0)
+                    break;
+
+                string chunk = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(buf, (int)lineLen)!;
+                sb.Append(chunk);
+
+                lineNo += numLine;
+
+                // % ... % で終端を確認
+                string text    = sb.ToString();
+                int firstPct   = text.IndexOf('%');
+                int secondPct  = firstPct >= 0 ? text.IndexOf('%', firstPct + 1) : -1;
+                if (secondPct >= 0)
+                    break;
+            }
+
+            if (sb.Length == 0)
+            {
+                _logger.LogWarning("cnc_rdprogline: O{ProgNo:D4} 내용 없음", programNo);
+                return null;
+            }
+
+            _logger.LogInformation("cnc_rdprogline 성공: O{ProgNo:D4} ({Bytes}bytes)", programNo, sb.Length);
+            return sb.ToString();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error downloading program O{ProgramNo:D4}", programNo);
+            _logger.LogError(ex, "ReadProgramByLine 예외: O{ProgNo:D4}", programNo);
             return null;
         }
+        finally
+        {
+            System.Runtime.InteropServices.Marshal.FreeHGlobal(buf);
+        }
+    }
+
+    private string? TryUploadProgram(int programNo, short path)
+    {
+        short ret = Focas1.cnc_upstart3(_connection.Handle, 0, programNo, 0);
+        if (ret != Focas1.EW_OK)
+        {
+            string desc = ret switch
+            {
+                1  => "EW_FUNC (기능 미지원)",
+                5  => "EW_DATA (경로에 프로그램 없음)",
+                11 => "EW_PATH (경로 오류)",
+                12 => "EW_MODE (EDIT 모드 필요)",
+                13 => "EW_REJECT (자동운전 중 또는 백그라운드 편집 중)",
+                _  => $"EW={ret}",
+            };
+            _logger.LogWarning("cnc_upstart3 failed: {Desc} for O{ProgramNo:D4} path={Path}",
+                desc, programNo, path);
+
+            throw new InvalidOperationException(ret switch
+            {
+                5  => "EW_DATA",
+                12 => "EW_MODE",
+                13 => "EW_REJECT",
+                _  => $"EW={ret}",
+            });
+        }
+
+        var sb      = new System.Text.StringBuilder(4096);
+        var buf     = new char[256];
+        int retries = 0;
+        const int MaxRetries = 500;
+
+        while (true)
+        {
+            int length = buf.Length;
+            ret = Focas1.cnc_upload3(_connection.Handle, ref length, buf);
+
+            if (ret == Focas1.EW_OK)
+            {
+                if (length > 0)
+                    sb.Append(buf, 0, length);
+
+                retries = 0;
+
+                string text    = sb.ToString();
+                int firstPct   = text.IndexOf('%');
+                int secondPct  = firstPct >= 0 ? text.IndexOf('%', firstPct + 1) : -1;
+                if (secondPct >= 0)
+                    break;
+            }
+            else if (ret == 10) // EW_BUFFER: CNC 데이터 준비 중
+            {
+                if (++retries >= MaxRetries)
+                {
+                    _logger.LogWarning("cnc_upload3: timeout for O{ProgramNo:D4}", programNo);
+                    break;
+                }
+                Thread.Sleep(10); // FOCAS 스레드 유지 (Task.Delay 쓰면 ThreadPool로 이탈)
+            }
+            else
+            {
+                _logger.LogWarning("cnc_upload3 ended with: {ErrorCode}", ret);
+                break;
+            }
+        }
+
+        Focas1.cnc_upend3(_connection.Handle);
+
+        return sb.Length > 0 ? sb.ToString() : null;
     }
 
     /// <summary>

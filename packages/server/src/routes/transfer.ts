@@ -18,7 +18,7 @@ const upload = multer({
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB limit
   },
-  fileFilter: (req, file, cb) => {
+  fileFilter: (_req, file, cb) => {
     // Accept NC program files
     const allowedExtensions = ['.nc', '.txt', '.prg', '.cnc'];
     const ext = file.originalname.toLowerCase().slice(file.originalname.lastIndexOf('.'));
@@ -48,6 +48,7 @@ router.get('/:machineId/programs', authenticate, async (req: Request, res: Respo
     }
 
     // Agent에 LIST_PROGRAMS 명령 전송 후 응답 대기
+    const pathNo = parseInt((req.query['path'] as string) || '1', 10) || 1;
     const correlationId = uuidv4();
     await prisma.commandLog.create({
       data: {
@@ -62,11 +63,11 @@ router.get('/:machineId/programs', authenticate, async (req: Request, res: Respo
       timestamp: new Date().toISOString(),
       command: 'LIST_PROGRAMS',
       correlationId,
-      params: {},
+      params: { path: pathNo },
     });
 
     try {
-      const cmdResult = await commandWaiter.wait(correlationId, 15_000);
+      const cmdResult = await commandWaiter.wait(correlationId, 45_000);
       if (cmdResult.status !== 'success') {
         return res.status(502).json({
           success: false,
@@ -77,7 +78,7 @@ router.get('/:machineId/programs', authenticate, async (req: Request, res: Respo
     } catch {
       return res.status(504).json({
         success: false,
-        error: { code: 'COMMAND_TIMEOUT', message: 'Agent 응답 시간 초과 (15초)' },
+        error: { code: 'COMMAND_TIMEOUT', message: 'Agent 응답 시간 초과 (45초)' },
       });
     }
   } catch (error) {
@@ -161,6 +162,50 @@ router.post('/:machineId/upload', authenticate, upload.single('file'), async (re
         status: 'PENDING',
       },
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Preview program content from CNC (synchronous — waits for agent response)
+router.get('/:machineId/preview/:programNo', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { machineId, programNo } = req.params;
+
+    const machine = await prisma.machine.findUnique({ where: { machineId } });
+    if (!machine) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'MACHINE_NOT_FOUND', message: '장비를 찾을 수 없습니다' },
+      });
+    }
+
+    const pathNo = parseInt((req.query['path'] as string) || '1', 10) || 1;
+    const correlationId = `preview-${Date.now()}-${programNo}`;
+
+    mqttService.publish(TOPICS.COMMAND_TO(machineId), {
+      timestamp: new Date().toISOString(),
+      command: 'DOWNLOAD_PROGRAM',
+      correlationId,
+      params: { fileName: `O${programNo}`, path: pathNo },
+    });
+
+    try {
+      const cmdResult = await commandWaiter.wait(correlationId, 30_000);
+      if (cmdResult.status !== 'success') {
+        return res.status(502).json({
+          success: false,
+          error: { code: cmdResult.errorCode ?? 'AGENT_ERROR', message: cmdResult.errorMessage ?? '프로그램 읽기 실패' },
+        });
+      }
+      const r = cmdResult.result as Record<string, unknown>;
+      return res.json({ success: true, data: { content: r['content'] ?? '' } });
+    } catch {
+      return res.status(504).json({
+        success: false,
+        error: { code: 'COMMAND_TIMEOUT', message: 'Agent 응답 시간 초과 (30초)' },
+      });
+    }
   } catch (error) {
     next(error);
   }

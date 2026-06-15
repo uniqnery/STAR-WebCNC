@@ -2,7 +2,6 @@
 
 import path from 'path';
 import fs from 'fs/promises';
-import { createWriteStream } from 'fs';
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { prisma } from '../lib/prisma';
@@ -13,6 +12,8 @@ import { createAuditLog } from './audit';
 const BACKUP_DIR = process.env.DATA_DIR
   ? path.join(process.env.DATA_DIR, 'backup')
   : path.join(process.cwd(), 'data', 'backup');
+
+const BACKUP_INDEX_FILE = path.join(BACKUP_DIR, 'index.json');
 
 // multer: Agent 업로드 수신 (메모리 저장 → 파일로 저장)
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
@@ -33,10 +34,43 @@ interface BackupRecord {
   completedAt?: Date;
   errorMessage?: string;
   filePath?: string;
+  createdBy: string;
 }
 
-// In-memory backup records (in production, use database)
+// Backup records — loaded from disk on startup, persisted on every change
 const backupRecords = new Map<string, BackupRecord>();
+
+async function saveIndex(): Promise<void> {
+  try {
+    await fs.mkdir(BACKUP_DIR, { recursive: true });
+    await fs.writeFile(
+      BACKUP_INDEX_FILE,
+      JSON.stringify(Array.from(backupRecords.values()), null, 2),
+      'utf-8',
+    );
+  } catch (err) {
+    console.error('[Backup] Failed to save index:', err);
+  }
+}
+
+async function loadIndex(): Promise<void> {
+  try {
+    const raw = await fs.readFile(BACKUP_INDEX_FILE, 'utf-8');
+    const records = JSON.parse(raw) as Array<BackupRecord & { createdAt: string; completedAt?: string }>;
+    for (const r of records) {
+      backupRecords.set(r.id, {
+        ...r,
+        createdAt: new Date(r.createdAt),
+        completedAt: r.completedAt ? new Date(r.completedAt) : undefined,
+      });
+    }
+    console.log(`[Backup] Loaded ${records.length} backup records from index`);
+  } catch {
+    // index.json doesn't exist yet — normal on first run
+  }
+}
+
+void loadIndex();
 
 // Get backup history for a machine
 router.get('/:machineId', authenticate, async (req: Request, res: Response, next: NextFunction) => {
@@ -105,7 +139,7 @@ router.post('/:machineId', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), 
       });
     }
 
-    const backupId = `backup-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const backupId = `backup-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
     const timestamp = new Date();
     const fileName = `${machineId}_${type}_${timestamp.toISOString().replace(/[:.]/g, '-')}.zip`;
 
@@ -118,8 +152,10 @@ router.post('/:machineId', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), 
       fileSize: 0,
       status: 'PENDING',
       createdAt: timestamp,
+      createdBy: req.user!.username,
     };
     backupRecords.set(backupId, backupRecord);
+    await saveIndex();
 
     // Send backup command to Agent via MQTT
     mqttService.publish(TOPICS.COMMAND_TO(machineId), {
@@ -240,6 +276,7 @@ router.post('/:backupId/upload', upload.single('file'), async (req: Request, res
     backup.fileSize = file.buffer.length;
     backup.filePath = filePath;
     backup.completedAt = new Date();
+    await saveIndex();
 
     res.json({ success: true, data: { backupId, fileSize: file.buffer.length } });
   } catch (error) {
@@ -247,7 +284,7 @@ router.post('/:backupId/upload', upload.single('file'), async (req: Request, res
   }
 });
 
-// Update backup status (called by agent via internal API)
+// Update backup status (called from index.ts MQTT handler)
 export function updateBackupStatus(
   backupId: string,
   status: BackupRecord['status'],
@@ -264,6 +301,7 @@ export function updateBackupStatus(
       if (details.filePath) backup.filePath = details.filePath;
       if (details.errorMessage) backup.errorMessage = details.errorMessage;
     }
+    void saveIndex();
   }
 }
 

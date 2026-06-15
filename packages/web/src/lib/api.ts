@@ -15,6 +15,8 @@ interface ApiResponse<T = unknown> {
 
 class ApiClient {
   private baseUrl: string;
+  private isRefreshing = false;
+  private refreshQueue: Array<(success: boolean) => void> = [];
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
@@ -33,77 +35,93 @@ class ApiClient {
     return headers;
   }
 
-  private async handleResponse<T>(response: Response): Promise<ApiResponse<T>> {
-    const data = await response.json();
-
-    // Handle 401 - try to refresh token
-    if (response.status === 401) {
-      const refreshed = await this.refreshToken();
-      if (!refreshed) {
-        useAuthStore.getState().logout();
-        window.location.href = '/login';
-      }
+  private async request<T>(url: string, init: RequestInit): Promise<ApiResponse<T>> {
+    const response = await fetch(url, init);
+    if (response.status !== 401) {
+      return response.json() as Promise<ApiResponse<T>>;
     }
 
-    return data;
+    // 401: refresh token (singleton — concurrent 401s queue here)
+    const refreshed = await this.refreshToken();
+    if (!refreshed) {
+      useAuthStore.getState().logout();
+      window.location.href = '/login';
+      return response.json() as Promise<ApiResponse<T>>;
+    }
+
+    // Retry with new token
+    const retryInit: RequestInit = {
+      ...init,
+      headers: { ...init.headers, ...this.getHeaders() },
+    };
+    const retry = await fetch(url, retryInit);
+    return retry.json() as Promise<ApiResponse<T>>;
   }
 
   private async refreshToken(): Promise<boolean> {
+    // Singleton: if refresh already in flight, queue and wait for the result
+    if (this.isRefreshing) {
+      return new Promise<boolean>((resolve) => {
+        this.refreshQueue.push(resolve);
+      });
+    }
+    this.isRefreshing = true;
     try {
       const response = await fetch(`${this.baseUrl}/api/auth/refresh`, {
         method: 'POST',
         credentials: 'include',
       });
-
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.data?.accessToken) {
           useAuthStore.getState().setAccessToken(data.data.accessToken);
+          this.refreshQueue.forEach((resolve) => resolve(true));
           return true;
         }
       }
-    } catch (error) {
-      console.error('Token refresh failed:', error);
+      this.refreshQueue.forEach((resolve) => resolve(false));
+      return false;
+    } catch {
+      this.refreshQueue.forEach((resolve) => resolve(false));
+      return false;
+    } finally {
+      this.isRefreshing = false;
+      this.refreshQueue = [];
     }
-    return false;
   }
 
   async get<T>(path: string): Promise<ApiResponse<T>> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    return this.request<T>(`${this.baseUrl}${path}`, {
       method: 'GET',
       headers: this.getHeaders(),
       credentials: 'include',
     });
-    return this.handleResponse<T>(response);
   }
 
   async post<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    return this.request<T>(`${this.baseUrl}${path}`, {
       method: 'POST',
       headers: this.getHeaders(),
       credentials: 'include',
       body: body ? JSON.stringify(body) : undefined,
     });
-    return this.handleResponse<T>(response);
   }
 
   async put<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    return this.request<T>(`${this.baseUrl}${path}`, {
       method: 'PUT',
       headers: this.getHeaders(),
       credentials: 'include',
       body: body ? JSON.stringify(body) : undefined,
     });
-    return this.handleResponse<T>(response);
   }
 
   async delete<T>(path: string): Promise<ApiResponse<T>> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    return this.request<T>(`${this.baseUrl}${path}`, {
       method: 'DELETE',
       headers: this.getHeaders(),
       credentials: 'include',
     });
-    return this.handleResponse<T>(response);
   }
 
   // multipart/form-data 전송 (Content-Type 헤더 제외 — 브라우저가 자동 설정)
@@ -111,13 +129,12 @@ class ApiClient {
     const headers: HeadersInit = {};
     const token = useAuthStore.getState().accessToken;
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    return this.request<T>(`${this.baseUrl}${path}`, {
       method: 'POST',
       headers,
       credentials: 'include',
       body: form,
     });
-    return this.handleResponse<T>(response);
   }
 }
 
@@ -512,8 +529,8 @@ export const fileApi = {
   },
 
   // CNC 프로그램 목록 (기존 transferApi.listPrograms 래핑)
-  listCncFiles: (machineId: string) =>
-    api.get(`/api/transfer/${machineId}/programs`),
+  listCncFiles: (machineId: string, path = 1) =>
+    api.get(`/api/transfer/${machineId}/programs?path=${path}`),
 
   // 파일 내용 읽기
   readFile: (root: string, machineId: string, fileName: string) =>
@@ -527,9 +544,13 @@ export const fileApi = {
   deleteFiles: (root: string, machineId: string, fileNames: string[]) =>
     api.post('/api/files/delete', { root, machineId, fileNames }),
 
+  // CNC 프로그램 내용 미리보기 (동기 응답)
+  readCncProgram: (machineId: string, programNo: number, path = 1) =>
+    api.get(`/api/transfer/${machineId}/preview/${programNo}?path=${path}`),
+
   // 파일 전송 (PC ↔ CNC)
-  transfer: (machineId: string, direction: string, fileNames: string[], conflictPolicy: string) =>
-    api.post('/api/files/transfer', { machineId, direction, fileNames, conflictPolicy }),
+  transfer: (machineId: string, direction: string, fileNames: string[], conflictPolicy: string, path = 1) =>
+    api.post('/api/files/transfer', { machineId, direction, fileNames, conflictPolicy, path }),
 };
 
 // Template API (HQ_ENGINEER/ADMIN 전용 - 장비 템플릿 관리)
