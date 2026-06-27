@@ -226,6 +226,7 @@ export function RemoteControl() {
                   path1={telemetry?.path1}
                   path2={telemetry?.path2}
                   machineMode={telemetry?.mode ? `PROGRAM( ${telemetry.mode} )` : undefined}
+                  mode={telemetry?.mode}
                   machineId={selectedMachineId || undefined}
                   activeTab={monitorTab}
                   onTabChange={setMonitorTab}

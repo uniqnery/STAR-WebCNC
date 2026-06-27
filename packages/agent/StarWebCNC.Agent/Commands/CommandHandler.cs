@@ -93,6 +93,7 @@ public class CommandHandler
                 "READ_TOOL_LIFE"         => await ExecuteReadToolLifeAsync(command),
                 "WRITE_TOOL_LIFE_PRESET" => await ExecuteWriteToolLifePresetAsync(command),
                 "PMC_WRITE"              => await ExecutePmcWriteAsync(command),
+                "WRITE_MDI"              => ExecuteWriteMdi(command),
                 "SEARCH_PROGRAM"         => ExecuteSearchProgram(command),
                 "REWIND_PROGRAM"         => ExecuteRewind(command),
                 "REWIND"                 => ExecuteRewind(command),
@@ -136,6 +137,7 @@ public class CommandHandler
             "WRITE_OFFSET"           => true,
             "WRITE_COUNT"            => true,
             "WRITE_TOOL_LIFE_PRESET" => true,
+            "WRITE_MDI"              => true,  // MDI 버퍼 기록: PMC 인터락 불필요, 제어권만 확인
             _ => false
         };
     }
@@ -784,6 +786,31 @@ public class CommandHandler
             CorrelationId = command.CorrelationId,
             Status        = "success",
             Result        = new { address = addrStr, value = bitValue, holdMs }
+        };
+    }
+
+    /// <summary>
+    /// WRITE_MDI: MDI 버퍼에 프로그램 기록 (cnc_wrmdiprog)
+    /// params: { program: string }  — ';' EOB 포함 가능
+    /// </summary>
+    private CommandResultMessage ExecuteWriteMdi(CommandMessage command)
+    {
+        if (command.Params == null ||
+            !command.Params.TryGetValue("program", out var progObj) ||
+            progObj is not string program ||
+            string.IsNullOrWhiteSpace(program))
+            return CreateFailureResult(command, "INVALID_PARAMS", "program 파라미터가 필요합니다.");
+
+        bool ok = _dataReader.WriteMdiProgram(program);
+        if (!ok)
+            return CreateFailureResult(command, "WRITE_MDI_FAILED", "MDI 버퍼 기록 실패. MDI 모드인지 확인하세요.");
+
+        return new CommandResultMessage
+        {
+            MachineId     = _settings.MachineId,
+            CorrelationId = command.CorrelationId,
+            Status        = "success",
+            Result        = new { written = true },
         };
     }
 

@@ -577,6 +577,43 @@ public class FocasDataReader
     }
 
     /// <summary>
+    /// MDI 버퍼에 프로그램 기록 (cnc_wrmdiprog)
+    /// program: "G0 X40.0 ; G0 X20.0" 형식 — ';' → '\n' 변환 후 CNC에 전송
+    /// </summary>
+    public bool WriteMdiProgram(string program)
+    {
+        if (!_connection.IsConnected) return false;
+        try
+        {
+            var lines = program
+                .Replace(";", "\n")
+                .Split('\n')
+                .Select(l => l.Trim())
+                .Where(l => !string.IsNullOrEmpty(l))
+                .ToList();
+
+            if (lines.Count == 0) return false;
+
+            var mdiText = string.Join("\n", lines) + "\n";
+            byte[] data = Encoding.ASCII.GetBytes(mdiText);
+
+            short ret = Focas1.cnc_wrmdiprog(_connection.Handle, (short)data.Length, data);
+            if (ret != Focas1.EW_OK)
+            {
+                _logger.LogWarning("cnc_wrmdiprog failed: EW={Ret}", ret);
+                return false;
+            }
+            _logger.LogInformation("WriteMdiProgram OK: [{Lines}]", string.Join(" ; ", lines));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "WriteMdiProgram error");
+            return false;
+        }
+    }
+
+    /// <summary>
     /// 오퍼레이터 메시지 읽기 (cnc_rdopmsg3)
     /// NC 프로그램(#3006), 외부 신호, PMC 매크로 등에서 발생한 메시지
     /// </summary>
