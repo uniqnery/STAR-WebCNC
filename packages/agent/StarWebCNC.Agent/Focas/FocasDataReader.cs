@@ -556,12 +556,14 @@ public class FocasDataReader
                 var m = msgs[i];
                 if (m.alm_no != 0)
                 {
+                    var msgLen = Math.Clamp((int)m.msg_len, 0, 64);
+                    var raw    = m.alm_msg ?? "";
                     alarms.Add(new AlarmInfo
                     {
                         AlarmNo = m.alm_no,
                         Type    = m.type,
                         Axis    = m.axis,
-                        Message = m.alm_msg?.TrimEnd('\0') ?? "",
+                        Message = raw[..Math.Min(msgLen, raw.Length)].Trim(),
                     });
                 }
             }

@@ -299,7 +299,8 @@ export interface CncTemplate {
 }
 
 // ── Store ─────────────────────────────────────────────────
-const STORAGE_KEY = 'star-webcnc-templates';
+const STORAGE_KEY   = 'star-webcnc-templates';
+const SELECTED_KEY  = 'star-webcnc-selected-template';
 
 // 서버 create 중복 방지 — 로컬 id 기준으로 진행 중인 create 추적
 const _pendingServerCreates = new Set<string>();
@@ -758,7 +759,9 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     const stored = loadFromStorage();
     if (stored && stored.length > 0) {
       // 로컬 데이터 우선 (사용자 편집 내용 보존)
-      set({ templates: stored, selectedTemplateId: stored[0].id });
+      const savedId = localStorage.getItem(SELECTED_KEY);
+      const restoredId = stored.find(t => t.id === savedId)?.id ?? stored[0].id;
+      set({ templates: stored, selectedTemplateId: restoredId });
     }
 
     // 항상 서버에서 최신 템플릿 로드 (로컬 캐시 덮어쓰기)
@@ -785,6 +788,7 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
   },
 
   selectTemplate: (id) => {
+    if (id) localStorage.setItem(SELECTED_KEY, id);
     set({ selectedTemplateId: id });
   },
 

@@ -416,7 +416,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6132.0",
-          "lampAddr": "R6032.0"
+          "lampAddr": "Y51.0"
         },
         {
           "id": "HEAD2",
@@ -430,7 +430,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6133.0",
-          "lampAddr": "R6033.0"
+          "lampAddr": "Y51.1"
         },
         {
           "id": "HEAD_CHANGE",
@@ -464,7 +464,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6101.0",
-          "lampAddr": "R6001.0"
+          "lampAddr": "Y54.3"
         },
         {
           "id": "SUB_CHUCK",
@@ -478,7 +478,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6103.0",
-          "lampAddr": "R6003.0"
+          "lampAddr": "Y54.6"
         }
       ],
       "name": "CHUCKING",
@@ -499,7 +499,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6136.0",
-          "lampAddr": "F3.6"
+          "lampAddr": "Y52.1"
         },
         {
           "id": "MEMORY",
@@ -513,7 +513,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6137.0",
-          "lampAddr": "F3.5"
+          "lampAddr": "Y52.2"
         },
         {
           "id": "MDI",
@@ -527,7 +527,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6138.0",
-          "lampAddr": "F3.3"
+          "lampAddr": "Y52.3"
         },
         {
           "id": "JOG",
@@ -541,7 +541,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6140.0",
-          "lampAddr": "F3.1"
+          "lampAddr": "Y52.5"
         },
         {
           "id": "DNC",
@@ -575,7 +575,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6145.0",
-          "lampAddr": "R6045.0"
+          "lampAddr": "Y53.1"
         },
         {
           "id": "OPT_STOP",
@@ -589,7 +589,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6146.0",
-          "lampAddr": "R6046.0"
+          "lampAddr": "Y53.2"
         },
         {
           "id": "AIR_CUT",
@@ -603,7 +603,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6147.0",
-          "lampAddr": "R6047.0"
+          "lampAddr": "Y53.4"
         },
         {
           "id": "AUTO_PWR_OFF",
@@ -617,7 +617,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6148.0",
-          "lampAddr": "R6048.0"
+          "lampAddr": "D1.6"
         },
         {
           "id": "WORK_LIGHT",
@@ -631,7 +631,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6149.0",
-          "lampAddr": "R6049.0"
+          "lampAddr": "Y53.6"
         },
         {
           "id": "k-1774079767388-r2fj",
@@ -645,7 +645,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6150.0",
-          "lampAddr": "R6050.0"
+          "lampAddr": "Y54.0"
         }
       ],
       "name": "FUNCTION"
@@ -665,7 +665,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6144.0",
-          "lampAddr": "R6024.0"
+          "lampAddr": "Y51.7"
         },
         {
           "id": "E_STOP",
@@ -711,7 +711,7 @@
           "label": "도어 닫힘",
           "contact": "A",
           "enabled": true,
-          "pmcAddr": "R6011.0"
+          "pmcAddr": "X9.3"
         },
         {
           "id": "tbi-1774959701281-4fyg",
@@ -734,35 +734,35 @@
           "label": "머시닝 모드",
           "contact": "A",
           "enabled": true,
-          "pmcAddr": "R6000.0"
+          "pmcAddr": "X47.5"
         },
         {
           "id": "tbi-1774959969310-jypr",
           "label": "메모리 모드",
           "contact": "A",
           "enabled": true,
-          "pmcAddr": "R6037.0"
+          "pmcAddr": "Y52.2"
         },
         {
           "id": "sc-estop",
           "label": "도어 닫힘",
           "contact": "A",
           "enabled": true,
-          "pmcAddr": "R6011.0"
+          "pmcAddr": "R7.3"
         },
         {
           "id": "tbi-1774959968935-e3tz",
           "label": "절삭유S/W ON",
           "contact": "A",
           "enabled": true,
-          "pmcAddr": "R6073.0"
+          "pmcAddr": "X47.2"
         },
         {
           "id": "tbi-1774961826472-1hzx",
           "label": "비가동중",
           "contact": "B",
           "enabled": true,
-          "pmcAddr": "R6024.0"
+          "pmcAddr": "Y1.6"
         }
       ],
       "interlockEnabled": true
@@ -981,6 +981,33 @@
     "path2OnlyTimeoutAction": "error",
     "path2OnlyConfirmDelayMs": 500
   },
+  "pmcMessages": [
+    {
+      "id": "pmc-msg-1",
+      "message": "ARE YOU SURE OF \"AIR CUT\" MODE ?",
+      "pmcAddr": "A209.5"
+    },
+    {
+      "id": "pmc-msg-2",
+      "message": "ARE YOU SURE OF PATH2 MODE ?",
+      "pmcAddr": "A209.6"
+    },
+    {
+      "id": "msg-1774260697202",
+      "message": "AUTOMATIC BARFEEDER NOT READY",
+      "pmcAddr": "A207.6"
+    },
+    {
+      "id": "msg-1775141265617",
+      "message": "OVERRIDE IS NOT 100%",
+      "pmcAddr": "A206.1"
+    },
+    {
+      "id": "msg-1775867255411",
+      "message": "COOLANT 1 KEY IS OFF",
+      "pmcAddr": "A208.3"
+    }
+  ],
   "capabilities": {
     "hasCAxis": true,
     "hasYAxis": true,
@@ -992,6 +1019,7 @@
     "remoteControl": true
   },
   "extraPmcAddrs": [
-    "R6035.0"
+    "R6035.0",
+    "R551.0"
   ]
 }

@@ -1007,6 +1007,33 @@
     "path2OnlyTimeoutAction": "error",
     "path2OnlyConfirmDelayMs": 500
   },
+  "pmcMessages": [
+    {
+      "id": "pmc-msg-1",
+      "message": "ARE YOU SURE OF \"AIR CUT\" MODE ?",
+      "pmcAddr": "A209.5"
+    },
+    {
+      "id": "pmc-msg-2",
+      "message": "ARE YOU SURE OF PATH2 MODE ?",
+      "pmcAddr": "A209.6"
+    },
+    {
+      "id": "msg-1774260697202",
+      "message": "AUTOMATIC BARFEEDER NOT READY",
+      "pmcAddr": "A207.6"
+    },
+    {
+      "id": "msg-1775141265617",
+      "message": "OVERRIDE IS NOT 100%",
+      "pmcAddr": "A206.1"
+    },
+    {
+      "id": "msg-1775867255411",
+      "message": "COOLANT 1 KEY IS OFF",
+      "pmcAddr": "A208.3"
+    }
+  ],
   "capabilities": {
     "hasCAxis": true,
     "hasYAxis": true,

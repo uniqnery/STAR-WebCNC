@@ -45,8 +45,12 @@ interface ActiveStream {
   process: ChildProcessWithoutNullStreams;
   subscribers: Set<Response>;
   startedAt: number;
+  graceTimer?: ReturnType<typeof setTimeout>; // 마지막 구독자 퇴장 후 유예 타이머
 }
 const activeStreams = new Map<string, ActiveStream>();
+
+// 마지막 구독자 퇴장 후 FFmpeg 유지 시간 (재진입 시 재사용)
+const GRACE_PERIOD_MS = 3_000;
 
 process.on('SIGTERM', cleanupAllStreams);
 process.on('SIGINT', cleanupAllStreams);
@@ -159,9 +163,14 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Accel-Buffering', 'no');
 
-    // 이미 실행 중인 스트림이 있으면 구독자로만 추가
+    // [Fix1] await 이후 재확인 — getCameraConfigs() 대기 중 다른 요청이 스트림을 시작했을 수 있음
     const existing = activeStreams.get(streamKey);
     if (existing) {
+      // [Fix2] 유예 타이머 취소 — 재진입 시 기존 FFmpeg 재사용
+      if (existing.graceTimer) {
+        clearTimeout(existing.graceTimer);
+        existing.graceTimer = undefined;
+      }
       existing.subscribers.add(res);
       console.log(`[Camera] Subscriber joined: ${id} (${clientIp}) — total: ${existing.subscribers.size}`);
 
@@ -169,9 +178,16 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
         existing.subscribers.delete(res);
         console.log(`[Camera] Subscriber left: ${id} (${clientIp}) — remaining: ${existing.subscribers.size}`);
         if (existing.subscribers.size === 0 && activeStreams.get(streamKey) === existing) {
-          console.log(`[Camera] Last subscriber left — killing FFmpeg: ${id}`);
-          existing.process.kill('SIGTERM');
-          activeStreams.delete(streamKey);
+          // [Fix2] 즉시 종료 대신 유예 기간 — 빠른 재진입 시 FFmpeg 재사용
+          if (existing.graceTimer) clearTimeout(existing.graceTimer);
+          existing.graceTimer = setTimeout(() => {
+            if (activeStreams.get(streamKey) === existing && existing.subscribers.size === 0) {
+              console.log(`[Camera] Grace expired — killing FFmpeg: ${id}`);
+              existing.process.kill('SIGTERM');
+              activeStreams.delete(streamKey);
+            }
+          }, GRACE_PERIOD_MS);
+          console.log(`[Camera] Last subscriber left — grace ${GRACE_PERIOD_MS / 1000}s: ${id}`);
         }
       });
       return;
@@ -254,20 +270,22 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
 
       if (stderrBuf.includes('401') || stderrBuf.includes('Unauthorized')) {
         ff.kill('SIGTERM');
-        activeStreams.delete(id);
+        activeStreams.delete(streamKey); // [Fix3] id → streamKey (thumb 스트림 좀비 방지)
         stream.subscribers.clear();
         res.status(401).json({ success: false, error: { code: 'AUTH_ERROR' as CameraErrorCode, message: '카메라 인증 실패 (ID/PW 확인)' } });
       } else if (stderrBuf.includes('Connection refused') || stderrBuf.includes('No route to host') || stderrBuf.includes('Connection timed out')) {
         ff.kill('SIGTERM');
-        activeStreams.delete(id);
+        activeStreams.delete(streamKey); // [Fix3] id → streamKey (thumb 스트림 좀비 방지)
         stream.subscribers.clear();
         res.status(502).json({ success: false, error: { code: 'NETWORK_ERROR' as CameraErrorCode, message: '카메라에 접속할 수 없습니다 (IP/포트 확인)' } });
       }
     });
 
-    // ── FFmpeg 종료 시 전체 구독자 스트림 종료
+    // ── FFmpeg 종료 시 전체 구독자 스트림 종료 + 유예 타이머 정리
     ff.on('exit', (code, signal) => {
       console.log(`[Camera] Stream ended: ${id} (code=${code}, signal=${signal})`);
+      if (stream.graceTimer) { clearTimeout(stream.graceTimer); stream.graceTimer = undefined; }
+      if (watchdogTimer) clearTimeout(watchdogTimer);
       if (activeStreams.get(streamKey) === stream) activeStreams.delete(streamKey);
       for (const sub of stream.subscribers) {
         if (!sub.writableEnded) sub.end();
@@ -280,9 +298,16 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
       stream.subscribers.delete(res);
       console.log(`[Camera] Subscriber left: ${id} (${clientIp}) — remaining: ${stream.subscribers.size}`);
       if (stream.subscribers.size === 0 && activeStreams.get(streamKey) === stream) {
-        console.log(`[Camera] Last subscriber left — killing FFmpeg: ${id}`);
-        ff.kill('SIGTERM');
-        activeStreams.delete(streamKey);
+        // [Fix2] 즉시 종료 대신 유예 기간 — 빠른 재진입 시 FFmpeg 재사용
+        if (stream.graceTimer) clearTimeout(stream.graceTimer);
+        stream.graceTimer = setTimeout(() => {
+          if (activeStreams.get(streamKey) === stream && stream.subscribers.size === 0) {
+            console.log(`[Camera] Grace expired — killing FFmpeg: ${id}`);
+            ff.kill('SIGTERM');
+            activeStreams.delete(streamKey);
+          }
+        }, GRACE_PERIOD_MS);
+        console.log(`[Camera] Last subscriber left — grace ${GRACE_PERIOD_MS / 1000}s: ${id}`);
       }
     });
 

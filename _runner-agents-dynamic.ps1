@@ -51,6 +51,7 @@ foreach ($m in $machines) {
 `$env:ASPNETCORE_ENVIRONMENT = 'Production'
 `$env:Agent__AgentId         = '$agentId'
 `$env:Agent__MachineId       = '$machineId'
+`$env:Agent__TemplateId      = '$($m.templateId)'
 `$env:Agent__Cnc__IpAddress  = '$ip'
 `$env:Agent__Cnc__Port       = '$port'
 Set-Location '$PublishDir'

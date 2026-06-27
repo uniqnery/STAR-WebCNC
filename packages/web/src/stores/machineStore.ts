@@ -2,7 +2,7 @@
 
 import { create } from 'zustand';
 import { wsClient } from '../lib/wsClient';
-import { machineApi } from '../lib/api';
+import { machineApi, alarmApi } from '../lib/api';
 import { useAuthStore } from './authStore';
 import { useFileStore } from './fileStore';
 
@@ -444,6 +444,48 @@ function saveControlLockDuration(minutes: number) {
 // WS 핸들러 cleanup 함수 (initWebSocket 재호출 시 기존 핸들러 제거 후 재등록)
 let _wsCleanups: Array<() => void> = [];
 
+// WS 연결/재연결 시 DB에서 활성 알람 복원
+// 에이전트는 최초 발생 시에만 MQTT를 발행하므로, 재연결 후 기존 알람이 누락됨
+async function loadActiveAlarmsFromDb(
+  get: () => MachineState,
+  set: (partial: Partial<MachineState>) => void,
+) {
+  try {
+    const machines = get().machines;
+    if (machines.length === 0) return;
+
+    const newActiveAlarms: Record<string, Alarm[]> = {};
+    await Promise.all(
+      machines.map(async (m) => {
+        try {
+          const res = await alarmApi.getAlarms({ machineId: m.machineId, active: true, limit: 50 });
+          if (!res.success || !Array.isArray(res.data)) return;
+          newActiveAlarms[m.machineId] = (res.data as Array<{
+            id: string; alarmNo: number; alarmMsg: string;
+            alarmType?: string; occurredAt: string;
+          }>).map((a) => ({
+            id:         a.id,
+            alarmNo:    a.alarmNo,
+            alarmMsg:   a.alarmMsg,
+            category:   a.alarmType ?? undefined,
+            occurredAt: a.occurredAt,
+          }));
+        } catch { /* 개별 머신 실패 무시 */ }
+      }),
+    );
+
+    // 기존 activeAlarms와 병합 (WS로 이미 받은 신규 알람 유지)
+    const current = get().activeAlarms;
+    const merged: Record<string, Alarm[]> = { ...current };
+    for (const [machineId, dbAlarms] of Object.entries(newActiveAlarms)) {
+      const existingNos = new Set((current[machineId] ?? []).map((a) => a.alarmNo));
+      const fresh = dbAlarms.filter((a) => !existingNos.has(a.alarmNo));
+      merged[machineId] = [...(current[machineId] ?? []), ...fresh];
+    }
+    set({ activeAlarms: merged });
+  } catch { /* 전체 실패 무시 */ }
+}
+
 export const useMachineStore = create<MachineState>((set, get) => ({
   machines: loadMachines() ?? [],
   selectedMachineId: null,
@@ -786,6 +828,9 @@ export const useMachineStore = create<MachineState>((set, get) => ({
         if (machineIds.length > 0) {
           wsClient.subscribe(machineIds);
         }
+        // WS 연결/재연결 시 DB에서 현재 활성 알람 복원
+        // (에이전트는 새 알람만 MQTT로 발행하므로 재연결 후 기존 알람이 누락됨)
+        void loadActiveAlarmsFromDb(get, set);
       });
 
     const cleanupDisconnect = wsClient.onDisconnect(() => {
@@ -967,9 +1012,9 @@ export const useMachineStore = create<MachineState>((set, get) => ({
             useFileStore.setState((fs) => ({
               transferQueue: fs.transferQueue.map((j) => {
                 if (j.direction !== 'CNC_TO_PC' || j.status === 'DONE' || j.status === 'ERROR') return j;
-                // fileName 비교: "O0170" vs "O0170.nc" 등 확장자 무시
-                const jBase = j.fileName.replace(/\.nc$/i, '');
-                const eBase = fdFileName.replace(/\.nc$/i, '');
+                // fileName 비교: "O0170" vs "O0170.nc" / "O0170.P-2" 등 확장자 무시
+                const jBase = j.fileName.replace(/\.[^.]+$/, '');
+                const eBase = fdFileName.replace(/\.[^.]+$/, '');
                 return jBase === eBase ? { ...j, status: 'DONE' as const, progress: 100 } : j;
               }),
             }));

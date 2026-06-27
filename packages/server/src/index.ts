@@ -42,6 +42,15 @@ import { syncTemplatesFromFiles } from './lib/templateSync';
 // Express App
 const app = express();
 
+function normalizeDownloadedProgramFileName(fileName: string, pathNo: number): string {
+  const baseName = path.basename(fileName);
+  if (pathNo !== 2) return baseName;
+
+  const parsed = path.parse(baseName);
+  const name = parsed.name || baseName;
+  return `${name}.P-2`;
+}
+
 // Middleware
 app.use(cors({
   origin: (origin, callback) => {
@@ -231,7 +240,8 @@ function setupMqttHandlers(): void {
     if (!correlationId.startsWith('preview-') && status === 'success' && result && typeof result === 'object') {
       const r = result as Record<string, unknown>;
       if (r['content'] && r['fileName']) {
-        const fileName = r['fileName'] as string;
+        const pathNo = Number(r['pathNo'] ?? 1);
+        const fileName = normalizeDownloadedProgramFileName(r['fileName'] as string, pathNo);
         const content  = r['content'] as string;
         const shareDir = process.env.DATA_DIR
           ? path.join(process.env.DATA_DIR, 'share')

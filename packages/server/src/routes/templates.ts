@@ -86,10 +86,10 @@ router.get('/:id', asyncHandler(async (
 
 /**
  * POST /api/templates
- * Create new template (HQ_ENGINEER only)
+ * Create new template (ADMIN or HQ_ENGINEER)
  */
 router.post('/',
-  authenticate, authorize(UserRole.HQ_ENGINEER),
+  authenticate, authorize(UserRole.ADMIN, UserRole.HQ_ENGINEER),
   asyncHandler(async (req: Request, res: Response<ApiResponse<unknown>>) => {
     const body = req.body as Record<string, unknown>;
 
@@ -146,10 +146,10 @@ router.post('/',
 
 /**
  * PUT /api/templates/:id
- * Update template (HQ_ENGINEER only)
+ * Update template (ADMIN or HQ_ENGINEER)
  */
 router.put('/:id',
-  authenticate, authorize(UserRole.HQ_ENGINEER),
+  authenticate, authorize(UserRole.ADMIN, UserRole.HQ_ENGINEER),
   asyncHandler(async (req: Request, res: Response<ApiResponse<unknown>>) => {
     const { id } = req.params;
     const body = req.body as Record<string, unknown>;
@@ -219,11 +219,11 @@ router.put('/:id',
 
 /**
  * DELETE /api/templates/:id
- * Soft-delete template (HQ_ENGINEER only)
+ * Soft-delete template (ADMIN or HQ_ENGINEER)
  * Cannot delete if machines are using this template
  */
 router.delete('/:id',
-  authenticate, authorize(UserRole.HQ_ENGINEER),
+  authenticate, authorize(UserRole.ADMIN, UserRole.HQ_ENGINEER),
   asyncHandler(async (req: Request, res: Response<ApiResponse<unknown>>) => {
     const { id } = req.params;
 
@@ -260,11 +260,11 @@ router.delete('/:id',
 
 /**
  * POST /api/templates/:id/reload
- * Notify all Agents to reload template cache (HQ_ENGINEER only)
+ * Notify all Agents to reload template cache (ADMIN or HQ_ENGINEER)
  * Sends MQTT command to all machines using this template
  */
 router.post('/:id/reload',
-  authenticate, authorize(UserRole.HQ_ENGINEER),
+  authenticate, authorize(UserRole.ADMIN, UserRole.HQ_ENGINEER),
   asyncHandler(async (req: Request, res: Response<ApiResponse<unknown>>) => {
     const { id } = req.params;
 

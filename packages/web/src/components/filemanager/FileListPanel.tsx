@@ -19,6 +19,7 @@ interface FileListPanelProps {
   onRefresh: () => void;
   onDoubleClick?: (file: FileEntry) => void;
   onDelete?: (names: string[]) => void;
+  onDownload?: (names: string[]) => void;
   onUpload?: (file: File) => void;
   lockMessage?: string;
   emptyMessage?: string;
@@ -56,6 +57,7 @@ export function FileListPanel({
   onRefresh,
   onDoubleClick,
   onDelete,
+  onDownload,
   onUpload,
   lockMessage,
   emptyMessage,
@@ -125,6 +127,15 @@ export function FileListPanel({
                 className="hidden"
               />
             </>
+          )}
+          {onDownload && selectedFiles.length > 0 && (
+            <button
+              onClick={() => onDownload(selectedFiles)}
+              className="p-1.5 text-gray-400 hover:text-green-400 hover:bg-gray-700 rounded transition-colors"
+              title="내 PC로 저장"
+            >
+              <DownloadIcon />
+            </button>
           )}
           {onDelete && !readOnly && selectedFiles.length > 0 && (
             <button
@@ -264,6 +275,14 @@ function UploadIcon() {
   return (
     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+    </svg>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
     </svg>
   );
 }

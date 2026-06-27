@@ -382,6 +382,7 @@ public class CommandHandler
                 fileName  = pcFileName,
                 content,
                 size      = content.Length,
+                pathNo,
             },
         };
     }

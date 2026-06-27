@@ -100,13 +100,21 @@ export function Transfer() {
 interface ConfirmDialogProps {
   direction: TransferDirection;
   fileNames: string[];
+  cncPath?: 'path1' | 'path2' | 'path3';
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-function TransferConfirmDialog({ direction, fileNames, onConfirm, onCancel }: ConfirmDialogProps) {
+function TransferConfirmDialog({ direction, fileNames, cncPath, onConfirm, onCancel }: ConfirmDialogProps) {
   const dirLabel = direction === 'PC_TO_CNC' ? 'PC → CNC' : 'CNC → PC';
   const dirColor = direction === 'PC_TO_CNC' ? 'text-blue-400' : 'text-green-400';
+
+  const displayName = (name: string) => {
+    if (direction !== 'CNC_TO_PC') return name;
+    if (cncPath === 'path2') return `${name}.P-2`;
+    if (cncPath === 'path3') return `${name}.P-3`;
+    return `${name}.nc`;
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
@@ -131,7 +139,7 @@ function TransferConfirmDialog({ direction, fileNames, onConfirm, onCancel }: Co
                 <svg className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                {name}
+                {displayName(name)}
               </li>
             ))}
           </ul>
@@ -140,16 +148,69 @@ function TransferConfirmDialog({ direction, fileNames, onConfirm, onCancel }: Co
         {/* 하단 버튼 */}
         <div className="px-5 py-3 border-t border-gray-700 flex items-center justify-end gap-3">
           <button
+            onClick={onConfirm}
+            className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+          >
+            전송 실행
+          </button>
+          <button
             onClick={onCancel}
             className="px-4 py-2 text-sm text-gray-400 hover:text-white bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
           >
             취소
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// 범용 확인 다이얼로그 (다운로드 / 삭제 등)
+// ============================================================
+interface SimpleConfirmDialogProps {
+  title: string;
+  description: string;
+  fileNames: string[];
+  confirmLabel: string;
+  confirmColor: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+function SimpleConfirmDialog({ title, description, fileNames, confirmLabel, confirmColor, onConfirm, onCancel }: SimpleConfirmDialogProps) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="bg-gray-800 rounded-lg shadow-xl w-96 max-h-[80vh] flex flex-col border border-gray-600">
+        <div className="px-5 py-4 border-b border-gray-700">
+          <h3 className="text-lg font-semibold text-white">{title}</h3>
+        </div>
+        <div className="px-5 py-4 flex-1 min-h-0 overflow-y-auto">
+          <p className="text-sm text-gray-400 mb-3">{description}</p>
+          <div className="text-sm text-gray-400 mb-2">선택된 파일 ({fileNames.length}개):</div>
+          <ul className="space-y-1 max-h-48 overflow-y-auto">
+            {fileNames.map((name) => (
+              <li key={name} className="flex items-center gap-2 text-sm text-white font-mono bg-gray-900 px-3 py-1.5 rounded">
+                <svg className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                {name}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="px-5 py-3 border-t border-gray-700 flex items-center justify-end gap-3">
           <button
             onClick={onConfirm}
-            className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+            className={`px-4 py-2 text-sm text-white ${confirmColor} rounded-lg transition-colors`}
           >
-            전송 실행
+            {confirmLabel}
+          </button>
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-sm text-gray-400 hover:text-white bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+          >
+            취소
           </button>
         </div>
       </div>
@@ -191,6 +252,9 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
     fileNames: string[];
     cncPath?: 'path1' | 'path2' | 'path3';
   } | null>(null);
+
+  const [downloadConfirm, setDownloadConfirm] = useState<{ fileNames: string[] } | null>(null);
+  const [deleteConfirm, setDeleteConfirm]   = useState<{ fileNames: string[] } | null>(null);
 
   // CNC Path 경로 텍스트
   const cncPathComment = dncConfig?.dncPaths?.[cncPath]
@@ -250,9 +314,49 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
   }, [uploadToShare, loadShareFiles]);
 
   const handleShareDelete = useCallback((fileNames: string[]) => {
-    if (!confirm(`${fileNames.length}개 파일을 삭제하시겠습니까?`)) return;
-    deleteFromShare(fileNames);
-  }, [deleteFromShare]);
+    setDeleteConfirm({ fileNames });
+  }, []);
+
+  const handleConfirmDelete = useCallback(() => {
+    if (!deleteConfirm) return;
+    deleteFromShare(deleteConfirm.fileNames);
+    setDeleteConfirm(null);
+  }, [deleteConfirm, deleteFromShare]);
+
+  const execDownload = useCallback(async (fileNames: string[]) => {
+    for (const fileName of fileNames) {
+      try {
+        const res = await fileApi.readFile('TRANSFER_SHARE', '', fileName);
+        if (!res.success) {
+          const errMsg = (res as { error?: { message?: string } }).error?.message ?? '파일 읽기 실패';
+          alert(`다운로드 실패: ${fileName}\n${errMsg}`);
+          continue;
+        }
+        const content = (res.data as { content?: string })?.content ?? '';
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 100);
+      } catch {
+        console.error(`Download failed: ${fileName}`);
+      }
+    }
+  }, []);
+
+  const handleShareDownload = useCallback((fileNames: string[]) => {
+    setDownloadConfirm({ fileNames });
+  }, []);
+
+  const handleConfirmDownload = useCallback(async () => {
+    if (!downloadConfirm) return;
+    setDownloadConfirm(null);
+    await execDownload(downloadConfirm.fileNames);
+  }, [downloadConfirm, execDownload]);
 
   const handleShareDoubleClick = useCallback(async (file: FileEntry) => {
     openViewer(file.name, '파일을 읽는 중...', false, 'TRANSFER_SHARE', machineId);
@@ -355,6 +459,7 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
           onSelectFiles={setSelectedShareFiles}
           onRefresh={loadShareFiles}
           onDoubleClick={handleShareDoubleClick}
+          onDownload={handleShareDownload}
           onDelete={canTransfer ? handleShareDelete : undefined}
           onUpload={canTransfer ? handleShareUpload : undefined}
           pathComment={pcPathComment}
@@ -369,8 +474,35 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
         <TransferConfirmDialog
           direction={confirmDialog.direction}
           fileNames={confirmDialog.fileNames}
+          cncPath={confirmDialog.cncPath}
           onConfirm={handleConfirmTransfer}
           onCancel={() => setConfirmDialog(null)}
+        />
+      )}
+
+      {/* 다운로드 확인 다이얼로그 */}
+      {downloadConfirm && (
+        <SimpleConfirmDialog
+          title="내 PC로 저장"
+          description="선택한 파일을 PC로 다운로드합니다."
+          fileNames={downloadConfirm.fileNames}
+          confirmLabel="다운로드"
+          confirmColor="bg-green-600 hover:bg-green-700"
+          onConfirm={handleConfirmDownload}
+          onCancel={() => setDownloadConfirm(null)}
+        />
+      )}
+
+      {/* 삭제 확인 다이얼로그 */}
+      {deleteConfirm && (
+        <SimpleConfirmDialog
+          title="파일 삭제"
+          description="삭제된 파일은 복구할 수 없습니다."
+          fileNames={deleteConfirm.fileNames}
+          confirmLabel="삭제"
+          confirmColor="bg-red-600 hover:bg-red-700"
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setDeleteConfirm(null)}
         />
       )}
     </div>

@@ -45,6 +45,7 @@ type TemplateFileData = {
   counterConfig: unknown;
   toolLifeConfig: unknown;
   schedulerConfig: unknown;
+  pmcMessages: unknown;
   capabilities: unknown;
   extraPmcAddrs?: unknown;
 };
@@ -177,6 +178,7 @@ export async function exportTemplateToFile(template: Record<string, unknown>): P
       counterConfig:          template.counterConfig,
       toolLifeConfig:         template.toolLifeConfig,
       schedulerConfig:        template.schedulerConfig,
+      pmcMessages:            template.pmcMessages,
       capabilities:           template.capabilities,
       extraPmcAddrs:          template.extraPmcAddrs,
     };
