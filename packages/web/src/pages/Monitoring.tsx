@@ -104,7 +104,7 @@ export function Monitoring() {
 
         {/* 좌측: NC 모니터 + 알람 + 탭 바 */}
         <div className={`flex flex-col gap-2 overflow-hidden lg:h-full max-lg:portrait:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-16rem)] max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'monitor' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
-          <div className="flex-1 min-h-0 lg:flex-none lg:shrink-0 lg:h-[435px]">
+          <div className="flex-1 min-h-0 lg:flex-none lg:shrink-0">
             <NCMonitor
               path1={telemetry?.path1}
               path2={telemetry?.path2}

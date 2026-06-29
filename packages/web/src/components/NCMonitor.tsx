@@ -3,7 +3,6 @@
 
 import { useState } from 'react';
 import { PathData, useMachineTelemetry, useControlLock } from '../stores/machineStore';
-import { useTemplateStore } from '../stores/templateStore';
 import { useCamerasForMachine, useCameraStore } from '../stores/cameraStore';
 import { commandApi } from '../lib/api';
 import { CameraMultiView } from './CameraMultiView';
@@ -17,13 +16,11 @@ export type MonitorTab = 'monitor' | 'camera' | 'offset' | 'count' | 'tool-life'
 interface NCMonitorProps {
   path1?: PathData;
   path2?: PathData;
-  machineMode?: string;  // PROGRAM( CHECK ), PROGRAM( MEM ) 등
-  mode?: string;         // 원시 CNC 모드 문자열 (EDIT, MDI, MEM 등)
-  machineId?: string;    // 카메라 매핑용
-  /** 외부에서 탭 상태를 제어할 때 사용. 없으면 내부 상태로 동작 */
+  machineMode?: string;
+  mode?: string;
+  machineId?: string;
   activeTab?: MonitorTab;
   onTabChange?: (tab: MonitorTab) => void;
-  /** true 시 하단 탭 바 숨김 (탭 바를 외부에서 별도 렌더링할 때) */
   hideTabs?: boolean;
 }
 
@@ -46,31 +43,29 @@ export function NCMonitor({ path1, path2, machineMode, mode, machineId, activeTa
   const camerasForMachine = useCamerasForMachine(machineId || '');
 
   return (
-    <div className="bg-gray-900 rounded-lg shadow overflow-hidden flex flex-col h-full">
-      {/* 탭 콘텐츠 — h-full 컨테이너 내에서 flex-1, 자식 뷰가 자체 스크롤 관리 */}
-      <div className="flex-1 min-h-0 overflow-hidden">
-        {activeTab === 'monitor' && (
+    <div className="bg-gray-900 rounded-lg shadow overflow-hidden flex flex-col">
+      <div className="relative">
+        {/* MonitorView — 항상 렌더하여 컨테이너 높이 기준 결정 */}
+        <div className={activeTab === 'monitor' ? '' : 'invisible pointer-events-none'}>
           <MonitorView path1={path1} path2={path2} machineMode={machineMode} mode={mode} machineId={machineId} />
-        )}
-        {activeTab === 'camera' && (
-          cameraEnabled && camerasForMachine.length > 0 ? (
-            <CameraMultiView cameras={camerasForMachine} className="h-full" />
-          ) : (
-            <PlaceholderView title="카메라" description="카메라 옵션 추가 시 실시간 화면이 표시됩니다" />
-          )
-        )}
-        {activeTab === 'offset' && (
-          <OffsetView machineId={machineId} />
-        )}
-        {activeTab === 'count' && (
-          <CountView machineId={machineId} />
-        )}
-        {activeTab === 'tool-life' && (
-          <ToolLifeView machineId={machineId} />
+        </div>
+        {/* 비모니터 탭 — MonitorView 위에 절대 위치 오버레이 */}
+        {activeTab !== 'monitor' && (
+          <div className="absolute inset-0 overflow-hidden">
+            {activeTab === 'camera' && (
+              cameraEnabled && camerasForMachine.length > 0 ? (
+                <CameraMultiView cameras={camerasForMachine} className="h-full" />
+              ) : (
+                <PlaceholderView title="카메라" description="카메라 옵션 추가 시 실시간 화면이 표시됩니다" />
+              )
+            )}
+            {activeTab === 'offset' && <OffsetView machineId={machineId} />}
+            {activeTab === 'count' && <CountView machineId={machineId} />}
+            {activeTab === 'tool-life' && <ToolLifeView machineId={machineId} />}
+          </div>
         )}
       </div>
 
-      {/* 하단 탭 선택 (hideTabs=true 시 숨김) */}
       {!hideTabs && (
         <div className="flex border-t border-gray-700 shrink-0">
           {TABS.map((tab) => (
@@ -93,9 +88,24 @@ export function NCMonitor({ path1, path2, machineMode, mode, machineId, activeTa
 }
 
 // ============================================================
-// 모니터 뷰 (실제 NC 화면 레이아웃)
+// 모니터 뷰
 // ============================================================
 const DEFAULT_AXES = ['X', 'Y', 'Z', 'C'];
+
+// 프로그램 내용 라인 색상:
+//   O번호 라인 → active=cyan, inactive=white
+//   > 현재위치 라인 → active=cyan bold, inactive=gray bold
+//   일반 라인 → green
+function programLineClass(line: string, isActive: boolean): string {
+  const core = line.startsWith('>') ? line.slice(1).trimStart() : line.trimStart();
+  if (/^O\d+/i.test(core)) {
+    return `font-bold ${isActive ? 'text-cyan-300' : 'text-white'}`;
+  }
+  if (line.startsWith('>')) {
+    return `font-bold ${isActive ? 'text-cyan-300' : 'text-gray-300'}`;
+  }
+  return 'text-green-400';
+}
 
 function MonitorView({
   path1, path2, machineMode, mode, machineId,
@@ -111,23 +121,12 @@ function MonitorView({
   const [mdiConfirm, setMdiConfirm] = useState(false);
   const [mdiSending, setMdiSending] = useState(false);
 
-  // 제어권 + PMC
   const controlLock = useControlLock(machineId ?? '');
   const telemetry   = useMachineTelemetry(machineId ?? '');
   const pmcBits     = telemetry?.pmcBits ?? {};
 
-  // panelLayout에서 HEAD1/HEAD2 lampAddr 조회
-  const selectedTemplate = useTemplateStore(
-    (s) => s.templates.find((t) => t.id === s.selectedTemplateId) ?? null
-  );
-  const allKeys  = selectedTemplate?.panelLayout?.flatMap((g) => g.keys) ?? [];
-  const head1Addr = allKeys.find((k) => k.id === 'HEAD1')?.lampAddr ?? '';
-  const head2Addr = allKeys.find((k) => k.id === 'HEAD2')?.lampAddr ?? '';
-
-  // HEAD2 lamp ON이고 HEAD1 lamp OFF이면 PATH2, 아니면 PATH1
-  const head2On = head2Addr !== '' && pmcBits[head2Addr] === 1;
-  const head1On = head1Addr !== '' && pmcBits[head1Addr] === 1;
-  const activePath: 1 | 2 = (head2On && !head1On) ? 2 : 1;
+  // G63.0: HEAD SELECT 키로 제어되는 CNC 표시 계통 (0=PATH1, 1=PATH2)
+  const activePath: 1 | 2 = pmcBits['G63.0'] === 1 ? 2 : 1;
 
   const isOwner = controlLock?.isOwner ?? false;
   const rawMode = (mode ?? '').toUpperCase();
@@ -149,7 +148,6 @@ function MonitorView({
     }
   };
 
-  // decimalPlaces: IS-B=3→/1000, IS-C=4→/10000. 0이면 기본값 3
   const formatPos = (val?: number, decimalPlaces?: number) => {
     if (val === undefined) return '0.000';
     const dp = (decimalPlaces && decimalPlaces > 0) ? decimalPlaces : 3;
@@ -159,64 +157,74 @@ function MonitorView({
   const axes1 = (path1?.axisNames && path1.axisNames.length > 0) ? path1.axisNames : DEFAULT_AXES;
   const axes2 = (path2?.axisNames && path2.axisNames.length > 0) ? path2.axisNames : DEFAULT_AXES;
 
+  // MDI 모드에서만 비활성 계통을 흐릿하게 표시
+  const dimInactive = isMdi;
+  const p1Dim = dimInactive && activePath !== 1;
+  const p2Dim = dimInactive && activePath !== 2;
+
   return (
-    <>
+    <div className="flex flex-col">
+
+      {/* NC 데이터 영역 */}
       <div className="text-green-400 font-mono text-xs p-2 space-y-0">
 
-        {/* 상단 헤더 3분할: 좌=모드 | 중=PATH1 프로그램 | 우=PATH2 프로그램 */}
-        <div className="flex items-center justify-between text-cyan-300 mb-1 gap-1">
-          <span className="text-[10px] max-lg:text-xs flex-1 min-w-0 truncate">
-            {machineMode || 'PROGRAM( CHECK )'}
-          </span>
-          <span className="text-white text-sm font-bold flex-none tabular-nums">
-            {path1?.programNo || 'O0000'} {path1?.blockNo || 'N00000'}
-          </span>
-          <span className="text-yellow-300 text-sm font-bold flex-none tabular-nums">
-            {path2?.programNo || 'O0000'} {path2?.blockNo || 'N00000'}
-          </span>
+        {/* 헤더 2분할: 좌=모드+PATH1 O/N | 우=PATH2 O/N */}
+        <div className="grid grid-cols-2 gap-0 mb-1">
+          <div className="flex items-center justify-between pr-1">
+            <span className="text-cyan-300 text-[10px] max-lg:text-xs truncate min-w-0">
+              {machineMode || 'PROGRAM( CHECK )'}
+            </span>
+            <span className={`text-sm font-bold tabular-nums shrink-0 ml-1 transition-opacity ${
+              activePath === 1 ? 'text-cyan-300' : p1Dim ? 'text-white opacity-40' : 'text-white'
+            }`}>
+              {path1?.programNo || 'O0000'} {path1?.blockNo || 'N00000'}
+            </span>
+          </div>
+          <div className="flex items-center justify-end">
+            <span className={`text-sm font-bold tabular-nums transition-opacity ${
+              activePath === 2 ? 'text-cyan-300' : p2Dim ? 'text-white opacity-40' : 'text-white'
+            }`}>
+              {path2?.programNo || 'O0000'} {path2?.blockNo || 'N00000'}
+            </span>
+          </div>
         </div>
 
         {/* PATH1 / PATH2 프로그램 표시 */}
         <div className="grid grid-cols-2 gap-0 border border-gray-700">
-          {/* PATH1 */}
           <div className="border-r border-gray-700">
-            <div className="bg-gray-800 px-2 py-0.5 flex justify-between max-lg:text-xs">
+            <div className={`bg-gray-800 px-2 py-0.5 flex max-lg:text-xs transition-opacity ${p1Dim ? 'opacity-40' : ''}`}>
               <span className={activePath === 1 ? 'text-cyan-300 font-bold' : 'text-gray-400'}>
                 PATH1{activePath === 1 ? ' ▶' : ''}
               </span>
-              <span className="text-white">{path1?.programNo || '-'} {path1?.blockNo || ''}</span>
             </div>
             <div className="px-2 py-1 h-40 overflow-hidden max-lg:text-sm">
               {path1?.programContent?.map((line, i) => (
-                <div key={i} className={line.startsWith('>') ? 'text-cyan-300 font-bold' : 'text-green-400'}>
-                  {line || ' '}
+                <div key={i} className={programLineClass(line, activePath === 1)}>
+                  {line || ' '}
                 </div>
               )) || <div className="text-gray-600">-</div>}
             </div>
           </div>
-          {/* PATH2 */}
           <div>
-            <div className="bg-gray-800 px-2 py-0.5 flex justify-between max-lg:text-xs">
-              <span className={activePath === 2 ? 'text-yellow-300 font-bold' : 'text-gray-400'}>
+            <div className={`bg-gray-800 px-2 py-0.5 flex max-lg:text-xs transition-opacity ${p2Dim ? 'opacity-40' : ''}`}>
+              <span className={activePath === 2 ? 'text-cyan-300 font-bold' : 'text-gray-400'}>
                 PATH2{activePath === 2 ? ' ▶' : ''}
               </span>
-              <span className="text-white">{path2?.programNo || '-'} {path2?.blockNo || ''}</span>
             </div>
             <div className="px-2 py-1 h-40 overflow-hidden max-lg:text-sm">
               {path2?.programContent?.map((line, i) => (
-                <div key={i} className={line.startsWith('>') ? 'text-yellow-300 font-bold' : 'text-green-400'}>
-                  {line || ' '}
+                <div key={i} className={programLineClass(line, activePath === 2)}>
+                  {line || ' '}
                 </div>
               )) || <div className="text-gray-600">-</div>}
             </div>
           </div>
         </div>
 
-        {/* 좌표 표시: ABSOLUTE / DISTANCE TO GO (Path1 | Path2) */}
+        {/* 좌표: ABSOLUTE / DIST TO GO (Path1 | Path2) */}
         <div className="grid grid-cols-2 gap-0 border border-gray-700 border-t-0">
-          {/* PATH1 좌표 */}
           <div className="border-r border-gray-700">
-            <div className="grid grid-cols-2">
+            <div className={`grid grid-cols-2 transition-opacity ${p1Dim ? 'opacity-40' : ''}`}>
               <div className="border-r border-gray-700">
                 <div className="bg-gray-800 px-2 h-6 flex items-center justify-center text-[10px] max-lg:text-xs text-cyan-300">ABSOLUTE</div>
                 {axes1.map((axis, i) => (
@@ -237,8 +245,7 @@ function MonitorView({
               </div>
             </div>
           </div>
-          {/* PATH2 좌표 */}
-          <div>
+          <div className={`transition-opacity ${p2Dim ? 'opacity-40' : ''}`}>
             <div className="grid grid-cols-2">
               <div className="border-r border-gray-700">
                 <div className="bg-gray-800 px-2 h-6 flex items-center justify-center text-[10px] max-lg:text-xs text-cyan-300">ABSOLUTE</div>
@@ -262,19 +269,21 @@ function MonitorView({
           </div>
         </div>
 
-        {/* Feed / Spindle 실속도 */}
+        {/* Feed / Spindle */}
         <div className="grid grid-cols-2 gap-0 border border-gray-700 border-t-0">
-          <div className="px-2 py-1 text-[10px] border-r border-gray-700 space-y-0.5">
-            <div className="flex justify-between text-gray-400">
-              <span>F</span>
-              <span>{path1?.modal?.feedActual ?? 0} MM/MIN</span>
-            </div>
-            <div className="flex justify-between text-gray-400">
-              <span>S1</span>
-              <span className="text-white">{path1?.modal?.spindleActual ?? 0} /MIN</span>
+          <div className="border-r border-gray-700">
+            <div className={`px-2 py-1 text-[10px] space-y-0.5 transition-opacity ${p1Dim ? 'opacity-40' : ''}`}>
+              <div className="flex justify-between text-gray-400">
+                <span>F</span>
+                <span>{path1?.modal?.feedActual ?? 0} MM/MIN</span>
+              </div>
+              <div className="flex justify-between text-gray-400">
+                <span>S1</span>
+                <span className="text-white">{path1?.modal?.spindleActual ?? 0} /MIN</span>
+              </div>
             </div>
           </div>
-          <div className="px-2 py-1 text-[10px] space-y-0.5">
+          <div className={`px-2 py-1 text-[10px] space-y-0.5 transition-opacity ${p2Dim ? 'opacity-40' : ''}`}>
             <div className="flex justify-between text-gray-400">
               <span>F</span>
               <span>{path2?.modal?.feedActual ?? 0} MM/MIN</span>
@@ -288,32 +297,37 @@ function MonitorView({
 
         {/* Path 상태바 */}
         <div className="grid grid-cols-2 gap-0 border border-gray-700 border-t-0">
-          <div className="bg-gray-800 px-2 py-1 text-[10px] text-green-400 border-r border-gray-700">
-            {path1?.pathStatus || '---- ---- ---- ---'}
+          <div className="border-r border-gray-700">
+            <div className={`bg-gray-800 px-2 py-1 text-[10px] text-green-400 transition-opacity ${p1Dim ? 'opacity-40' : ''}`}>
+              {path1?.pathStatus || '---- ---- ---- ---'}
+            </div>
           </div>
-          <div className="bg-gray-800 px-2 py-1 text-[10px] text-green-400">
+          <div className={`bg-gray-800 px-2 py-1 text-[10px] text-green-400 transition-opacity ${p2Dim ? 'opacity-40' : ''}`}>
             {path2?.pathStatus || '---- ---- ---- ---'}
           </div>
         </div>
 
-        {/* LIST / MDI 입력 행 */}
-        <div className="flex items-center gap-1 border border-gray-700 border-t-0 px-1 py-1 min-h-[28px]">
-          {/* [LIST] 좌측 끝 — EDIT 모드 + 제어권 시에만 활성 */}
-          <button
-            disabled={!listEnabled}
-            onClick={() => setShowList(true)}
-            title={!isOwner ? '제어권 필요' : !isEdit ? 'EDIT 모드에서 사용 가능' : 'CNC 프로그램 목록'}
-            className={`shrink-0 px-2 py-0.5 text-[10px] font-bold rounded border transition-colors ${
-              listEnabled
-                ? 'border-cyan-600 text-cyan-300 hover:bg-cyan-900/40 cursor-pointer'
-                : 'border-gray-700 text-gray-600 cursor-not-allowed'
-            }`}
-          >
-            LIST
-          </button>
+      </div>
+      {/* ↑ NC 데이터 영역 끝 */}
 
-          {/* 우측 절반: MDI 입력창 + [INPUT] — 화면 50% 지점부터 시작 */}
-          <div className="ml-auto flex items-center gap-1 w-1/2">
+      {/* LIST / MDI 입력 바 — shrink-0으로 항상 하단 고정 */}
+      <div className="shrink-0 border-t border-gray-700 bg-gray-800 px-2 py-1.5">
+        <div className="flex items-center">
+          <div className="flex items-center gap-2 flex-1">
+            <button
+              disabled={!listEnabled}
+              onClick={() => setShowList(true)}
+              title={!isOwner ? '제어권 필요' : !isEdit ? 'EDIT 모드에서 사용 가능' : 'CNC 프로그램 목록'}
+              className={`px-2.5 py-0.5 text-[10px] font-semibold rounded transition-colors ${
+                listEnabled
+                  ? 'bg-cyan-700 text-white hover:bg-cyan-600'
+                  : 'bg-gray-700 text-gray-500 opacity-30 cursor-not-allowed'
+              }`}
+            >
+              LIST
+            </button>
+          </div>
+          <div className="flex items-center gap-1.5 w-1/2">
             <input
               type="text"
               value={mdiInput}
@@ -322,21 +336,17 @@ function MonitorView({
                 if (e.key === 'Enter' && inputEnabled && mdiInput.trim()) setMdiConfirm(true);
               }}
               disabled={!inputEnabled}
-              placeholder={inputEnabled ? 'G0 X40.0 ; G0 X20.0' : 'MDI + 제어권 필요'}
-              className={`flex-1 min-w-0 px-2 py-0.5 text-[10px] font-mono rounded border bg-gray-900 transition-colors ${
-                inputEnabled
-                  ? 'border-gray-500 text-green-300 placeholder:text-gray-600'
-                  : 'border-gray-800 text-gray-700 placeholder:text-gray-800 cursor-not-allowed'
-              }`}
+              placeholder=""
+              className="flex-1 min-w-0 bg-gray-700 border border-gray-600 focus:border-blue-500 text-white placeholder:text-gray-600 text-[11px] font-mono px-2 py-0.5 rounded outline-none disabled:opacity-40 disabled:cursor-not-allowed"
             />
             <button
-              disabled={!inputEnabled || !mdiInput.trim() || mdiSending}
-              onClick={() => setMdiConfirm(true)}
-              title={!isOwner ? '제어권 필요' : !isMdi ? 'MDI 모드에서 사용 가능' : 'MDI 버퍼에 기록'}
-              className={`shrink-0 px-2 py-0.5 text-[10px] font-bold rounded border transition-colors ${
-                inputEnabled && mdiInput.trim() && !mdiSending
-                  ? 'border-green-600 text-green-300 hover:bg-green-900/40 cursor-pointer'
-                  : 'border-gray-700 text-gray-600 cursor-not-allowed'
+              disabled={!inputEnabled || mdiSending}
+              onClick={() => { if (mdiInput.trim()) setMdiConfirm(true); }}
+              title={!isOwner ? '제어권 필요' : !isMdi ? 'MDI 모드에서 사용 가능' : !mdiInput.trim() ? 'MDI 내용을 입력하세요' : 'MDI 버퍼에 기록'}
+              className={`shrink-0 px-2.5 py-0.5 text-[10px] font-semibold rounded transition-colors ${
+                !inputEnabled || mdiSending
+                  ? 'bg-gray-700 text-gray-500 opacity-30 cursor-not-allowed'
+                  : 'bg-blue-700 text-white hover:bg-blue-600'
               }`}
             >
               {mdiSending ? '...' : 'INPUT'}
@@ -383,13 +393,12 @@ function MonitorView({
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
-
 // ============================================================
-// Placeholder 뷰 (카메라, OFFSET, COUNT, TOOL-LIFE)
+// Placeholder 뷰
 // ============================================================
 function PlaceholderView({ title, description }: { title: string; description: string }) {
   return (

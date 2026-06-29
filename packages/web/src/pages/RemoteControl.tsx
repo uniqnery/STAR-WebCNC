@@ -77,6 +77,7 @@ export function RemoteControl() {
   const [activeLabel, setActiveLabel] = useState('');
   const [lampStates, setLampStates] = useState<Record<string, boolean>>({});
   const [buttonWarnings, setButtonWarnings] = useState<Record<string, string>>({});
+  const [showLockPopup, setShowLockPopup] = useState(false);
   const warningTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   // 조작 가능 조건: 인터록 + 제어권 (TODO: interlockSatisfied 재활성화 — 실기기 인터락 검증 후)
@@ -133,7 +134,11 @@ export function RemoteControl() {
 
   // 버튼 실행 핸들러
   const handleButtonExecute = useCallback(async (key: PanelKey) => {
-    if (!selectedMachineId || !canOperate) return;
+    if (!selectedMachineId) return;
+    if (!hasControlLock) {
+      setShowLockPopup(true);
+      return;
+    }
 
     if (warningTimers.current[key.id]) {
       clearTimeout(warningTimers.current[key.id]);
@@ -221,7 +226,7 @@ export function RemoteControl() {
           <div className="grid grid-cols-1 lg:grid-cols-2 max-lg:landscape:grid-cols-2 gap-4 lg:flex-1 lg:min-h-0">
             {/* 좌측: NC 모니터 + 알람 + 탭 바 */}
             <div className={`flex flex-col gap-2 overflow-hidden lg:h-full max-lg:portrait:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-16rem)] max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'monitor' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
-              <div className="flex-1 min-h-0 lg:flex-none lg:shrink-0 lg:h-[435px]">
+              <div className="flex-1 min-h-0 lg:flex-none lg:shrink-0">
                 <NCMonitor
                   path1={telemetry?.path1}
                   path2={telemetry?.path2}
@@ -263,7 +268,7 @@ export function RemoteControl() {
                   groups={panelGroups}
                   lampStates={lampStates}
                   buttonWarnings={buttonWarnings}
-                  disabled={!canOperate}
+                  disabled={false}
                   activePressId={activePressId}
                   onPressStart={(id, label) => { setActivePressId(id); setActiveLabel(label); }}
                   onPressProgress={(p) => setActiveProgress(p)}
@@ -286,6 +291,11 @@ export function RemoteControl() {
           {/* 롱프레스 중앙 오버레이 */}
           {activePressId && (
             <LongPressOverlay progress={activeProgress} label={activeLabel} />
+          )}
+
+          {/* 제어권 미획득 팝업 */}
+          {showLockPopup && (
+            <ControlLockPopup onClose={() => setShowLockPopup(false)} />
           )}
         </>
       )}
@@ -589,6 +599,30 @@ function AlarmStrip({ alarms, pmcMessages = [] }: AlarmStripProps) {
       ) : (
         <span className="text-[11px] text-gray-600 m-auto">알람 없음</span>
       )}
+    </div>
+  );
+}
+
+// ─── 제어권 미획득 팝업 ───
+
+function ControlLockPopup({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="bg-gray-900 border border-yellow-600 rounded-lg p-6 w-72 shadow-2xl flex flex-col items-center gap-4">
+        <svg className="w-10 h-10 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+        </svg>
+        <div className="text-center">
+          <div className="text-yellow-400 font-bold text-sm mb-1">제어권 획득이 필요합니다</div>
+          <div className="text-gray-400 text-xs">패널 조작 전 제어권을 먼저 획득하세요.</div>
+        </div>
+        <button
+          onClick={onClose}
+          className="px-6 py-1.5 text-sm bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg transition-colors font-medium"
+        >
+          확인
+        </button>
+      </div>
     </div>
   );
 }

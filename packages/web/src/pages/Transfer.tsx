@@ -420,8 +420,8 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* 2분할 패널: 좌 4.5 : 우 5.5 */}
-      <div className="flex-1 grid grid-cols-[4.5fr_auto_5.5fr] gap-0 min-h-0">
+      {/* 2분할 패널: 좌 5 : 우 5 */}
+      <div className="flex-1 grid grid-cols-[1fr_auto_1fr] gap-0 min-h-0">
         {/* 좌측: CNC 프로그램 */}
         <FileListPanel
           title={`CNC (${machineId})`}

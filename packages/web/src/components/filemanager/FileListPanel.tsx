@@ -215,7 +215,7 @@ export function FileListPanel({
                   showComment
                     ? selectable ? 'grid-cols-[32px_120px_1fr]' : 'grid-cols-[120px_1fr]'
                     : selectable ? 'grid-cols-[32px_1fr_64px_80px]' : 'grid-cols-[1fr_64px_80px]'
-                } px-3 text-sm border-b border-gray-800 cursor-pointer hover:bg-gray-700/50 transition-colors items-center ${
+                } px-3 text-sm border-b border-gray-800 cursor-pointer hover:bg-gray-700/50 transition-colors items-center select-none ${
                   isSelected ? 'bg-blue-900/30' : ''
                 }`}
                 style={{ height: ROW_HEIGHT_PX }}

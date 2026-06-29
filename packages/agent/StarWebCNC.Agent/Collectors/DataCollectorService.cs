@@ -273,10 +273,14 @@ public class DataCollectorService : BackgroundService
             .Where(m => !string.IsNullOrWhiteSpace(m.PmcAddr))
             .Select(m => m.PmcAddr);
 
+        // G63.0: CNC 현재 표시 계통 (0=PATH1, 1=PATH2) — HEAD SELECT 키 결과
+        var standardAddrs = new[] { "G63.0" };
+
         var uniqueAddrs = interlockAddrs
             .Concat(tpl.PanelLampAddrs)
             .Concat(pmcMessageAddrs)
             .Concat(tpl.ExtraPmcAddrs)
+            .Concat(standardAddrs)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 

@@ -351,7 +351,7 @@ export function Scheduler() {
           <div className="grid grid-cols-1 lg:grid-cols-2 max-lg:landscape:grid-cols-2 gap-4 lg:flex-1 lg:min-h-0">
             {/* 좌측: NC 모니터 + 알람 + 탭 바 */}
             <div className={`flex flex-col gap-2 overflow-hidden lg:h-full max-lg:portrait:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-22rem)] max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'monitor' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
-              <div className="flex-1 min-h-0 lg:flex-none lg:shrink-0 lg:h-[435px]">
+              <div className="flex-1 min-h-0 lg:flex-none lg:shrink-0">
                 <NCMonitor
                   path1={telemetry?.path1}
                   path2={telemetry?.path2}

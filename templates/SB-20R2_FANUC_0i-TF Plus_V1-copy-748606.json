@@ -440,7 +440,7 @@
           "timing": {
             "holdMs": 300,
             "timeoutMs": 2000,
-            "longPressMs": 1500
+            "longPressMs": 1000
           },
           "hasLamp": false,
           "reqAddr": "R6131.0",
