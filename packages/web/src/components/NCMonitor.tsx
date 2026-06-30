@@ -174,14 +174,14 @@ function MonitorView({
             <span className="text-cyan-300 text-[10px] max-lg:text-xs truncate min-w-0">
               {machineMode || 'PROGRAM( CHECK )'}
             </span>
-            <span className={`text-sm font-bold tabular-nums shrink-0 ml-1 transition-opacity ${
+            <span className={`text-sm max-lg:text-xs font-bold tabular-nums shrink-0 ml-1 transition-opacity ${
               activePath === 1 ? 'text-cyan-300' : p1Dim ? 'text-white opacity-40' : 'text-white'
             }`}>
               {path1?.programNo || 'O0000'} {path1?.blockNo || 'N00000'}
             </span>
           </div>
           <div className="flex items-center justify-end">
-            <span className={`text-sm font-bold tabular-nums transition-opacity ${
+            <span className={`text-sm max-lg:text-xs font-bold tabular-nums transition-opacity ${
               activePath === 2 ? 'text-cyan-300' : p2Dim ? 'text-white opacity-40' : 'text-white'
             }`}>
               {path2?.programNo || 'O0000'} {path2?.blockNo || 'N00000'}
@@ -197,7 +197,7 @@ function MonitorView({
                 PATH1{activePath === 1 ? ' ▶' : ''}
               </span>
             </div>
-            <div className="px-2 py-1 h-40 overflow-hidden max-lg:text-sm">
+            <div className="px-2 py-1 h-40 overflow-hidden max-lg:text-xs">
               {path1?.programContent?.map((line, i) => (
                 <div key={i} className={programLineClass(line, activePath === 1)}>
                   {line || ' '}
@@ -211,7 +211,7 @@ function MonitorView({
                 PATH2{activePath === 2 ? ' ▶' : ''}
               </span>
             </div>
-            <div className="px-2 py-1 h-40 overflow-hidden max-lg:text-sm">
+            <div className="px-2 py-1 h-40 overflow-hidden max-lg:text-xs">
               {path2?.programContent?.map((line, i) => (
                 <div key={i} className={programLineClass(line, activePath === 2)}>
                   {line || ' '}
@@ -272,7 +272,7 @@ function MonitorView({
         {/* Feed / Spindle */}
         <div className="grid grid-cols-2 gap-0 border border-gray-700 border-t-0">
           <div className="border-r border-gray-700">
-            <div className={`px-2 py-1 text-[10px] space-y-0.5 transition-opacity ${p1Dim ? 'opacity-40' : ''}`}>
+            <div className={`px-2 py-1 text-[10px] max-lg:text-xs space-y-0.5 transition-opacity ${p1Dim ? 'opacity-40' : ''}`}>
               <div className="flex justify-between text-gray-400">
                 <span>F</span>
                 <span>{path1?.modal?.feedActual ?? 0} MM/MIN</span>
@@ -283,7 +283,7 @@ function MonitorView({
               </div>
             </div>
           </div>
-          <div className={`px-2 py-1 text-[10px] space-y-0.5 transition-opacity ${p2Dim ? 'opacity-40' : ''}`}>
+          <div className={`px-2 py-1 text-[10px] max-lg:text-xs space-y-0.5 transition-opacity ${p2Dim ? 'opacity-40' : ''}`}>
             <div className="flex justify-between text-gray-400">
               <span>F</span>
               <span>{path2?.modal?.feedActual ?? 0} MM/MIN</span>
@@ -298,11 +298,11 @@ function MonitorView({
         {/* Path 상태바 */}
         <div className="grid grid-cols-2 gap-0 border border-gray-700 border-t-0">
           <div className="border-r border-gray-700">
-            <div className={`bg-gray-800 px-2 py-1 text-[10px] text-green-400 transition-opacity ${p1Dim ? 'opacity-40' : ''}`}>
+            <div className={`bg-gray-800 px-2 py-1 text-[10px] max-lg:text-xs text-green-400 transition-opacity ${p1Dim ? 'opacity-40' : ''}`}>
               {path1?.pathStatus || '---- ---- ---- ---'}
             </div>
           </div>
-          <div className={`bg-gray-800 px-2 py-1 text-[10px] text-green-400 transition-opacity ${p2Dim ? 'opacity-40' : ''}`}>
+          <div className={`bg-gray-800 px-2 py-1 text-[10px] max-lg:text-xs text-green-400 transition-opacity ${p2Dim ? 'opacity-40' : ''}`}>
             {path2?.pathStatus || '---- ---- ---- ---'}
           </div>
         </div>
@@ -318,7 +318,7 @@ function MonitorView({
               disabled={!listEnabled}
               onClick={() => setShowList(true)}
               title={!isOwner ? '제어권 필요' : !isEdit ? 'EDIT 모드에서 사용 가능' : 'CNC 프로그램 목록'}
-              className={`px-2.5 py-0.5 text-[10px] font-semibold rounded transition-colors ${
+              className={`px-2.5 py-0.5 text-[10px] max-lg:text-xs font-semibold rounded transition-colors ${
                 listEnabled
                   ? 'bg-cyan-700 text-white hover:bg-cyan-600'
                   : 'bg-gray-700 text-gray-500 opacity-30 cursor-not-allowed'
@@ -337,13 +337,13 @@ function MonitorView({
               }}
               disabled={!inputEnabled}
               placeholder=""
-              className="flex-1 min-w-0 bg-gray-700 border border-gray-600 focus:border-blue-500 text-white placeholder:text-gray-600 text-[11px] font-mono px-2 py-0.5 rounded outline-none disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex-1 min-w-0 bg-gray-700 border border-gray-600 focus:border-blue-500 text-white placeholder:text-gray-600 text-[11px] max-lg:text-xs font-mono px-2 py-0.5 rounded outline-none disabled:opacity-40 disabled:cursor-not-allowed"
             />
             <button
               disabled={!inputEnabled || mdiSending}
               onClick={() => { if (mdiInput.trim()) setMdiConfirm(true); }}
               title={!isOwner ? '제어권 필요' : !isMdi ? 'MDI 모드에서 사용 가능' : !mdiInput.trim() ? 'MDI 내용을 입력하세요' : 'MDI 버퍼에 기록'}
-              className={`shrink-0 px-2.5 py-0.5 text-[10px] font-semibold rounded transition-colors ${
+              className={`shrink-0 px-2.5 py-0.5 text-[10px] max-lg:text-xs font-semibold rounded transition-colors ${
                 !inputEnabled || mdiSending
                   ? 'bg-gray-700 text-gray-500 opacity-30 cursor-not-allowed'
                   : 'bg-blue-700 text-white hover:bg-blue-600'
@@ -368,12 +368,12 @@ function MonitorView({
       {mdiConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
           <div className="bg-gray-900 border border-yellow-600 rounded-lg p-5 w-80 shadow-2xl">
-            <div className="text-yellow-400 font-bold text-sm mb-2">MDI 지령 확인</div>
+            <div className="text-yellow-400 font-bold text-sm max-lg:text-xs mb-2">MDI 지령 확인</div>
             <div className="text-gray-300 text-xs mb-1">다음 내용을 MDI 버퍼에 기록합니다:</div>
             <pre className="bg-gray-800 rounded p-2 text-green-300 text-xs font-mono mb-4 whitespace-pre-wrap break-all">
               {mdiInput.trim().replace(/;/g, '\n')}
             </pre>
-            <div className="text-gray-500 text-[10px] mb-4">
+            <div className="text-gray-500 text-[10px] max-lg:text-xs mb-4">
               ※ 사이클 스타트는 별도 조작반에서 실행하세요.
             </div>
             <div className="flex gap-2 justify-end">
@@ -404,7 +404,7 @@ function PlaceholderView({ title, description }: { title: string; description: s
   return (
     <div className="flex flex-col items-center justify-center h-full text-gray-500">
       <div className="text-lg font-bold text-gray-400 mb-2">{title}</div>
-      <div className="text-sm text-gray-600">{description}</div>
+      <div className="text-sm max-lg:text-xs text-gray-600">{description}</div>
     </div>
   );
 }

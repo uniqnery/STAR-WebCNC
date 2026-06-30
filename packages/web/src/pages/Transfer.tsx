@@ -37,7 +37,7 @@ export function Transfer() {
   const machineId = selectedMachineId || '';
 
   return (
-    <div className="p-6 flex flex-col h-[calc(100vh-64px)]">
+    <div className="p-6 flex flex-col h-[calc(100vh-64px)] max-lg:portrait:h-auto max-lg:portrait:min-h-[100dvh] max-lg:portrait:p-3">
       {/* MachineTopBar */}
       <div className="flex-shrink-0">
         <MachineTopBar pageTitle="프로그램 전송" pageId={activeTab === 'transfer' ? 'transfer' : 'backup'} />
@@ -419,9 +419,9 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
   );
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
+    <div className="flex-1 flex flex-col min-h-0 max-lg:portrait:min-h-0">
       {/* 2분할 패널: 좌 5 : 우 5 */}
-      <div className="flex-1 grid grid-cols-[1fr_auto_1fr] gap-0 min-h-0">
+      <div className="flex-1 grid grid-cols-[1fr_auto_1fr] gap-0 min-h-0 max-lg:portrait:grid-cols-1 max-lg:portrait:grid-rows-[minmax(18rem,auto)_auto_minmax(18rem,auto)] max-lg:portrait:gap-3">
         {/* 좌측: CNC 프로그램 */}
         <FileListPanel
           title={`CNC (${machineId})`}
@@ -438,6 +438,7 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
           emptyMessage="새로고침(↺) 버튼을 눌러 재시도하거나 Agent 상태를 확인하세요"
           readOnly
           showComment
+          className="max-lg:portrait:min-h-[18rem]"
         />
 
         {/* 중앙: 전송 화살표 */}
@@ -463,6 +464,7 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
           onDelete={canTransfer ? handleShareDelete : undefined}
           onUpload={canTransfer ? handleShareUpload : undefined}
           pathComment={pcPathComment}
+          className="max-lg:portrait:min-h-[18rem]"
         />
       </div>
 

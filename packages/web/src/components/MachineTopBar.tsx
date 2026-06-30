@@ -81,7 +81,6 @@ export function MachineTopBar({ pageTitle, pageId, settingsContent, rightSlot, l
     return selectedTemplate.topBarInterlock[pageId] ?? null;
   }, [pageId, selectedTemplate]);
 
-  const interlockEnabled = pageConfig?.interlockEnabled ?? true;
   const activeFields = (pageConfig?.fields ?? []).filter((f) => f.enabled);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -242,13 +241,13 @@ export function MachineTopBar({ pageTitle, pageId, settingsContent, rightSlot, l
       </div>
 
       {/* Row 2: 좌측(장비선택+경광등) | 우측(인터록 pills) */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-4 max-lg:portrait:grid-cols-1 max-lg:portrait:gap-2">
         {/* 좌측: Machine selector + info + Tower light */}
-        <div className="flex items-center gap-3 bg-white dark:bg-gray-800 rounded-lg shadow px-4 py-2.5">
+        <div className="flex items-center gap-3 bg-white dark:bg-gray-800 rounded-lg shadow px-4 py-2.5 max-lg:portrait:px-3 max-lg:portrait:gap-2 min-w-0">
           <select
             value={selectedMachineId || ''}
             onChange={(e) => selectMachine(e.target.value || null)}
-            className="bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white flex-shrink-0"
+            className="bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white flex-shrink-0 max-lg:portrait:w-auto max-lg:portrait:max-w-[11rem]"
           >
             <option value="">장비 선택</option>
             {machines.map((m) => (
@@ -258,7 +257,7 @@ export function MachineTopBar({ pageTitle, pageId, settingsContent, rightSlot, l
             ))}
           </select>
           {machine?.modelName && (
-            <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
+            <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs text-gray-500 dark:text-gray-400 flex-shrink-0 max-lg:portrait:max-w-[7rem] max-lg:portrait:truncate">
               {machine.modelName}
             </span>
           )}
@@ -271,18 +270,12 @@ export function MachineTopBar({ pageTitle, pageId, settingsContent, rightSlot, l
         </div>
 
         {/* 우측: 인터록 pills (rightSlot 있으면 대체) */}
-        <div className="flex items-center bg-white dark:bg-gray-800 rounded-lg shadow px-4 py-2.5 gap-2">
+        <div className="flex items-center bg-white dark:bg-gray-800 rounded-lg shadow px-4 py-2.5 gap-2 max-lg:portrait:px-3 max-lg:portrait:items-start min-w-0">
           {rightSlot ?? (
             <>
-              {/* 인터록 OFF 배지 */}
-              {!interlockEnabled && (
-                <span className="text-[10px] bg-yellow-500/20 text-yellow-400 border border-yellow-600/40 rounded px-1.5 py-0.5 shrink-0 font-semibold">
-                  인터록 OFF
-                </span>
-              )}
 
               {activeFields.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5 min-w-0">
                   {activeFields.map((field) => {
                     const ok = getPillOk(field, pmcBits, hasTelemetry);
                     return (

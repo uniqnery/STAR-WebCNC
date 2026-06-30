@@ -262,7 +262,7 @@ export function Scheduler() {
 
   return (
     <div
-      className="p-6 lg:p-4 space-y-4 lg:space-y-0 lg:gap-3 lg:h-full lg:flex lg:flex-col lg:overflow-hidden max-lg:landscape:p-1 max-lg:landscape:space-y-1 max-lg:landscape:pl-7"
+      className="p-6 lg:p-4 space-y-4 lg:space-y-0 lg:gap-3 lg:h-full lg:flex lg:flex-col lg:overflow-hidden max-lg:landscape:p-1 max-lg:landscape:space-y-1 max-lg:landscape:pl-7 max-lg:portrait:overflow-x-hidden"
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >
@@ -348,10 +348,10 @@ export function Scheduler() {
           </div>
 
           {/* PC: lg:grid-cols-2 / 모바일 landscape: grid-cols-2 */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 max-lg:landscape:grid-cols-2 gap-4 lg:flex-1 lg:min-h-0">
+          <div className="grid grid-cols-1 lg:grid-cols-2 max-lg:landscape:grid-cols-2 gap-4 lg:flex-1 lg:min-h-0 max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 max-lg:portrait:overflow-x-hidden">
             {/* 좌측: NC 모니터 + 알람 + 탭 바 */}
-            <div className={`flex flex-col gap-2 overflow-hidden lg:h-full max-lg:portrait:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-22rem)] max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'monitor' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
-              <div className="flex-1 min-h-0 lg:flex-none lg:shrink-0">
+            <div className={`flex flex-col gap-2 max-lg:portrait:gap-1 overflow-hidden max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 lg:h-full max-lg:portrait:h-auto max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'monitor' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
+              <div className="flex-1 min-h-0 max-lg:portrait:flex-none lg:flex-none lg:shrink-0">
                 <NCMonitor
                   path1={telemetry?.path1}
                   path2={telemetry?.path2}
@@ -380,14 +380,14 @@ export function Scheduler() {
                 ))}
               </div>
               {/* 모바일 portrait 전용 로그 — PC(lg:) 및 landscape에서 숨김 */}
-              <div className="lg:hidden landscape:hidden shrink-0 h-40 mt-1">
+              <div className="lg:hidden landscape:hidden shrink-0 h-40 max-lg:portrait:mt-0">
                 <FocasEventLog events={focasEvents} userActivityContent={<UserActivityFeed machineId={selectedMachineId || ''} page="scheduler" />} />
               </div>
             </div>
 
             {/* 우측: 스케줄러 */}
-            <div className={`flex flex-col gap-2 lg:h-full max-lg:portrait:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-22rem)] max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'scheduler' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
-            <div className="bg-gray-800 text-white rounded-lg shadow p-4 flex flex-col lg:flex-1 lg:min-h-0 max-lg:flex-1 max-lg:min-h-0">
+            <div className={`flex flex-col gap-2 max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 lg:h-full max-lg:portrait:h-auto max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'scheduler' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
+            <div className="bg-gray-800 text-white rounded-lg shadow p-4 flex flex-col lg:flex-1 lg:min-h-0 max-lg:landscape:flex-1 max-lg:landscape:min-h-0 max-lg:portrait:flex-none">
 
               {/* 현재 실행 상태 + 제어 버튼 (같은 줄, 우측 정렬) */}
               <div className="mb-3 p-3 bg-gray-700 rounded-lg flex items-center gap-2">
@@ -469,7 +469,7 @@ export function Scheduler() {
               </div>
 
               {/* 큐 테이블 */}
-              <div className="overflow-auto flex-1 min-h-0">
+              <div className="overflow-auto flex-1 min-h-0 max-lg:portrait:flex-none max-lg:portrait:min-h-[23rem] max-lg:portrait:overflow-visible">
                 <table className="w-full text-sm table-fixed">
                   <colgroup>
                     <col className="w-8" />      {/* No */}
@@ -535,7 +535,7 @@ export function Scheduler() {
             </div>
 
               {/* 모바일 portrait 전용 로그 — PC(lg:) 및 landscape에서 숨김 */}
-              <div className="lg:hidden landscape:hidden shrink-0 h-40 mt-1">
+              <div className="lg:hidden landscape:hidden shrink-0 h-40 max-lg:portrait:mt-0">
                 <FocasEventLog events={focasEvents} userActivityContent={<UserActivityFeed machineId={selectedMachineId || ''} page="scheduler" />} />
               </div>
             </div>

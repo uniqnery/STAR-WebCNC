@@ -29,17 +29,21 @@ import { MachineTopBar } from '../components/MachineTopBar';
 import { useLongPress } from '../hooks/useLongPress';
 
 export function RemoteControl() {
-  const { selectedMachineId, addFocasEvent } = useMachineStore();
+  const { machines, selectedMachineId, addFocasEvent } = useMachineStore();
   const telemetry = useMachineTelemetry(selectedMachineId || '');
   const focasEvents = useFocasEvents(selectedMachineId || '');
   const activeAlarms = useMachineAlarms(selectedMachineId || '');
   const controlLock = useControlLock(selectedMachineId || '');
+  const selectedMachine = machines.find((m) => m.machineId === selectedMachineId);
 
-  // 템플릿에서 panelLayout 로드
-  const { templates, loadTemplates } = useTemplateStore();
-  const selectedTemplate = useTemplateStore(
-    (s) => s.templates.find((t) => t.id === s.selectedTemplateId) ?? null,
-  );
+  // 템플릿에서 panelLayout 로드: 장비에 할당된 템플릿을 우선 사용
+  const { templates, loadTemplates, selectedTemplateId } = useTemplateStore();
+  const selectedTemplate =
+    (selectedMachine?.template?.templateId
+      ? templates.find((t) => t.templateId === selectedMachine.template?.templateId)
+      : null) ??
+    (selectedTemplateId ? templates.find((t) => t.id === selectedTemplateId) : null) ??
+    null;
 
   useEffect(() => {
     if (templates.length === 0) loadTemplates();
@@ -190,7 +194,7 @@ export function RemoteControl() {
 
   return (
     <div
-      className="p-6 lg:p-4 space-y-4 lg:space-y-0 lg:gap-3 lg:h-full lg:flex lg:flex-col lg:overflow-hidden max-lg:landscape:p-1 max-lg:landscape:space-y-1 max-lg:landscape:pl-7"
+      className="p-6 lg:p-4 space-y-4 lg:space-y-0 lg:gap-3 lg:h-full lg:flex lg:flex-col lg:overflow-hidden max-lg:landscape:p-1 max-lg:landscape:space-y-1 max-lg:landscape:pl-7 max-lg:portrait:overflow-x-hidden"
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >
@@ -223,10 +227,10 @@ export function RemoteControl() {
           </div>
 
           {/* PC: lg:grid-cols-2 / 모바일 landscape: grid-cols-2 */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 max-lg:landscape:grid-cols-2 gap-4 lg:flex-1 lg:min-h-0">
+          <div className="grid grid-cols-1 lg:grid-cols-2 max-lg:landscape:grid-cols-2 gap-4 lg:flex-1 lg:min-h-0 max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 max-lg:portrait:overflow-x-hidden">
             {/* 좌측: NC 모니터 + 알람 + 탭 바 */}
-            <div className={`flex flex-col gap-2 overflow-hidden lg:h-full max-lg:portrait:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-16rem)] max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'monitor' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
-              <div className="flex-1 min-h-0 lg:flex-none lg:shrink-0">
+            <div className={`flex flex-col gap-2 max-lg:portrait:gap-1 overflow-hidden max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 lg:h-full max-lg:portrait:h-auto max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'monitor' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
+              <div className="flex-1 min-h-0 max-lg:portrait:flex-none lg:flex-none lg:shrink-0">
                 <NCMonitor
                   path1={telemetry?.path1}
                   path2={telemetry?.path2}
@@ -256,14 +260,14 @@ export function RemoteControl() {
                 ))}
               </div>
               {/* 모바일 portrait 전용 로그 — PC(lg:) 및 landscape에서 숨김 */}
-              <div className="lg:hidden landscape:hidden shrink-0 h-40 mt-1">
+              <div className="lg:hidden landscape:hidden shrink-0 h-40 max-lg:portrait:mt-0">
                 <FocasEventLog events={focasEvents} userActivityContent={<UserActivityFeed machineId={selectedMachineId || ''} page="control" />} />
               </div>
             </div>
 
             {/* 우측: 오퍼레이션 패널 */}
-            <div className={`flex flex-col gap-2 lg:h-full max-lg:portrait:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-16rem)] max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'panel' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
-              <div className="bg-gray-800 text-white rounded-lg shadow p-4 max-lg:p-2 flex flex-col lg:flex-1 lg:min-h-0 max-lg:flex-1 max-lg:min-h-0">
+            <div className={`flex flex-col gap-2 max-lg:portrait:gap-1 max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 lg:h-full max-lg:portrait:h-auto max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'panel' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
+              <div className="bg-gray-800 text-white rounded-lg shadow p-4 max-lg:p-2 flex flex-col lg:flex-1 lg:min-h-0 max-lg:landscape:flex-1 max-lg:landscape:min-h-0 max-lg:portrait:flex-none max-lg:portrait:max-h-[38rem] max-lg:portrait:overflow-hidden">
                 <OperationPanel
                   groups={panelGroups}
                   lampStates={lampStates}
@@ -277,7 +281,7 @@ export function RemoteControl() {
                 />
               </div>
               {/* 모바일 portrait 전용 로그 — PC(lg:) 및 landscape에서 숨김 */}
-              <div className="lg:hidden landscape:hidden shrink-0 h-40 mt-1">
+              <div className="lg:hidden landscape:hidden shrink-0 h-40 max-lg:portrait:mt-0">
                 <FocasEventLog events={focasEvents} userActivityContent={<UserActivityFeed machineId={selectedMachineId || ''} page="control" />} />
               </div>
             </div>
