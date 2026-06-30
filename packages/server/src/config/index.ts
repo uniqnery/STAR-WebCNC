@@ -25,6 +25,13 @@ export const config = {
   // CORS
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
 
+  // Web Push (VAPID)
+  vapid: {
+    publicKey: process.env.VAPID_PUBLIC_KEY || '',
+    privateKey: process.env.VAPID_PRIVATE_KEY || '',
+    subject: process.env.VAPID_SUBJECT || 'mailto:admin@star-webcnc.local',
+  },
+
   // Cookie
   cookie: {
     secure: process.env.NODE_ENV === 'production',

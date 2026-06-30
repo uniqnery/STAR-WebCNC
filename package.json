@@ -22,10 +22,14 @@
     "test": "npm run test --workspaces --if-present"
   },
   "devDependencies": {
+    "@types/web-push": "^3.6.4",
     "concurrently": "^8.2.2",
     "typescript": "^5.3.3"
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "web-push": "^3.6.7"
   }
 }

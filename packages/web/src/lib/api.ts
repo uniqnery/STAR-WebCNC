@@ -630,6 +630,17 @@ export const cameraServerApi = {
   },
 };
 
+export const notificationApi = {
+  getVapidPublicKey: () =>
+    api.get<{ publicKey: string }>('/api/notifications/vapid-public-key'),
+
+  subscribe: (subscription: PushSubscriptionJSON) =>
+    api.post('/api/notifications/subscribe', { subscription }),
+
+  unsubscribe: (endpoint: string) =>
+    api.post('/api/notifications/unsubscribe', { endpoint }),
+};
+
 export const diagnosticsApi = {
   /** 시스템 전체 연결 상태 조회 */
   getStatus: () =>

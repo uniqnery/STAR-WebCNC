@@ -29,7 +29,9 @@ import fileRoutes from './routes/files';
 import diagnosticsRoutes from './routes/diagnostics';
 import settingsRoutes from './routes/settings';
 import cameraRoutes from './routes/camera';
+import notificationRoutes from './routes/notifications';
 import { errorHandler } from './middleware/error';
+import { pushService } from './lib/pushService';
 
 // Services
 import { wsService } from './lib/websocket';
@@ -133,6 +135,7 @@ app.use('/api/diagnostics', diagnosticsRoutes);
 // Settings Routes (전역 설정)
 app.use('/api/settings', settingsRoutes);
 app.use('/api/camera', cameraRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Error Handler (must be last middleware)
 app.use(errorHandler);
@@ -207,6 +210,13 @@ function setupMqttHandlers(): void {
       alarmMsg,
       type: type === 'occurred' ? 'occur' : 'clear',
     });
+
+    // Web Push — 알람 발생 시에만 발송
+    if (type === 'occurred') {
+      const machine = await prisma.machine.findUnique({ where: { machineId }, select: { name: true } });
+      const machineName = machine?.name ?? machineId;
+      void pushService.sendAlarmNotification(machineId, machineName, alarmNo, alarmMsg);
+    }
 
     // Publish to Redis for other server instances
     await redisService.publish(REDIS_KEYS.CHANNEL_ALARM, message);

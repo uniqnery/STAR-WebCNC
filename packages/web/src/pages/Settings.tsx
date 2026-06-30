@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { useMachineStore, useControlLockDuration } from '../stores/machineStore';
 import { useCameraStore, CameraConfig } from '../stores/cameraStore';
-import { diagnosticsApi, DiagnosticsData, AgentDiagStatus, settingsApi } from '../lib/api';
+import { diagnosticsApi, DiagnosticsData, AgentDiagStatus, settingsApi, notificationApi } from '../lib/api';
 
 export function Settings() {
   const user = useAuthStore((state) => state.user);
@@ -333,12 +333,131 @@ export function Settings() {
         </div>
       )}
 
+      {/* 푸시 알림 */}
+      <PushNotificationSection />
+
       {/* 시스템 진단 */}
       {(isAdmin || user?.role === 'HQ_ENGINEER') && (
         <DiagnosticsSection />
       )}
     </div>
   );
+}
+
+// ── 푸시 알림 섹션 ──────────────────────────────────────────────
+
+function PushNotificationSection() {
+  const [supported, setSupported] = useState(false);
+  const [subscribed, setSubscribed] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const ok = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    setSupported(ok);
+    if (!ok) return;
+    navigator.serviceWorker.ready.then((reg) => {
+      reg.pushManager.getSubscription().then((sub) => {
+        setSubscribed(!!sub);
+      });
+    });
+  }, []);
+
+  const handleSubscribe = async () => {
+    setLoading(true);
+    setError(null);
+    setMsg(null);
+    try {
+      const keyRes = await notificationApi.getVapidPublicKey();
+      if (!keyRes.success || !keyRes.data?.publicKey) throw new Error('서버 VAPID 키 조회 실패');
+
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        setError('알림 권한이 거부되었습니다. 브라우저 설정에서 허용해주세요.');
+        return;
+      }
+
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(keyRes.data.publicKey),
+      });
+
+      await notificationApi.subscribe(sub.toJSON() as PushSubscriptionJSON);
+      setSubscribed(true);
+      setMsg('알림이 활성화되었습니다.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '알림 등록 실패');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUnsubscribe = async () => {
+    setLoading(true);
+    setError(null);
+    setMsg(null);
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await notificationApi.unsubscribe(sub.endpoint);
+        await sub.unsubscribe();
+      }
+      setSubscribed(false);
+      setMsg('알림이 비활성화되었습니다.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '알림 해제 실패');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">알람 푸시 알림</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            CNC 알람 발생 시 이 기기로 푸시 알림을 받습니다
+          </p>
+        </div>
+        {supported ? (
+          <button
+            onClick={subscribed ? handleUnsubscribe : handleSubscribe}
+            disabled={loading}
+            className={`relative w-14 h-7 rounded-full transition-colors disabled:opacity-50 ${
+              subscribed ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+            }`}
+          >
+            <span className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${subscribed ? 'translate-x-7' : ''}`} />
+          </button>
+        ) : (
+          <span className="text-xs text-gray-400">이 브라우저는 미지원</span>
+        )}
+      </div>
+
+      {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
+      {msg && <p className="mt-3 text-sm text-green-500">{msg}</p>}
+
+      {supported && !subscribed && (
+        <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-xs text-blue-600 dark:text-blue-400">
+          <p className="font-semibold mb-1">📱 아이폰 사용자</p>
+          <p>Safari에서 이 페이지를 열고 → 공유 버튼 → <strong>홈 화면에 추가</strong> 후 앱으로 실행하면 알림을 받을 수 있습니다. (iOS 16.4 이상)</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return new Uint8Array([...rawData].map((c) => c.charCodeAt(0)));
 }
 
 // ── 시스템 진단 섹션 ────────────────────────────────────────────
