@@ -801,16 +801,23 @@ public class CommandHandler
             string.IsNullOrWhiteSpace(program))
             return CreateFailureResult(command, "INVALID_PARAMS", "program 파라미터가 필요합니다.");
 
-        bool ok = _dataReader.WriteMdiProgram(program);
+        int pathNo = 1;
+        if ((command.Params.TryGetValue("path", out var pathObj) || command.Params.TryGetValue("pathNo", out pathObj)) &&
+            int.TryParse(pathObj?.ToString(), out int parsedPath))
+        {
+            pathNo = parsedPath;
+        }
+
+        bool ok = _dataReader.WriteMdiProgram(program, pathNo);
         if (!ok)
-            return CreateFailureResult(command, "WRITE_MDI_FAILED", "MDI 버퍼 기록 실패. MDI 모드인지 확인하세요.");
+            return CreateFailureResult(command, "WRITE_MDI_FAILED", "MDI buffer write failed. Check MDI mode and selected path.");
 
         return new CommandResultMessage
         {
             MachineId     = _settings.MachineId,
             CorrelationId = command.CorrelationId,
             Status        = "success",
-            Result        = new { written = true },
+            Result        = new { written = true, path = pathNo },
         };
     }
 

@@ -141,7 +141,7 @@ function MonitorView({
     setMdiSending(true);
     setMdiConfirm(false);
     try {
-      await commandApi.sendAndWait(machineId, 'WRITE_MDI', { program: mdiInput.trim() }, 10_000);
+      await commandApi.sendAndWait(machineId, 'WRITE_MDI', { program: mdiInput.trim(), path: activePath }, 10_000);
       setMdiInput('');
     } finally {
       setMdiSending(false);
@@ -166,10 +166,10 @@ function MonitorView({
     <div className="flex flex-col">
 
       {/* NC 데이터 영역 */}
-      <div className="text-green-400 font-mono text-xs p-2 space-y-0">
+      <div className="text-green-400 font-mono text-xs p-2 max-lg:landscape:p-1 space-y-0">
 
         {/* 헤더 2분할: 좌=모드+PATH1 O/N | 우=PATH2 O/N */}
-        <div className="grid grid-cols-2 gap-0 mb-1">
+        <div className="grid grid-cols-2 gap-0 mb-1 max-lg:landscape:mb-0.5">
           <div className="flex items-center justify-between pr-1">
             <span className="text-cyan-300 text-[10px] max-lg:text-xs truncate min-w-0">
               {machineMode || 'PROGRAM( CHECK )'}
@@ -197,7 +197,7 @@ function MonitorView({
                 PATH1{activePath === 1 ? ' ▶' : ''}
               </span>
             </div>
-            <div className="px-2 py-1 h-40 overflow-hidden max-lg:text-xs">
+            <div className="px-2 max-lg:landscape:px-1 py-1 max-lg:landscape:py-0.5 h-40 max-lg:landscape:h-20 overflow-hidden max-lg:text-xs max-lg:landscape:text-[10px]">
               {path1?.programContent?.map((line, i) => (
                 <div key={i} className={programLineClass(line, activePath === 1)}>
                   {line || ' '}
@@ -211,7 +211,7 @@ function MonitorView({
                 PATH2{activePath === 2 ? ' ▶' : ''}
               </span>
             </div>
-            <div className="px-2 py-1 h-40 overflow-hidden max-lg:text-xs">
+            <div className="px-2 max-lg:landscape:px-1 py-1 max-lg:landscape:py-0.5 h-40 max-lg:landscape:h-20 overflow-hidden max-lg:text-xs max-lg:landscape:text-[10px]">
               {path2?.programContent?.map((line, i) => (
                 <div key={i} className={programLineClass(line, activePath === 2)}>
                   {line || ' '}
@@ -226,18 +226,18 @@ function MonitorView({
           <div className="border-r border-gray-700">
             <div className={`grid grid-cols-2 transition-opacity ${p1Dim ? 'opacity-40' : ''}`}>
               <div className="border-r border-gray-700">
-                <div className="bg-gray-800 px-2 h-6 flex items-center justify-center text-[10px] max-lg:text-xs text-cyan-300">ABSOLUTE</div>
+                <div className="bg-gray-800 px-2 max-lg:px-1.5 h-6 max-lg:h-5 max-lg:landscape:h-4 flex items-center justify-center text-[10px] max-lg:text-xs max-lg:landscape:text-[9px] text-cyan-300">ABSOLUTE</div>
                 {axes1.map((axis, i) => (
-                  <div key={`p1a-${axis}`} className="flex justify-between items-center px-2 h-6 max-lg:text-xs">
+                  <div key={`p1a-${axis}`} className="flex justify-between items-center px-2 max-lg:px-1.5 h-6 max-lg:h-5 max-lg:landscape:h-4 max-lg:leading-none max-lg:text-xs max-lg:landscape:text-[10px]">
                     <span className="text-cyan-300">{axis}</span>
                     <span className="text-white">{formatPos(path1?.coordinates?.absolute[i], path1?.coordinates?.decimalPlaces?.[i])}</span>
                   </div>
                 ))}
               </div>
               <div>
-                <div className="bg-gray-800 px-2 h-6 flex items-center justify-center text-[10px] max-lg:text-xs text-cyan-300">DIST TO GO</div>
+                <div className="bg-gray-800 px-2 max-lg:px-1.5 h-6 max-lg:h-5 max-lg:landscape:h-4 flex items-center justify-center text-[10px] max-lg:text-xs max-lg:landscape:text-[9px] text-cyan-300">DIST TO GO</div>
                 {axes1.map((axis, i) => (
-                  <div key={`p1d-${axis}`} className="flex justify-between items-center px-2 h-6 max-lg:text-xs">
+                  <div key={`p1d-${axis}`} className="flex justify-between items-center px-2 max-lg:px-1.5 h-6 max-lg:h-5 max-lg:landscape:h-4 max-lg:leading-none max-lg:text-xs max-lg:landscape:text-[10px]">
                     <span className="text-cyan-300">{axis}</span>
                     <span className="text-yellow-300">{formatPos(path1?.coordinates?.distanceToGo[i], path1?.coordinates?.decimalPlaces?.[i])}</span>
                   </div>
@@ -248,18 +248,18 @@ function MonitorView({
           <div className={`transition-opacity ${p2Dim ? 'opacity-40' : ''}`}>
             <div className="grid grid-cols-2">
               <div className="border-r border-gray-700">
-                <div className="bg-gray-800 px-2 h-6 flex items-center justify-center text-[10px] max-lg:text-xs text-cyan-300">ABSOLUTE</div>
+                <div className="bg-gray-800 px-2 max-lg:px-1.5 h-6 max-lg:h-5 max-lg:landscape:h-4 flex items-center justify-center text-[10px] max-lg:text-xs max-lg:landscape:text-[9px] text-cyan-300">ABSOLUTE</div>
                 {axes2.map((axis, i) => (
-                  <div key={`p2a-${axis}`} className="flex justify-between items-center px-2 h-6 max-lg:text-xs">
+                  <div key={`p2a-${axis}`} className="flex justify-between items-center px-2 max-lg:px-1.5 h-6 max-lg:h-5 max-lg:landscape:h-4 max-lg:leading-none max-lg:text-xs max-lg:landscape:text-[10px]">
                     <span className="text-cyan-300">{axis}</span>
                     <span className="text-white">{formatPos(path2?.coordinates?.absolute[i], path2?.coordinates?.decimalPlaces?.[i])}</span>
                   </div>
                 ))}
               </div>
               <div>
-                <div className="bg-gray-800 px-2 h-6 flex items-center justify-center text-[10px] max-lg:text-xs text-cyan-300">DIST TO GO</div>
+                <div className="bg-gray-800 px-2 max-lg:px-1.5 h-6 max-lg:h-5 max-lg:landscape:h-4 flex items-center justify-center text-[10px] max-lg:text-xs max-lg:landscape:text-[9px] text-cyan-300">DIST TO GO</div>
                 {axes2.map((axis, i) => (
-                  <div key={`p2d-${axis}`} className="flex justify-between items-center px-2 h-6 max-lg:text-xs">
+                  <div key={`p2d-${axis}`} className="flex justify-between items-center px-2 max-lg:px-1.5 h-6 max-lg:h-5 max-lg:landscape:h-4 max-lg:leading-none max-lg:text-xs max-lg:landscape:text-[10px]">
                     <span className="text-cyan-300">{axis}</span>
                     <span className="text-yellow-300">{formatPos(path2?.coordinates?.distanceToGo[i], path2?.coordinates?.decimalPlaces?.[i])}</span>
                   </div>
@@ -272,7 +272,7 @@ function MonitorView({
         {/* Feed / Spindle */}
         <div className="grid grid-cols-2 gap-0 border border-gray-700 border-t-0">
           <div className="border-r border-gray-700">
-            <div className={`px-2 py-1 text-[10px] max-lg:text-xs space-y-0.5 transition-opacity ${p1Dim ? 'opacity-40' : ''}`}>
+            <div className={`px-2 max-lg:landscape:px-1 py-1 max-lg:landscape:py-0.5 text-[10px] max-lg:text-xs max-lg:landscape:text-[9px] space-y-0.5 max-lg:landscape:space-y-0 transition-opacity ${p1Dim ? 'opacity-40' : ''}`}>
               <div className="flex justify-between text-gray-400">
                 <span>F</span>
                 <span>{path1?.modal?.feedActual ?? 0} MM/MIN</span>
@@ -283,7 +283,7 @@ function MonitorView({
               </div>
             </div>
           </div>
-          <div className={`px-2 py-1 text-[10px] max-lg:text-xs space-y-0.5 transition-opacity ${p2Dim ? 'opacity-40' : ''}`}>
+          <div className={`px-2 max-lg:landscape:px-1 py-1 max-lg:landscape:py-0.5 text-[10px] max-lg:text-xs max-lg:landscape:text-[9px] space-y-0.5 max-lg:landscape:space-y-0 transition-opacity ${p2Dim ? 'opacity-40' : ''}`}>
             <div className="flex justify-between text-gray-400">
               <span>F</span>
               <span>{path2?.modal?.feedActual ?? 0} MM/MIN</span>
@@ -298,11 +298,11 @@ function MonitorView({
         {/* Path 상태바 */}
         <div className="grid grid-cols-2 gap-0 border border-gray-700 border-t-0">
           <div className="border-r border-gray-700">
-            <div className={`bg-gray-800 px-2 py-1 text-[10px] max-lg:text-xs text-green-400 transition-opacity ${p1Dim ? 'opacity-40' : ''}`}>
+            <div className={`bg-gray-800 px-2 max-lg:landscape:px-1 py-1 max-lg:landscape:py-0.5 text-[10px] max-lg:text-xs max-lg:landscape:text-[9px] text-green-400 transition-opacity ${p1Dim ? 'opacity-40' : ''}`}>
               {path1?.pathStatus || '---- ---- ---- ---'}
             </div>
           </div>
-          <div className={`bg-gray-800 px-2 py-1 text-[10px] max-lg:text-xs text-green-400 transition-opacity ${p2Dim ? 'opacity-40' : ''}`}>
+          <div className={`bg-gray-800 px-2 max-lg:landscape:px-1 py-1 max-lg:landscape:py-0.5 text-[10px] max-lg:text-xs max-lg:landscape:text-[9px] text-green-400 transition-opacity ${p2Dim ? 'opacity-40' : ''}`}>
             {path2?.pathStatus || '---- ---- ---- ---'}
           </div>
         </div>
@@ -311,7 +311,7 @@ function MonitorView({
       {/* ↑ NC 데이터 영역 끝 */}
 
       {/* LIST / MDI 입력 바 — shrink-0으로 항상 하단 고정 */}
-      <div className="shrink-0 border-t border-gray-700 bg-gray-800 px-2 py-1.5">
+      <div className="shrink-0 border-t border-gray-700 bg-gray-800 px-2 max-lg:landscape:px-1 py-1.5 max-lg:landscape:py-0.5">
         <div className="flex items-center">
           <div className="flex items-center gap-2 flex-1">
             <button

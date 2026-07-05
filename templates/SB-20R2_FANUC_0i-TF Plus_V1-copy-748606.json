@@ -589,7 +589,7 @@
           },
           "hasLamp": true,
           "reqAddr": "R6146.0",
-          "lampAddr": "Y53.2"
+          "lampAddr": "D6.0"
         },
         {
           "id": "AIR_CUT",

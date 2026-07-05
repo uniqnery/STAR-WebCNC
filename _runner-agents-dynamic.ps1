@@ -1,14 +1,14 @@
-# 서버 API에서 활성 설비 목록을 읽어 설비별 에이전트 프로세스를 동적으로 실행
-
 param(
     [string]$ServerUrl  = "http://localhost:3000",
     [string]$Username   = "admin",
     [string]$Password   = "admin123!",
     [string]$PublishDir = "C:\Star-WebCNC\packages\agent\StarWebCNC.Agent\publish",
-    [string]$LogDir     = "C:\temp"
+    [string]$LogDir     = "C:\Star-WebCNC\agent-runtime"
 )
 
-if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }
+if (-not (Test-Path $LogDir)) {
+    New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+}
 
 Write-Host "[agents] Fetching machine list from $ServerUrl ..."
 
@@ -17,7 +17,7 @@ try {
     $login = Invoke-RestMethod -Uri "$ServerUrl/api/auth/login" -Method POST -ContentType "application/json" -Body $loginBody
     $token = $login.data.accessToken
 } catch {
-    Write-Host "[agents] ERROR: Server login failed — $_"
+    Write-Host "[agents] ERROR: Server login failed - $_"
     exit 1
 }
 
@@ -25,7 +25,7 @@ try {
     $resp = Invoke-RestMethod -Uri "$ServerUrl/api/machines?limit=100" -Headers @{ Authorization = "Bearer $token" }
     $machines = $resp.data.items | Where-Object { $_.isActive -eq $true }
 } catch {
-    Write-Host "[agents] ERROR: Failed to fetch machines — $_"
+    Write-Host "[agents] ERROR: Failed to fetch machines - $_"
     exit 1
 }
 
@@ -43,26 +43,33 @@ foreach ($m in $machines) {
     $ip        = $m.ipAddress
     $port      = if ($m.port) { $m.port } else { 8193 }
     $agentId   = "AGENT-" + $machineId.Replace("MC-", "")
-    $logFile   = "$LogDir\agent_$($machineId -replace '-','').log"
+    $templateId = if ($m.templateId) { $m.templateId } elseif ($m.template -and $m.template.templateId) { $m.template.templateId } else { "" }
+    $safeMachineId = $machineId -replace '-', ''
+    $logFile   = Join-Path $LogDir "agent_$safeMachineId.log"
+    $psScript  = Join-Path $LogDir "start_agent_$machineId.ps1"
 
-    # 호기별 PS1 스크립트 생성 — 독립 powershell 프로세스로 실행
-    $psScript = "$LogDir\start_agent_$machineId.ps1"
     @"
 `$env:ASPNETCORE_ENVIRONMENT = 'Production'
-`$env:Agent__AgentId         = '$agentId'
-`$env:Agent__MachineId       = '$machineId'
-`$env:Agent__TemplateId      = '$($m.templateId)'
-`$env:Agent__Cnc__IpAddress  = '$ip'
-`$env:Agent__Cnc__Port       = '$port'
+`$env:DOTNET_ENVIRONMENT = 'Production'
+`$env:Logging__EventLog__LogLevel__Default = 'None'
+`$env:Logging__EventLog__LogLevel__StarWebCNC_Agent = 'None'
+`$env:Agent__AgentId = '$agentId'
+`$env:Agent__MachineId = '$machineId'
+`$env:Agent__TemplateId = '$templateId'
+`$env:Agent__Cnc__IpAddress = '$ip'
+`$env:Agent__Cnc__Port = '$port'
+`$env:Agent__Mqtt__Host = 'localhost'
+`$env:Agent__Mqtt__Port = '1883'
+`$env:Agent__Server__BaseUrl = '$ServerUrl'
 Set-Location '$PublishDir'
-& '$dotnet' StarWebCNC.Agent.dll *>> '$logFile'
+& '$dotnet' StarWebCNC.Agent.dll "--Agent:AgentId=$agentId" "--Agent:MachineId=$machineId" "--Agent:TemplateId=$templateId" "--Agent:Cnc:IpAddress=$ip" "--Agent:Cnc:Port=$port" "--Agent:Mqtt:Host=localhost" "--Agent:Mqtt:Port=1883" "--Agent:Server:BaseUrl=$ServerUrl" *>> '$logFile'
 "@ | Out-File -FilePath $psScript -Encoding utf8
 
     Start-Process -FilePath "powershell.exe" `
         -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$psScript`"" `
         -WindowStyle Hidden
 
-    Write-Host "  [$machineId] IP=$ip Port=$port  log=$logFile"
+    Write-Host "  [$machineId] IP=$ip Port=$port Template=$templateId log=$logFile"
 }
 
 Write-Host "[agents] All agents launched."

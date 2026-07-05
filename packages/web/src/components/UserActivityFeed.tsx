@@ -1,7 +1,7 @@
 // 사용자 기록 피드 — 스케줄러/조작반 페이지 공용
 
-import { useEffect, useRef } from 'react';
-import { useUserActivities, UserActivityPage, UserActivity } from '../stores/machineStore';
+import { useEffect } from 'react';
+import { useMachineStore, useUserActivities, UserActivityPage, UserActivity } from '../stores/machineStore';
 
 const ROLE_LABEL: Record<string, string> = {
   ADMIN: '관리자',
@@ -23,11 +23,11 @@ interface UserActivityFeedProps {
 
 export function UserActivityFeed({ machineId, page }: UserActivityFeedProps) {
   const activities = useUserActivities(machineId, page);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const loadUserActivities = useMachineStore((state) => state.loadUserActivities);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activities.length]);
+    if (machineId) void loadUserActivities(machineId, page);
+  }, [machineId, page, loadUserActivities]);
 
   if (activities.length === 0) {
     return (
@@ -37,7 +37,7 @@ export function UserActivityFeed({ machineId, page }: UserActivityFeedProps) {
 
   return (
     <>
-      {[...activities].reverse().map((a) => (
+      {activities.map((a) => (
         <div
           key={a.id}
           className={`flex items-start gap-2 px-1.5 py-0.5 min-h-[24px] shrink-0 font-mono text-xs ${getRowStyle(a)}`}
@@ -57,7 +57,6 @@ export function UserActivityFeed({ machineId, page }: UserActivityFeedProps) {
           </span>
         </div>
       ))}
-      <div ref={bottomRef} />
     </>
   );
 }

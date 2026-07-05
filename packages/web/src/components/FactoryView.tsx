@@ -203,8 +203,8 @@ export function FactoryView({ machines, onSelectMachine, selectedMachineId }: Fa
     if (e.touches.length === 2) {
       // 핀치 줌 시작
       setLastPinchDistance(getPinchDistance(e.touches));
-    } else if (e.touches.length === 1) {
-      // 팬 시작
+    } else if (e.touches.length === 1 && scale > 1) {
+      // 확대 상태에서만 팬 시작
       setIsPanning(true);
       setLastPanPoint({ x: e.touches[0].clientX, y: e.touches[0].clientY });
     }
@@ -219,11 +219,15 @@ export function FactoryView({ machines, onSelectMachine, selectedMachineId }: Fa
       e.preventDefault();
       const newDistance = getPinchDistance(e.touches);
       const delta = newDistance / lastPinchDistance;
-      const newScale = Math.min(Math.max(scale * delta, ZOOM.MIN), ZOOM.MAX);
+      const newScale = Math.min(Math.max(scale * delta, 1), ZOOM.MAX);
       setScale(newScale);
+      if (newScale <= 1) {
+        setTranslate({ x: 0, y: 0 });
+        setIsPanning(false);
+      }
       setLastPinchDistance(newDistance);
-    } else if (e.touches.length === 1 && isPanning) {
-      // 팬
+    } else if (e.touches.length === 1 && isPanning && scale > 1) {
+      // 확대 상태에서만 팬
       const deltaX = e.touches[0].clientX - lastPanPoint.x;
       const deltaY = e.touches[0].clientY - lastPanPoint.y;
       setTranslate((prev) => ({ x: prev.x + deltaX, y: prev.y + deltaY }));
@@ -249,7 +253,11 @@ export function FactoryView({ machines, onSelectMachine, selectedMachineId }: Fa
   };
 
   const handleZoomOut = () => {
-    setScale((prev) => Math.max(prev / ZOOM.STEP, ZOOM.MIN));
+    setScale((prev) => {
+      const next = Math.max(prev / ZOOM.STEP, 1);
+      if (next <= 1) setTranslate({ x: 0, y: 0 });
+      return next;
+    });
   };
 
   // 아이템 추가
@@ -510,7 +518,7 @@ export function FactoryView({ machines, onSelectMachine, selectedMachineId }: Fa
   };
 
   return (
-    <div className="bg-gray-100 dark:bg-gray-900 rounded-lg p-4 flex flex-col gap-3 h-full">
+    <div className="bg-gray-100 dark:bg-gray-900 rounded-lg p-4 max-lg:portrait:p-2 flex flex-col gap-3 max-lg:portrait:gap-2 h-full max-lg:portrait:h-auto">
       {/* 상단: 범례 + 편집 버튼 */}
       <div className="shrink-0 flex items-center justify-between">
         <div className="flex items-center gap-6 text-sm">
@@ -546,9 +554,9 @@ export function FactoryView({ machines, onSelectMachine, selectedMachineId }: Fa
       </div>
 
       {/* 본문: 좌측 장비 패널 + 우측 캔버스 */}
-      <div className="flex gap-4 flex-1 min-h-0">
+      <div className="flex gap-4 max-lg:portrait:gap-2 flex-1 min-h-0 max-lg:portrait:flex-col max-lg:portrait:min-h-0">
         {/* 좌측: 선택된 장비 상세 (전체 폭의 1/4) */}
-        <div className="basis-1/4 shrink-0 flex flex-col gap-3 overflow-y-auto min-w-0">
+        <div className="basis-1/4 shrink-0 flex flex-col gap-3 overflow-y-auto min-w-0 max-lg:portrait:order-2 max-lg:portrait:basis-auto max-lg:portrait:w-full max-lg:portrait:overflow-visible">
           {selectedMachine ? (
             <>
               <MachineStatusCard machine={selectedMachine} />
@@ -563,10 +571,11 @@ export function FactoryView({ machines, onSelectMachine, selectedMachineId }: Fa
         </div>
 
         {/* 우측: 캔버스 (h-full로 채우고 SVG viewBox가 내부 비율 처리) */}
-        <div className="flex-1 min-w-0 h-full">
+        <div className="flex-1 min-w-0 h-full max-lg:portrait:order-1 max-lg:portrait:flex-none max-lg:portrait:w-full max-lg:portrait:h-auto"
+          style={{ aspectRatio: `${layout.width} / ${layout.height}` }}>
           <div
             ref={containerRef}
-            className="relative overflow-hidden touch-none h-full"
+            className="relative overflow-hidden touch-none h-full max-lg:portrait:w-full"
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}

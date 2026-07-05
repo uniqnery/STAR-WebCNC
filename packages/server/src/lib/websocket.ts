@@ -10,6 +10,7 @@ import { verifyAccessToken, verifyRefreshToken } from '../auth/jwt';
 import { config } from '../config';
 import { prisma } from './prisma';
 import { UserRole } from '@prisma/client';
+import { recordUserActivity } from './userActivityHistory';
 
 // Client info attached to WebSocket
 export interface WsClient {
@@ -428,15 +429,27 @@ class WebSocketService {
   sendUserActivity(
     machineId: string,
     page: 'scheduler' | 'control',
-    actor: { username: string; role: string } | null,
+    actor: { id?: string; username: string; role: string } | null,
     action: string,
     detail?: string
   ): void {
-    this.broadcastToMachine(machineId, {
-      type: 'user_activity',
-      timestamp: new Date().toISOString(),
-      payload: { machineId, page, actor, action, detail },
-    });
+    const timestamp = new Date().toISOString();
+    void recordUserActivity({ machineId, page, actor, action, detail, createdAt: new Date(timestamp) })
+      .then((item) => {
+        this.broadcastToMachine(machineId, {
+          type: 'user_activity',
+          timestamp: item?.timestamp ?? timestamp,
+          payload: item ?? { machineId, page, actor, action, detail, timestamp },
+        });
+      })
+      .catch((err) => {
+        console.error('[UserActivity] Failed to persist activity:', err);
+        this.broadcastToMachine(machineId, {
+          type: 'user_activity',
+          timestamp,
+          payload: { machineId, page, actor, action, detail, timestamp },
+        });
+      });
   }
 
   /**

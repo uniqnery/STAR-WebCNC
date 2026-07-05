@@ -37,7 +37,7 @@ export function Transfer() {
   const machineId = selectedMachineId || '';
 
   return (
-    <div className="p-6 flex flex-col h-[calc(100vh-64px)] max-lg:portrait:h-auto max-lg:portrait:min-h-[100dvh] max-lg:portrait:p-3">
+    <div className="p-6 lg:p-4 flex flex-col lg:h-full lg:overflow-hidden max-lg:portrait:h-auto max-lg:portrait:min-h-[100dvh] max-lg:portrait:p-3">
       {/* MachineTopBar */}
       <div className="flex-shrink-0">
         <MachineTopBar pageTitle="프로그램 전송" pageId={activeTab === 'transfer' ? 'transfer' : 'backup'} />
@@ -238,6 +238,7 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
     startTransfer,
     uploadToShare,
     deleteFromShare,
+    loadFileHistory,
     openViewer,
   } = useFileStore();
 
@@ -300,7 +301,7 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
 
   const handleShareUpload = useCallback(async (file: File) => {
     try {
-      const res = await fileApi.uploadShareFile(file);
+      const res = await fileApi.uploadShareFile(file, machineId);
       if (res.success && res.data) {
         const d = res.data as { name: string; size: number; modifiedAt: string };
         uploadToShare(d.name, d.size);
@@ -311,7 +312,8 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
       console.error('Upload error:', err);
     }
     void loadShareFiles();
-  }, [uploadToShare, loadShareFiles]);
+    void loadFileHistory(machineId);
+  }, [uploadToShare, loadShareFiles, loadFileHistory, machineId]);
 
   const handleShareDelete = useCallback((fileNames: string[]) => {
     setDeleteConfirm({ fileNames });
@@ -319,9 +321,9 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
 
   const handleConfirmDelete = useCallback(() => {
     if (!deleteConfirm) return;
-    deleteFromShare(deleteConfirm.fileNames);
+    deleteFromShare(deleteConfirm.fileNames, machineId);
     setDeleteConfirm(null);
-  }, [deleteConfirm, deleteFromShare]);
+  }, [deleteConfirm, deleteFromShare, machineId]);
 
   const execDownload = useCallback(async (fileNames: string[]) => {
     for (const fileName of fileNames) {
@@ -419,9 +421,9 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
   );
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 max-lg:portrait:min-h-0">
+    <div className="flex-1 flex flex-col min-h-0 gap-3 max-lg:portrait:min-h-0">
       {/* 2분할 패널: 좌 5 : 우 5 */}
-      <div className="flex-1 grid grid-cols-[1fr_auto_1fr] gap-0 min-h-0 max-lg:portrait:grid-cols-1 max-lg:portrait:grid-rows-[minmax(18rem,auto)_auto_minmax(18rem,auto)] max-lg:portrait:gap-3">
+      <div className="flex-[4_1_0%] grid grid-cols-[1fr_auto_1fr] gap-0 min-h-0 max-lg:portrait:grid-cols-1 max-lg:portrait:grid-rows-[minmax(18rem,auto)_auto_minmax(18rem,auto)] max-lg:portrait:gap-3">
         {/* 좌측: CNC 프로그램 */}
         <FileListPanel
           title={`CNC (${machineId})`}
@@ -468,8 +470,10 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
         />
       </div>
 
-      {/* 전송 큐 - 항상 고정 영역 */}
-      <TransferQueuePanel />
+      {/* 전송 큐 */}
+      <div className="flex-1 min-h-[4rem] overflow-hidden">
+        <TransferQueuePanel machineId={machineId} />
+      </div>
 
       {/* 전송 확인 다이얼로그 */}
       {confirmDialog && (
@@ -672,9 +676,7 @@ function BackupSection({ machineId, canTransfer }: { machineId: string; canTrans
                   </td>
                   <td className="px-4 py-2 text-sm text-gray-400">
                     {backup.status === 'COMPLETED' ? formatFileSize(backup.fileSize) : (
-                      <span className={`text-xs ${backup.status === 'FAILED' ? 'text-red-400' : 'text-yellow-400'}`}>
-                        {backup.status === 'FAILED' ? '실패' : '처리 중...'}
-                      </span>
+                      <BackupProgressStatus status={backup.status} />
                     )}
                   </td>
                   <td className="px-4 py-2 text-sm text-gray-400">
@@ -717,6 +719,24 @@ function BackupTypeBadge({ type }: { type: string }) {
     <span className={`px-2 py-1 rounded text-xs font-medium ${styles[type] || styles.FULL}`}>
       {type}
     </span>
+  );
+}
+
+function BackupProgressStatus({ status }: { status: BackupRecord['status'] }) {
+  if (status === 'FAILED') {
+    return <span className="text-xs text-red-400">실패</span>;
+  }
+
+  return (
+    <div className="min-w-[7rem] max-w-[10rem]">
+      <div className="flex items-center justify-between text-[11px] text-yellow-400 mb-1">
+        <span>처리 중</span>
+        <span>{status}</span>
+      </div>
+      <div className="h-1.5 rounded-full bg-gray-700 overflow-hidden">
+        <div className="h-full w-2/3 rounded-full bg-yellow-500 animate-pulse" />
+      </div>
+    </div>
   );
 }
 

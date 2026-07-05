@@ -145,7 +145,7 @@ export function Dashboard() {
       </div>
 
       {/* Summary Cards */}
-      <div className={`grid grid-cols-2 md:grid-cols-5 gap-4 ${viewMode === 'factory' ? 'lg:shrink-0 mb-3' : 'mb-6'}`}>
+      <div className={`grid grid-cols-5 md:grid-cols-5 gap-1.5 md:gap-4 ${viewMode === 'factory' ? 'lg:shrink-0 mb-3' : 'mb-6'}`}>
         <SummaryCard label="전체" value={stats.total} color="bg-slate-500" />
         <SummaryCard label="가동중" value={stats.running} color={STATUS_COLORS.running} />
         <SummaryCard label="대기" value={stats.idle} color={STATUS_COLORS.idle} />
@@ -177,14 +177,14 @@ interface SummaryCardProps {
 
 function SummaryCard({ label, value, color }: SummaryCardProps) {
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow">
-      <div className="flex items-center gap-3">
-        <div className={`w-3 h-10 rounded ${color}`} />
-        <div>
-          <div className="text-2xl font-bold text-gray-900 dark:text-white">
+    <div className="bg-white dark:bg-gray-800 rounded-lg p-4 max-lg:p-2 shadow">
+      <div className="flex items-center gap-3 max-lg:gap-1.5">
+        <div className={`w-3 h-10 max-lg:w-1.5 max-lg:h-8 rounded ${color}`} />
+        <div className="min-w-0">
+          <div className="text-2xl max-lg:text-base font-bold text-gray-900 dark:text-white leading-tight">
             {value}
           </div>
-          <div className="text-sm text-gray-500">{label}</div>
+          <div className="text-sm max-lg:text-[10px] text-gray-500 truncate">{label}</div>
         </div>
       </div>
     </div>

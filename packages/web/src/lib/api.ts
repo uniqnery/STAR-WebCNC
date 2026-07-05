@@ -522,9 +522,10 @@ export const fileApi = {
     api.get('/api/files/share'),
 
   // 외부 PC → share 폴더 파일 업로드 (multipart)
-  uploadShareFile: (file: File) => {
+  uploadShareFile: (file: File, machineId?: string) => {
     const form = new FormData();
     form.append('file', file, file.name);
+    if (machineId) form.append('machineId', machineId);
     return api.postForm('/api/files/share/upload', form);
   },
 
@@ -549,10 +550,19 @@ export const fileApi = {
     api.get(`/api/transfer/${machineId}/preview/${programNo}?path=${path}`),
 
   // 파일 전송 (PC ↔ CNC)
+  getFileHistory: (machineId: string, limit = 100) =>
+    api.get(`/api/files/history?machineId=${encodeURIComponent(machineId)}&limit=${limit}`),
+
   transfer: (machineId: string, direction: string, fileNames: string[], conflictPolicy: string, path = 1) =>
     api.post('/api/files/transfer', { machineId, direction, fileNames, conflictPolicy, path }),
 };
 
+
+// User Activity History API
+export const userActivityApi = {
+  getHistory: (machineId: string, page: 'control' | 'scheduler', limit = 100) =>
+    api.get(`/api/user-activities?machineId=${encodeURIComponent(machineId)}&page=${encodeURIComponent(page)}&limit=${limit}`),
+};
 // Template API (HQ_ENGINEER/ADMIN 전용 - 장비 템플릿 관리)
 export const templateApi = {
   getAll: () =>

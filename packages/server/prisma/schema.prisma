@@ -30,7 +30,9 @@ model User {
   refreshTokens      RefreshToken[]
   auditLogs          AuditLog[]
   controlLocks       ControlLockLog[]
-  acknowledgedAlarms Alarm[]   @relation("AcknowledgedAlarms")
+  acknowledgedAlarms      Alarm[]                @relation("AcknowledgedAlarms")
+  fileOperationHistories FileOperationHistory[]
+  userActivityHistories UserActivityHistory[]
 
   @@map("users")
 }
@@ -92,7 +94,9 @@ model Machine {
   alarms           Alarm[]
   commandLogs      CommandLog[]
   schedulerRows    SchedulerRow[]
-  productionLogs   ProductionLog[]
+  productionLogs         ProductionLog[]
+  fileOperationHistories FileOperationHistory[]
+  userActivityHistories UserActivityHistory[]
 
   @@map("machines")
 }
@@ -280,6 +284,57 @@ model AuditLog {
   @@map("audit_logs")
 }
 
+
+model FileOperationHistory {
+  id             String    @id @default(uuid())
+  machineDbId    String?   @map("machine_id")
+  machineCode    String?   @map("machine_code")
+  operationType  String    @map("operation_type")
+  target         String
+  fileName       String    @map("file_name")
+  fileNames      Json?     @map("file_names")
+  path           String?
+  status         String
+  correlationId  String?   @map("correlation_id")
+  userId         String    @map("user_id")
+  username       String
+  errorMessage   String?   @map("error_message")
+  fileSizeBefore Int?      @map("file_size_before")
+  fileSizeAfter  Int?      @map("file_size_after")
+  startedAt      DateTime  @default(now()) @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  machine Machine? @relation(fields: [machineDbId], references: [id], onDelete: SetNull)
+  user    User     @relation(fields: [userId], references: [id])
+
+  @@index([machineCode, startedAt])
+  @@index([machineDbId, startedAt])
+  @@index([correlationId])
+  @@index([userId, startedAt])
+  @@map("file_operation_histories")
+}
+model UserActivityHistory {
+  id            String   @id @default(uuid())
+  machineDbId   String?  @map("machine_id")
+  machineCode   String   @map("machine_code")
+  page          String
+  actorUserId   String?  @map("actor_user_id")
+  actorUsername String?  @map("actor_username")
+  actorRole     String?  @map("actor_role")
+  action        String
+  detail        String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  machine Machine? @relation(fields: [machineDbId], references: [id], onDelete: SetNull)
+  actor   User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([machineCode, page, createdAt])
+  @@index([machineDbId, page, createdAt])
+  @@index([actorUserId, createdAt])
+  @@map("user_activity_histories")
+}
 model ControlLockLog {
   id          String   @id @default(uuid())
   machineId   String   @map("machine_id")

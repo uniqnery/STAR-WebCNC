@@ -580,11 +580,19 @@ public class FocasDataReader
     /// MDI 버퍼에 프로그램 기록 (cnc_wrmdiprog)
     /// program: "G0 X40.0 ; G0 X20.0" 형식 — ';' → '\n' 변환 후 CNC에 전송
     /// </summary>
-    public bool WriteMdiProgram(string program)
+    public bool WriteMdiProgram(string program, int pathNo = 1)
     {
         if (!_connection.IsConnected) return false;
+        pathNo = Math.Clamp(pathNo, 1, 3);
         try
         {
+            short sp = Focas1.cnc_setpath(_connection.Handle, (short)pathNo);
+            if (sp != Focas1.EW_OK)
+            {
+                _logger.LogWarning("WriteMdiProgram cnc_setpath({Path}) failed: EW={Ret}", pathNo, sp);
+                return false;
+            }
+
             var lines = program
                 .Replace(";", "\n")
                 .Split('\n')
@@ -600,16 +608,20 @@ public class FocasDataReader
             short ret = Focas1.cnc_wrmdiprog(_connection.Handle, (short)data.Length, data);
             if (ret != Focas1.EW_OK)
             {
-                _logger.LogWarning("cnc_wrmdiprog failed: EW={Ret}", ret);
+                _logger.LogWarning("cnc_wrmdiprog failed path={Path}: EW={Ret}", pathNo, ret);
                 return false;
             }
-            _logger.LogInformation("WriteMdiProgram OK: [{Lines}]", string.Join(" ; ", lines));
+            _logger.LogInformation("WriteMdiProgram OK path={Path}: [{Lines}]", pathNo, string.Join(" ; ", lines));
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "WriteMdiProgram error");
+            _logger.LogError(ex, "WriteMdiProgram error path={Path}", pathNo);
             return false;
+        }
+        finally
+        {
+            try { if (pathNo > 1) Focas1.cnc_setpath(_connection.Handle, 1); } catch { }
         }
     }
 

@@ -26,6 +26,7 @@ import workOrderRoutes from './routes/workOrder';
 import auditRoutes from './routes/audit';
 import templateRoutes from './routes/templates';
 import fileRoutes from './routes/files';
+import userActivityRoutes from './routes/userActivities';
 import diagnosticsRoutes from './routes/diagnostics';
 import settingsRoutes from './routes/settings';
 import cameraRoutes from './routes/camera';
@@ -40,6 +41,7 @@ import { redisService, REDIS_KEYS } from './lib/redis';
 import { commandWaiter } from './lib/commandWaiter';
 import { prisma } from './lib/prisma';
 import { syncTemplatesFromFiles } from './lib/templateSync';
+import { updateFileOperationByCorrelation } from './lib/fileOperationHistory';
 
 // Express App
 const app = express();
@@ -51,6 +53,137 @@ function normalizeDownloadedProgramFileName(fileName: string, pathNo: number): s
   const parsed = path.parse(baseName);
   const name = parsed.name || baseName;
   return `${name}.P-2`;
+}
+function readStringField(source: unknown, key: string): string | undefined {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return undefined;
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function readNumberField(source: unknown, key: string): number | undefined {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return undefined;
+  const value = (source as Record<string, unknown>)[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  return undefined;
+}
+
+const MODE_PANEL_KEY_IDS = new Set(['EDIT', 'MEMORY', 'MEM', 'MDI', 'JOG', 'HANDLE', 'DNC', 'TAPE']);
+
+function buildControlActivity(command: string, params: unknown, result: unknown): { action: string; detail?: string } | null {
+  const normalized = command.toUpperCase();
+
+  if (normalized === 'PMC_WRITE') {
+    const label = readStringField(params, 'panelLabel')
+      ?? readStringField(params, 'keyLabel')
+      ?? readStringField(params, 'label')
+      ?? readStringField(result, 'address')
+      ?? '조작';
+    const keyId = readStringField(params, 'panelKeyId')?.toUpperCase();
+    const groupName = readStringField(params, 'panelGroupName')?.toUpperCase();
+    const address = readStringField(params, 'address') ?? readStringField(result, 'address');
+    const holdMs = readNumberField(params, 'holdMs') ?? readNumberField(result, 'holdMs');
+    const isModeCommand = groupName === 'MODE' || (keyId ? MODE_PANEL_KEY_IDS.has(keyId) : false);
+
+    const detailParts = [address, holdMs !== undefined ? `hold ${holdMs}ms` : null].filter(Boolean);
+    return {
+      action: isModeCommand ? `${label} 모드 조작 실행` : `${label} 조작 실행`,
+      detail: detailParts.length > 0 ? detailParts.join(' / ') : undefined,
+    };
+  }
+
+  if (normalized === 'WRITE_MDI') {
+    const program = readStringField(params, 'program') ?? '';
+    const pathNo = readNumberField(params, 'path') ?? readNumberField(result, 'path');
+    const compactProgram = program.replace(/\s+/g, ' ').trim();
+    const preview = compactProgram.length > 80 ? `${compactProgram.slice(0, 80)}...` : compactProgram;
+    const detailParts = [pathNo ? `PATH${pathNo}` : null, preview || null].filter(Boolean);
+    return {
+      action: 'MDI 프로그램 입력 실행',
+      detail: detailParts.length > 0 ? detailParts.join(' / ') : undefined,
+    };
+  }
+
+  if (normalized === 'SEARCH_PROGRAM') {
+    const programNo = readNumberField(params, 'programNo') ?? readNumberField(result, 'programNo');
+    const pathNo = readNumberField(params, 'path') ?? readNumberField(result, 'path');
+    const detailParts = [programNo ? `O${String(programNo).padStart(4, '0')}` : null, pathNo ? `PATH${pathNo}` : null].filter(Boolean);
+    return {
+      action: 'EDIT 프로그램 선택 실행',
+      detail: detailParts.length > 0 ? detailParts.join(' / ') : undefined,
+    };
+  }
+
+  if (normalized === 'UPLOAD_PROGRAM') {
+    const fileName = readStringField(params, 'fileName') ?? readStringField(result, 'fileName');
+    const pathNo = readNumberField(params, 'path') ?? readNumberField(result, 'path');
+    const detailParts = [fileName, pathNo ? `PATH${pathNo}` : null].filter(Boolean);
+    return {
+      action: 'EDIT 프로그램 전송 실행',
+      detail: detailParts.length > 0 ? detailParts.join(' / ') : undefined,
+    };
+  }
+
+  const actionLabel: Record<string, string> = {
+    START: '시작 조작 실행',
+    STOP: '정지 조작 실행',
+    RESET: 'RESET 조작 실행',
+    CYCLE_START: 'CYCLE START 조작 실행',
+    FEED_HOLD: 'FEED HOLD 조작 실행',
+    WRITE_MACRO: '매크로 쓰기 조작 실행',
+  };
+
+  return actionLabel[normalized] ? { action: actionLabel[normalized] } : null;
+}
+
+async function updateCommandAuditResult(correlationId: string, status: string, errorMessage?: string | null): Promise<void> {
+  try {
+    await prisma.auditLog.updateMany({
+      where: { params: { path: ['correlationId'], equals: correlationId } },
+      data: {
+        result: status === 'success' ? 'success' : 'failure',
+        errorMsg: status === 'success' ? null : errorMessage ?? null,
+      },
+    });
+  } catch (err) {
+    console.error('[Audit] Failed to update command audit result:', err);
+  }
+}
+
+async function emitSuccessfulCommandActivity(
+  machineId: string,
+  correlationId: string,
+  status: string,
+  result: unknown
+): Promise<void> {
+  if (status !== 'success') return;
+
+  try {
+    const commandLog = await prisma.commandLog.findFirst({
+      where: { correlationId },
+      include: { machine: { select: { machineId: true } } },
+    });
+    if (!commandLog) return;
+
+    const activity = buildControlActivity(commandLog.command, commandLog.params, result);
+    if (!activity) return;
+
+    const auditLog = await prisma.auditLog.findFirst({
+      where: { params: { path: ['correlationId'], equals: correlationId } },
+      include: { user: { select: { username: true, role: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    wsService.sendUserActivity(
+      commandLog.machine?.machineId ?? machineId,
+      'control',
+      auditLog?.user ? { username: auditLog.user.username, role: auditLog.user.role } : null,
+      activity.action,
+      activity.detail,
+    );
+  } catch (err) {
+    console.error('[UserActivity] Failed to emit command activity:', err);
+  }
 }
 
 // Middleware
@@ -128,6 +261,7 @@ app.use('/api/templates', templateRoutes);
 
 // File Management Routes (DNC 저장소 / 공유 폴더)
 app.use('/api/files', fileRoutes);
+app.use('/api/user-activities', userActivityRoutes);
 
 // Diagnostics Routes (시스템 상태 점검)
 app.use('/api/diagnostics', diagnosticsRoutes);
@@ -243,7 +377,20 @@ function setupMqttHandlers(): void {
     }
 
     // ── 2. wait=true 요청 대기 중인 HTTP 핸들러에 알림 ───────────
+    if (correlationId.startsWith('xfer-')) {
+      try {
+        await updateFileOperationByCorrelation(
+          correlationId,
+          status === 'success' ? 'SUCCESS' : 'FAILURE',
+          errorMessage ?? errorCode ?? null,
+        );
+      } catch (err) {
+        console.error('[Files] Failed to update file operation history:', err);
+      }
+    }
     commandWaiter.notify(correlationId, { status, result, errorCode, errorMessage });
+    await updateCommandAuditResult(correlationId, status, errorMessage ?? errorCode ?? null);
+    await emitSuccessfulCommandActivity(machineId, correlationId, status, result);
 
     // ── 3. DOWNLOAD_PROGRAM 결과: share/ 폴더에 파일 저장 ────────
     // preview-로 시작하는 correlationId는 더블클릭 미리보기용 — share/ 저장 제외

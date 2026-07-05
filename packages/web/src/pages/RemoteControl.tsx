@@ -84,9 +84,6 @@ export function RemoteControl() {
   const [showLockPopup, setShowLockPopup] = useState(false);
   const warningTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  // 조작 가능 조건: 인터록 + 제어권 (TODO: interlockSatisfied 재활성화 — 실기기 인터락 검증 후)
-  const canOperate = hasControlLock; // && interlockSatisfied;
-
   // 램프 상태: lampAddr이 있으면 telemetry.pmcBits 기반, 없으면 mode/runState fallback
   useEffect(() => {
     const states: Record<string, boolean> = {};
@@ -144,6 +141,8 @@ export function RemoteControl() {
       return;
     }
 
+    const group = panelGroups.find((g) => g.keys.some((k) => k.id === key.id));
+
     if (warningTimers.current[key.id]) {
       clearTimeout(warningTimers.current[key.id]);
       delete warningTimers.current[key.id];
@@ -167,6 +166,9 @@ export function RemoteControl() {
         address: key.reqAddr,
         value: 1,
         holdMs: key.timing.holdMs,
+        panelKeyId: key.id,
+        panelLabel: key.label,
+        panelGroupName: group?.name,
       });
 
       addFocasEvent(selectedMachineId, {
@@ -190,11 +192,11 @@ export function RemoteControl() {
         timestamp: new Date().toISOString(),
       });
     }
-  }, [selectedMachineId, canOperate, addFocasEvent, setWarning]);
+  }, [selectedMachineId, hasControlLock, panelGroups, addFocasEvent, setWarning]);
 
   return (
     <div
-      className="p-6 lg:p-4 space-y-4 lg:space-y-0 lg:gap-3 lg:h-full lg:flex lg:flex-col lg:overflow-hidden max-lg:landscape:p-1 max-lg:landscape:space-y-1 max-lg:landscape:pl-7 max-lg:portrait:overflow-x-hidden"
+      className="p-6 lg:p-4 space-y-4 lg:space-y-0 lg:gap-3 lg:h-full lg:flex lg:flex-col lg:overflow-hidden max-lg:landscape:h-[100dvh] max-lg:landscape:flex max-lg:landscape:flex-col max-lg:landscape:overflow-hidden max-lg:landscape:p-1 max-lg:landscape:space-y-1 max-lg:landscape:pl-7 max-lg:portrait:overflow-x-hidden"
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >
@@ -215,7 +217,7 @@ export function RemoteControl() {
               <button
                 key={t}
                 onClick={() => setMobileTab(t)}
-                className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                className={`flex-1 py-2 max-lg:landscape:py-1 text-xs max-lg:landscape:text-[10px] font-medium transition-colors ${
                   mobileTab === t
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
@@ -227,10 +229,10 @@ export function RemoteControl() {
           </div>
 
           {/* PC: lg:grid-cols-2 / 모바일 landscape: grid-cols-2 */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 max-lg:landscape:grid-cols-2 gap-4 lg:flex-1 lg:min-h-0 max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 max-lg:portrait:overflow-x-hidden">
+          <div className="grid grid-cols-1 lg:grid-cols-2 max-lg:landscape:grid-cols-2 gap-4 max-lg:landscape:gap-1 lg:flex-[4_1_0%] lg:min-h-0 max-lg:landscape:flex-1 max-lg:landscape:min-h-0 max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 max-lg:portrait:overflow-x-hidden">
             {/* 좌측: NC 모니터 + 알람 + 탭 바 */}
-            <div className={`flex flex-col gap-2 max-lg:portrait:gap-1 overflow-hidden max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 lg:h-full max-lg:portrait:h-auto max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'monitor' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
-              <div className="flex-1 min-h-0 max-lg:portrait:flex-none lg:flex-none lg:shrink-0">
+            <div className={`flex flex-col gap-2 max-lg:portrait:gap-1 overflow-hidden max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 lg:h-full max-lg:portrait:h-auto max-lg:landscape:h-full max-lg:landscape:min-h-0 lg:flex max-lg:landscape:flex ${mobileTab === 'monitor' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
+              <div className="flex-1 min-h-0 max-lg:portrait:flex-none max-lg:landscape:flex-none lg:flex-none lg:shrink-0">
                 <NCMonitor
                   path1={telemetry?.path1}
                   path2={telemetry?.path2}
@@ -242,14 +244,14 @@ export function RemoteControl() {
                   hideTabs
                 />
               </div>
-              <div className="shrink-0 h-24 lg:h-auto lg:flex-1 lg:min-h-0"><AlarmStrip alarms={activeAlarms} pmcMessages={activePmcMessages} /></div>
+              <div className="shrink-0 h-24 max-lg:landscape:h-12 lg:h-auto lg:flex-1 lg:min-h-0"><AlarmStrip alarms={activeAlarms} pmcMessages={activePmcMessages} /></div>
               {/* NC 탭 바 */}
-              <div className="shrink-0 flex rounded-lg overflow-hidden border border-gray-700">
+              <div className="shrink-0 flex rounded-lg overflow-hidden border border-gray-700 max-lg:landscape:h-7">
                 {TABS.map((tab) => (
                   <button
                     key={tab.id}
                     onClick={() => setMonitorTab(tab.id)}
-                    className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                    className={`flex-1 py-2 max-lg:landscape:py-1 text-xs max-lg:landscape:text-[10px] font-medium transition-colors ${
                       monitorTab === tab.id
                         ? 'bg-blue-600 text-white'
                         : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
@@ -266,8 +268,8 @@ export function RemoteControl() {
             </div>
 
             {/* 우측: 오퍼레이션 패널 */}
-            <div className={`flex flex-col gap-2 max-lg:portrait:gap-1 max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 lg:h-full max-lg:portrait:h-auto max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'panel' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
-              <div className="bg-gray-800 text-white rounded-lg shadow p-4 max-lg:p-2 flex flex-col lg:flex-1 lg:min-h-0 max-lg:landscape:flex-1 max-lg:landscape:min-h-0 max-lg:portrait:flex-none max-lg:portrait:max-h-[38rem] max-lg:portrait:overflow-hidden">
+            <div className={`flex flex-col gap-2 max-lg:portrait:gap-1 max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 lg:h-full max-lg:portrait:h-auto max-lg:landscape:h-full max-lg:landscape:min-h-0 lg:flex max-lg:landscape:flex ${mobileTab === 'panel' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
+              <div className="bg-gray-800 text-white rounded-lg shadow p-4 max-lg:p-2 max-lg:landscape:p-1 flex flex-col lg:flex-1 lg:min-h-0 max-lg:landscape:flex-1 max-lg:landscape:min-h-0 max-lg:portrait:flex-none max-lg:portrait:max-h-[38rem] max-lg:portrait:overflow-hidden">
                 <OperationPanel
                   groups={panelGroups}
                   lampStates={lampStates}
@@ -287,8 +289,8 @@ export function RemoteControl() {
             </div>
           </div>
 
-          {/* 이벤트 로그 — PC: 고정 h-40, 모바일 landscape: h-40, 모바일 portrait: 숨김(각 탭에 포함) */}
-          <div className="max-lg:portrait:hidden max-lg:landscape:h-40 max-lg:landscape:shrink-0 lg:shrink-0 lg:h-40">
+          {/* 이벤트 로그 — PC: 나머지 공간 채움(최소 5rem), 모바일 portrait: 숨김 */}
+          <div className="max-lg:hidden lg:flex-1 lg:min-h-[4rem] lg:overflow-hidden">
             <FocasEventLog events={focasEvents} userActivityContent={<UserActivityFeed machineId={selectedMachineId || ''} page="control" />} />
           </div>
 
@@ -341,7 +343,7 @@ function OperationPanel({
     const justifyCls = KEYS_JUSTIFY_CLS[group.nameAlign || 'left'];
     return (
       <GroupSection key={group.id} group={group}>
-        <div className={`flex flex-wrap gap-1.5 lg:gap-2 ${justifyCls}`}>
+        <div className={`flex flex-wrap gap-1.5 max-lg:landscape:gap-1 lg:gap-2 ${justifyCls}`}>
           {group.keys.map((key) => (
             <PmcButton
               key={key.id}
@@ -361,17 +363,17 @@ function OperationPanel({
   };
 
   return (
-    <div className="flex flex-col gap-2 lg:gap-3 h-full overflow-y-auto px-2 lg:px-3 py-1 lg:py-2">
+    <div className="flex flex-col gap-2 max-lg:landscape:gap-1 lg:gap-3 h-full overflow-y-auto px-2 max-lg:landscape:px-1 lg:px-3 py-1 max-lg:landscape:py-0 lg:py-2">
       {rows.map((row, ri) => (
         <div key={row[0].id}>
-          {ri > 0 && <div className="border-t border-gray-700 mb-2 lg:mb-3" />}
+          {ri > 0 && <div className="border-t border-gray-700 mb-2 max-lg:landscape:mb-1 lg:mb-3" />}
           {ri === lastRowIdx && <div className="flex-1 min-h-1 lg:min-h-2" />}
           {row.length === 1 ? (
             renderGroup(row[0])
           ) : (
-            <div className="flex items-start gap-3 lg:gap-4">
+            <div className="flex items-start gap-3 max-lg:landscape:gap-1.5 lg:gap-4">
               {row.map((group, gi) => (
-                <div key={group.id} className="flex items-start gap-3 lg:gap-4">
+                <div key={group.id} className="flex items-start gap-3 max-lg:landscape:gap-1.5 lg:gap-4">
                   {gi > 0 && <div className="self-stretch w-px bg-gray-700" />}
                   {renderGroup(group)}
                 </div>
@@ -409,7 +411,8 @@ function GroupSection({ group, children }: { group: PanelGroup; children: React.
 
   return (
     <div>
-      <div className={`${sizeCls} ${weightCls} ${colorCls} ${alignCls} mb-1 tracking-widest uppercase`}>
+      <div className={`${sizeCls} ${weightCls} ${colorCls} ${alignCls} mb-1 max-lg:landscape:mb-0.5 tracking-widest uppercase`}>
+
         {group.name}
       </div>
       {children}
@@ -487,22 +490,24 @@ function PmcButton({ panelKey, lampOn, warning, disabled, onPressStart, onPressP
 
   const c = colorConfig[panelKey.color || 'gray'];
 
-  const sizeConfig: Record<string, { w: string; h: string; font: string }> = {
-    small:  { w: 'w-[3.5rem]',   h: 'h-[4.375rem]', font: 'text-[0.5625rem]' },
-    normal: { w: 'w-[4.375rem]', h: 'h-[5.375rem]', font: 'text-[0.625rem]'  },
-    wide:   { w: 'w-[6.875rem]', h: 'h-[5.375rem]', font: 'text-[0.625rem]'  },
-    large:  { w: 'w-[5rem]',     h: 'h-[6rem]',     font: 'text-[0.6875rem]' },
+  const sizeConfig: Record<string, { w: string; h: string; font: string; landscape: string }> = {
+    small:  { w: 'w-[3.5rem]',   h: 'h-[4.375rem]', font: 'text-[0.5625rem]', landscape: 'max-lg:landscape:w-[2.75rem] max-lg:landscape:h-[3.125rem] max-lg:landscape:text-[0.5rem]' },
+    normal: { w: 'w-[4.375rem]', h: 'h-[5.375rem]', font: 'text-[0.625rem]',  landscape: 'max-lg:landscape:w-[3.375rem] max-lg:landscape:h-[3.75rem] max-lg:landscape:text-[0.5rem]' },
+    wide:   { w: 'w-[6.875rem]', h: 'h-[5.375rem]', font: 'text-[0.625rem]',  landscape: 'max-lg:landscape:w-[5rem] max-lg:landscape:h-[3.75rem] max-lg:landscape:text-[0.5rem]' },
+    large:  { w: 'w-[5rem]',     h: 'h-[6rem]',     font: 'text-[0.6875rem]', landscape: 'max-lg:landscape:w-[3.75rem] max-lg:landscape:h-[4.125rem] max-lg:landscape:text-[0.5625rem]' },
   };
   const sz = sizeConfig[panelKey.size] || sizeConfig.normal;
   const btnW = sz.w;
   const btnH = sz.h;
   const fontSize = sz.font;
+  const landscapeSize = sz.landscape;
+  const landscapeFont = panelKey.size === 'large' ? 'max-lg:landscape:!text-[0.5625rem]' : 'max-lg:landscape:!text-[0.5rem]';
 
   return (
     <button
       {...handlers}
       disabled={disabled}
-      className={`relative ${btnW} ${btnH} rounded-lg border transition-all select-none touch-none
+      className={`relative ${btnW} ${btnH} ${landscapeSize} rounded-lg max-lg:landscape:rounded-md border transition-all select-none touch-none
         flex flex-col items-center justify-center shrink-0
         ${disabled ? 'opacity-35 cursor-not-allowed' : 'cursor-pointer'}
         ${isPressed
@@ -512,14 +517,14 @@ function PmcButton({ panelKey, lampOn, warning, disabled, onPressStart, onPressP
       style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none' }}
     >
       {panelKey.hasLamp && (
-        <span className={`absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full border ${
+        <span className={`absolute top-1.5 right-1.5 max-lg:landscape:top-1 max-lg:landscape:right-1 w-2.5 h-2.5 max-lg:landscape:w-2 max-lg:landscape:h-2 rounded-full border ${
           lampOn
             ? 'bg-green-400 border-green-300 shadow-[0_0_8px_rgba(74,222,128,0.8)]'
             : 'bg-gray-800 border-gray-600'
         }`} />
       )}
 
-      <span className={`${c.text} ${fontSize} font-semibold leading-tight text-center drop-shadow-sm`}>
+      <span className={`${c.text} ${fontSize} ${landscapeFont} max-lg:landscape:!leading-[0.9] font-semibold leading-tight text-center drop-shadow-sm`}>
         {panelKey.label}
       </span>
 

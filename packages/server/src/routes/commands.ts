@@ -64,7 +64,7 @@ router.post('/:machineId',
     }
 
     // Check control lock for control commands
-    const controlCommands = ['WRITE_MACRO', 'START', 'STOP', 'RESET', 'CYCLE_START', 'FEED_HOLD'];
+    const controlCommands = ['WRITE_MACRO', 'PMC_WRITE', 'WRITE_MDI', 'SEARCH_PROGRAM', 'START', 'STOP', 'RESET', 'CYCLE_START', 'FEED_HOLD'];
     if (controlCommands.includes(command.toUpperCase())) {
       const lock = await redisService.getControlLock(machine.machineId);
       if (!lock || lock.ownerId !== req.user!.id) {

@@ -9,6 +9,8 @@ import path from 'path';
 import multer from 'multer';
 import { authenticate } from '../middleware/auth';
 import { mqttService, TOPICS } from '../lib/mqtt';
+import { prisma } from '../lib/prisma';
+import { listFileOperationHistory, recordFileOperation } from '../lib/fileOperationHistory';
 import { createAuditLog } from './audit';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -39,6 +41,19 @@ interface FileEntry {
   programNo?: string;
 }
 
+async function getFileSize(filePath: string): Promise<number | null> {
+  try {
+    return (await fs.stat(filePath)).size;
+  } catch {
+    return null;
+  }
+}
+
+async function findMachine(machineId?: string | null): Promise<{ id: string; machineId: string } | null> {
+  if (!machineId || !isSafe(machineId)) return null;
+  return prisma.machine.findUnique({ where: { machineId }, select: { id: true, machineId: true } });
+}
+
 async function readDirEntries(dir: string): Promise<FileEntry[]> {
   try {
     await ensureDir(dir);
@@ -63,6 +78,16 @@ async function readDirEntries(dir: string): Promise<FileEntry[]> {
 
 // ── 인증 전용 미들웨어 ─────────────────────────────────────────
 router.use(authenticate);
+
+router.get('/history', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { machineId, limit } = req.query as Record<string, string>;
+    const items = await listFileOperationHistory(machineId || undefined, Number(limit ?? 100));
+    return res.json({ success: true, data: { items } });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ─────────────────────────────────────────────────────────────
 // GET /api/files/share
@@ -104,6 +129,20 @@ router.post('/share/upload', upload.single('file'), async (req: Request, res: Re
       params: { size: file.size },
       result: 'success',
       ipAddress: req.ip ?? 'unknown',
+    });
+
+    const machine = await findMachine((req.body as { machineId?: string }).machineId);
+    await recordFileOperation({
+      machineDbId: machine?.id ?? null,
+      machineCode: machine?.machineId ?? null,
+      operationType: 'UPLOAD_SHARE',
+      target: 'TRANSFER_SHARE',
+      fileName: file.originalname,
+      fileNames: [file.originalname],
+      status: 'SUCCESS',
+      userId: req.user!.id,
+      username: req.user!.username,
+      fileSizeAfter: file.size,
     });
 
     const stat = await fs.stat(filePath);
@@ -194,6 +233,7 @@ router.put('/write', async (req: Request, res: Response, next: NextFunction) => 
       return res.status(400).json({ success: false, error: { code: 'INVALID_ROOT', message: '저장소 유형이 유효하지 않습니다' } });
     }
 
+    const beforeSize = await getFileSize(filePath);
     await fs.writeFile(filePath, content ?? '', 'utf-8');
 
     await createAuditLog({
@@ -208,6 +248,20 @@ router.put('/write', async (req: Request, res: Response, next: NextFunction) => 
     });
 
     const stat = await fs.stat(filePath);
+    const machine = await findMachine(machineId);
+    await recordFileOperation({
+      machineDbId: machine?.id ?? null,
+      machineCode: machine?.machineId ?? null,
+      operationType: root === 'TRANSFER_SHARE' ? 'EDIT_SHARE' : 'EDIT_REPO',
+      target: root,
+      fileName,
+      fileNames: [fileName],
+      status: 'SUCCESS',
+      userId: req.user!.id,
+      username: req.user!.username,
+      fileSizeBefore: beforeSize,
+      fileSizeAfter: stat.size,
+    });
     return res.json({ success: true, data: { fileName, size: stat.size, modifiedAt: stat.mtime.toISOString() } });
   } catch (err) {
     next(err);
@@ -251,6 +305,22 @@ router.post('/delete', async (req: Request, res: Response, next: NextFunction) =
       }
     }
 
+    const machine = await findMachine(machineId);
+    for (const result of results) {
+      await recordFileOperation({
+        machineDbId: machine?.id ?? null,
+        machineCode: machine?.machineId ?? null,
+        operationType: root === 'TRANSFER_SHARE' ? 'DELETE_SHARE' : 'DELETE_REPO',
+        target: root,
+        fileName: result.name,
+        fileNames: [result.name],
+        status: result.deleted ? 'SUCCESS' : 'FAILURE',
+        errorMessage: result.deleted ? null : 'File delete failed',
+        userId: req.user!.id,
+        username: req.user!.username,
+      });
+    }
+
     await createAuditLog({
       userId: req.user!.id,
       userRole: req.user!.role,
@@ -287,27 +357,61 @@ router.post('/transfer', async (req: Request, res: Response, next: NextFunction)
     };
 
     if (!machineId || !isSafe(machineId)) {
-      return res.status(400).json({ success: false, error: { code: 'INVALID_MACHINE', message: '장비 ID가 유효하지 않습니다' } });
+      return res.status(400).json({ success: false, error: { code: 'INVALID_MACHINE', message: 'Invalid machine ID' } });
     }
     if (!Array.isArray(fileNames) || fileNames.length === 0) {
-      return res.status(400).json({ success: false, error: { code: 'NO_FILES', message: '전송할 파일이 없습니다' } });
+      return res.status(400).json({ success: false, error: { code: 'NO_FILES', message: 'No files selected for transfer' } });
+    }
+
+    const machine = await findMachine(machineId);
+    if (!machine) {
+      return res.status(404).json({ success: false, error: { code: 'MACHINE_NOT_FOUND', message: 'Machine not found' } });
     }
 
     const correlationId = `xfer-${Date.now()}`;
     const jobs: Array<{ fileName: string; correlationId: string }> = [];
 
     if (direction === 'PC_TO_CNC') {
-      // Share 폴더에서 파일 읽어 MQTT로 Agent에 전송
       for (const fileName of fileNames) {
         if (!isSafe(fileName)) continue;
+        const jobCid = `${correlationId}-${fileName}`;
         const filePath = path.join(SHARE_DIR, fileName);
         let content = '';
         try {
           content = await fs.readFile(filePath, 'utf-8');
         } catch {
-          // 파일 없으면 빈 내용으로 명령 발송
+          await recordFileOperation({
+            machineDbId: machine.id,
+            machineCode: machine.machineId,
+            operationType: 'TRANSFER_PC_TO_CNC',
+            target: 'CNC_LOCAL',
+            fileName,
+            fileNames: [fileName],
+            path: `path${pathNo}`,
+            status: 'FAILURE',
+            correlationId: jobCid,
+            userId: req.user!.id,
+            username: req.user!.username,
+            errorMessage: 'Source file not found in PC shared storage',
+          });
+          jobs.push({ fileName, correlationId: jobCid });
+          continue;
         }
-        const jobCid = `${correlationId}-${fileName}`;
+
+        await recordFileOperation({
+          machineDbId: machine.id,
+          machineCode: machine.machineId,
+          operationType: 'TRANSFER_PC_TO_CNC',
+          target: 'CNC_LOCAL',
+          fileName,
+          fileNames: [fileName],
+          path: `path${pathNo}`,
+          status: 'PENDING',
+          correlationId: jobCid,
+          userId: req.user!.id,
+          username: req.user!.username,
+          fileSizeBefore: Buffer.byteLength(content, 'utf-8'),
+        });
         mqttService.publish(TOPICS.COMMAND_TO(machineId), {
           timestamp: new Date().toISOString(),
           command: 'UPLOAD_PROGRAM',
@@ -317,10 +421,22 @@ router.post('/transfer', async (req: Request, res: Response, next: NextFunction)
         jobs.push({ fileName, correlationId: jobCid });
       }
     } else {
-      // CNC → PC: Agent에 다운로드 명령 발송 (결과는 비동기 MQTT 수신)
       for (const fileName of fileNames) {
         if (!isSafe(fileName)) continue;
         const jobCid = `${correlationId}-${fileName}`;
+        await recordFileOperation({
+          machineDbId: machine.id,
+          machineCode: machine.machineId,
+          operationType: 'TRANSFER_CNC_TO_PC',
+          target: 'TRANSFER_SHARE',
+          fileName,
+          fileNames: [fileName],
+          path: `path${pathNo}`,
+          status: 'PENDING',
+          correlationId: jobCid,
+          userId: req.user!.id,
+          username: req.user!.username,
+        });
         mqttService.publish(TOPICS.COMMAND_TO(machineId), {
           timestamp: new Date().toISOString(),
           command: 'DOWNLOAD_PROGRAM',

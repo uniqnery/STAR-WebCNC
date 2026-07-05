@@ -2,7 +2,7 @@
 
 import { create } from 'zustand';
 import { wsClient } from '../lib/wsClient';
-import { machineApi, alarmApi } from '../lib/api';
+import { machineApi, alarmApi, userActivityApi } from '../lib/api';
 import { useAuthStore } from './authStore';
 import { useFileStore } from './fileStore';
 
@@ -327,6 +327,7 @@ interface MachineState {
   addFocasEvent: (machineId: string, event: FocasEvent) => void;
   clearFocasEvents: (machineId: string) => void;
   addUserActivity: (machineId: string, activity: UserActivity) => void;
+  loadUserActivities: (machineId: string, page: UserActivityPage) => Promise<void>;
   setSchedulerRows: (machineId: string, rows: SchedulerRow[]) => void;
   setSchedulerState: (machineId: string, state: SchedulerState) => void;
   updateSchedulerCount: (machineId: string, rowId: string, count: number) => void;
@@ -619,10 +620,30 @@ export const useMachineStore = create<MachineState>((set, get) => ({
       return {
         userActivities: {
           ...state.userActivities,
-          [key]: [activity, ...current].slice(0, 100),
+          [key]: [activity, ...current.filter((entry) => entry.id !== activity.id)]
+            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+            .slice(0, 100),
         },
       };
     }),
+
+  loadUserActivities: async (machineId, page) => {
+    if (!machineId) return;
+    try {
+      const res = await userActivityApi.getHistory(machineId, page, 100);
+      const data = res.data as { items?: UserActivity[] } | UserActivity[] | undefined;
+      const items = Array.isArray(data) ? data : data?.items ?? [];
+      const key = `${machineId}:${page}`;
+      set((state) => ({
+        userActivities: {
+          ...state.userActivities,
+          [key]: items,
+        },
+      }));
+    } catch (err) {
+      console.error('loadUserActivities failed:', err);
+    }
+  },
 
   setSchedulerRows: (machineId, rows) =>
     set((state) => {
@@ -941,13 +962,13 @@ export const useMachineStore = create<MachineState>((set, get) => ({
             };
             if (!p?.machineId) break;
             store.addUserActivity(p.machineId, {
-              id: `ua-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              id: (p as { id?: string }).id ?? `ua-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
               machineId: p.machineId,
               page: p.page,
               actor: p.actor,
               action: p.action,
               detail: p.detail,
-              timestamp: msg.timestamp,
+              timestamp: (p as { timestamp?: string }).timestamp ?? msg.timestamp,
             });
             break;
           }
@@ -998,6 +1019,27 @@ export const useMachineStore = create<MachineState>((set, get) => ({
                 level: isWarning ? 'warn' : 'error',
                 timestamp: msg.timestamp,
               });
+            }
+            break;
+          }
+          case 'file_operation_history': {
+            const p = msg.payload as { item?: import('./fileStore').FileOperationHistoryItem } | undefined;
+            if (p?.item) {
+              useFileStore.getState().upsertFileHistory(p.item);
+              if (p.item.operationType === 'TRANSFER_PC_TO_CNC' || p.item.operationType === 'TRANSFER_CNC_TO_PC') {
+                useFileStore.setState((fs) => ({
+                  transferQueue: fs.transferQueue.map((j) => {
+                    const expectedDirection = p.item!.operationType === 'TRANSFER_PC_TO_CNC' ? 'PC_TO_CNC' : 'CNC_TO_PC';
+                    if (j.direction !== expectedDirection || j.status === 'DONE' || j.status === 'ERROR') return j;
+                    const jBase = j.fileName.replace(/\.[^.]+$/, '');
+                    const eBase = p.item!.fileName.replace(/\.[^.]+$/, '');
+                    if (jBase !== eBase) return j;
+                    if (p.item!.status === 'SUCCESS') return { ...j, status: 'DONE' as const, progress: 100 };
+                    if (p.item!.status === 'FAILURE') return { ...j, status: 'ERROR' as const, progress: 100, error: p.item!.errorMessage ?? undefined };
+                    return { ...j, status: 'TRANSFERRING' as const, progress: Math.max(j.progress, 70) };
+                  }),
+                }));
+              }
             }
             break;
           }

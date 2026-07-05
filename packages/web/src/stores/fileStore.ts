@@ -34,6 +34,24 @@ export interface TransferJob {
 }
 
 // ── 뷰어 상태 ──
+
+export interface FileOperationHistoryItem {
+  id: string;
+  machineId: string | null;
+  operationType: string;
+  target: LogicalRootType | string;
+  fileName: string;
+  fileNames?: unknown;
+  path?: string | null;
+  status: 'PENDING' | 'SUCCESS' | 'FAILURE' | string;
+  correlationId?: string | null;
+  userName: string;
+  errorMessage?: string | null;
+  fileSizeBefore?: number | null;
+  fileSizeAfter?: number | null;
+  startedAt: string;
+  completedAt?: string | null;
+}
 export interface ViewerState {
   isOpen: boolean;
   fileName: string;
@@ -58,6 +76,8 @@ interface FileState {
   selectedShareFiles: string[];
   selectedCncFiles: string[];
   transferQueue: TransferJob[];
+  fileHistory: FileOperationHistoryItem[];
+  fileHistoryLoading: boolean;
 
   // 뷰어
   viewer: ViewerState;
@@ -73,7 +93,9 @@ interface FileState {
   setSelectedShareFiles: (names: string[]) => void;
   setSelectedCncFiles: (names: string[]) => void;
   uploadToShare: (fileName: string, size: number) => void;
-  deleteFromShare: (fileNames: string[]) => Promise<void>;
+  deleteFromShare: (fileNames: string[], machineId?: string) => Promise<void>;
+  loadFileHistory: (machineId: string) => Promise<void>;
+  upsertFileHistory: (item: FileOperationHistoryItem) => void;
   startTransfer: (direction: TransferDirection, fileNames: string[], machineId: string, userName: string, path?: number) => void;
   completeTransfer: (jobId: string) => void;
   clearCompletedTransfers: () => void;
@@ -108,6 +130,8 @@ export const useFileStore = create<FileState>((set, get) => ({
   selectedShareFiles: [],
   selectedCncFiles: [],
   transferQueue: [],
+  fileHistory: [],
+  fileHistoryLoading: false,
   viewer: {
     isOpen: false,
     fileName: '',
@@ -117,6 +141,30 @@ export const useFileStore = create<FileState>((set, get) => ({
     sourceRoot: 'TRANSFER_SHARE',
   },
 
+  
+  loadFileHistory: async (machineId) => {
+    if (!machineId) return;
+    set({ fileHistoryLoading: true });
+    try {
+      const res = await fileApi.getFileHistory(machineId, TRANSFER_HISTORY_MAX);
+      const data = res.data as { items?: FileOperationHistoryItem[] } | FileOperationHistoryItem[] | undefined;
+      const items = Array.isArray(data) ? data : data?.items ?? [];
+      set({ fileHistory: items, fileHistoryLoading: false });
+      return;
+    } catch (err) {
+      console.error('loadFileHistory failed:', err);
+    }
+    set({ fileHistoryLoading: false });
+  },
+
+  upsertFileHistory: (item) => {
+    set((state) => {
+      const next = [item, ...state.fileHistory.filter((entry) => entry.id !== item.id)]
+        .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
+        .slice(0, TRANSFER_HISTORY_MAX);
+      return { fileHistory: next };
+    });
+  },
   // ── 저장소 액션 ──
   loadRepoFiles: async (machineId, pathKey) => {
     set({ repoLoading: true });
@@ -240,13 +288,14 @@ export const useFileStore = create<FileState>((set, get) => ({
     }));
   },
 
-  deleteFromShare: async (fileNames) => {
+  deleteFromShare: async (fileNames, machineId = '') => {
     set((state) => ({
       shareFiles: state.shareFiles.filter((f) => !fileNames.includes(f.name)),
       selectedShareFiles: state.selectedShareFiles.filter((n) => !fileNames.includes(n)),
     }));
     try {
-      await fileApi.deleteFiles('TRANSFER_SHARE', '', fileNames);
+      await fileApi.deleteFiles('TRANSFER_SHARE', machineId, fileNames);
+      if (machineId) void get().loadFileHistory(machineId);
     } catch (err) {
       console.error('[fileStore] deleteFromShare failed:', err);
     }
@@ -282,11 +331,12 @@ export const useFileStore = create<FileState>((set, get) => ({
       .transfer(machineId, direction, fileNames, 'OVERWRITE', path)
       .then((res) => {
         if (res.success) {
+          void get().loadFileHistory(machineId);
           if (direction === 'PC_TO_CNC') {
-            // PC→CNC: 서버가 Agent에 전송 명령을 보낸 시점 = 완료로 처리
+            // PC→CNC: 서버가 명령을 접수하면 진행 중으로 유지하고 Agent 결과 이벤트에서 완료 처리
             set((state) => ({
               transferQueue: state.transferQueue.map((j) =>
-                jobs.some((jb) => jb.id === j.id) ? { ...j, status: 'DONE', progress: 100 } : j
+                jobs.some((jb) => jb.id === j.id) ? { ...j, status: 'TRANSFERRING', progress: 70 } : j
               ),
             }));
           }
@@ -402,6 +452,7 @@ export const useFileStore = create<FileState>((set, get) => ({
       const root = viewer.sourceRoot;
       const machineId = viewer.machineId || '';
       await fileApi.writeFile(root, machineId, viewer.fileName, viewer.content);
+      if (machineId) void get().loadFileHistory(machineId);
     } catch { /* ignore — content already in state */ }
     set((state) => ({
       viewer: { ...state.viewer, dirty: false },
