@@ -17,6 +17,13 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 
 const router = Router();
 
+// content의 첫 번째 O라인을 targetNo로 치환 (ex: "O7000" → "O7002")
+const replaceONumber = (content: string, targetNo: string): string => {
+  const digits = targetNo.replace(/^O/i, '');
+  const padded = digits.padStart(4, '0');
+  return content.replace(/^O\d+/m, `O${padded}`);
+};
+
 // ── 기본 스토리지 경로 ────────────────────────────────────────
 const DATA_DIR = process.env.DATA_DIR ?? path.join(process.cwd(), 'data');
 const REPO_DIR  = path.join(DATA_DIR, 'repo');   // SCHEDULER_REPO
@@ -348,12 +355,19 @@ router.post('/delete', async (req: Request, res: Response, next: NextFunction) =
 // ─────────────────────────────────────────────────────────────
 router.post('/transfer', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { machineId, direction, fileNames, conflictPolicy = 'OVERWRITE', path: pathNo = 1 } = req.body as {
+    const {
+      machineId, direction, fileNames,
+      conflictPolicy = 'OVERWRITE', path: pathNo = 1,
+      targetProgramNos = {} as Record<string, string>,
+      forceOverwrite = false,
+    } = req.body as {
       machineId: string;
       direction: 'PC_TO_CNC' | 'CNC_TO_PC';
       fileNames: string[];
       conflictPolicy: string;
       path: number;
+      targetProgramNos?: Record<string, string>;
+      forceOverwrite?: boolean;
     };
 
     if (!machineId || !isSafe(machineId)) {
@@ -412,11 +426,15 @@ router.post('/transfer', async (req: Request, res: Response, next: NextFunction)
           username: req.user!.username,
           fileSizeBefore: Buffer.byteLength(content, 'utf-8'),
         });
+        // targetProgramNo 지정 시 content의 O라인 치환
+        const targetNo = targetProgramNos[fileName];
+        const finalContent = targetNo ? replaceONumber(content, targetNo) : content;
+
         mqttService.publish(TOPICS.COMMAND_TO(machineId), {
           timestamp: new Date().toISOString(),
           command: 'UPLOAD_PROGRAM',
           correlationId: jobCid,
-          params: { fileName, content, conflictPolicy },
+          params: { fileName, content: finalContent, conflictPolicy, forceOverwrite },
         });
         jobs.push({ fileName, correlationId: jobCid });
       }

@@ -291,7 +291,8 @@ public class CommandHandler
 
     /// <summary>
     /// UPLOAD_PROGRAM: PC → CNC 프로그램 전송
-    /// params: { fileName: string, content: string }
+    /// params: { fileName: string, content: string, forceOverwrite?: bool }
+    /// forceOverwrite=true 시 content의 O번호를 파싱하여 cnc_delete 후 업로드
     /// </summary>
     private async Task<CommandResultMessage> ExecuteUploadProgramAsync(CommandMessage command)
     {
@@ -304,8 +305,25 @@ public class CommandHandler
         command.Params.TryGetValue("fileName", out var fileNameObj);
         string fileName = fileNameObj?.ToString() ?? "unknown.nc";
 
-        _logger.LogInformation("UPLOAD_PROGRAM: {FileName} ({Bytes} bytes)",
-            fileName, content.Length);
+        bool forceOverwrite = false;
+        if (command.Params.TryGetValue("forceOverwrite", out var foObj))
+            bool.TryParse(foObj?.ToString(), out forceOverwrite);
+
+        _logger.LogInformation("UPLOAD_PROGRAM: {FileName} ({Bytes} bytes) forceOverwrite={FO}",
+            fileName, content.Length, forceOverwrite);
+
+        if (forceOverwrite)
+        {
+            int targetNo = ExtractProgramNoFromContent(content);
+            if (targetNo > 0)
+            {
+                _logger.LogInformation("UPLOAD_PROGRAM: forceOverwrite → deleting O{No:D4} first", targetNo);
+                bool deleted = await _dataReader.DeleteProgramAsync(targetNo);
+                if (!deleted)
+                    return CreateFailureResult(command, "DELETE_FAILED",
+                        $"기존 O{targetNo:D4} 삭제 실패 — CNC가 EDIT 모드인지 확인하세요.");
+            }
+        }
 
         bool success = await _dataReader.UploadProgramAsync(content);
         if (!success)
@@ -318,6 +336,12 @@ public class CommandHandler
             Status        = "success",
             Result        = new { fileName, size = content.Length, uploaded = true },
         };
+    }
+
+    private static int ExtractProgramNoFromContent(string content)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(content, @"^O(\d+)", System.Text.RegularExpressions.RegexOptions.Multiline);
+        return match.Success && int.TryParse(match.Groups[1].Value, out int no) ? no : 0;
     }
 
     /// <summary>

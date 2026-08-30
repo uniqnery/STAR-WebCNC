@@ -1578,6 +1578,41 @@ public class FocasDataReader
     }
 
     /// <summary>
+    /// NC 프로그램 삭제 (cnc_delete) — forceOverwrite 시 업로드 전 호출
+    /// EDIT 모드 필요
+    /// </summary>
+    public Task<bool> DeleteProgramAsync(int programNo) => Task.FromResult(DeleteProgramSync(programNo));
+
+    private bool DeleteProgramSync(int programNo)
+    {
+        if (!_connection.IsConnected)
+            return false;
+
+        if (programNo <= 0 || programNo > short.MaxValue)
+        {
+            _logger.LogWarning("cnc_delete rejected invalid program number: {ProgramNo}", programNo);
+            return false;
+        }
+
+        try
+        {
+            short ret = Focas1.cnc_delete(_connection.Handle, (short)programNo);
+            if (ret != Focas1.EW_OK)
+            {
+                _logger.LogWarning("cnc_delete O{ProgramNo:D4} failed: {ErrorCode}", programNo, ret);
+                return false;
+            }
+            _logger.LogInformation("cnc_delete O{ProgramNo:D4} success", programNo);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting program O{ProgramNo:D4}", programNo);
+            return false;
+        }
+    }
+
+    /// <summary>
     /// NC 프로그램 수신 (CNC → PC, FOCAS "upload")
     /// </summary>
     public Task<string?> DownloadProgramAsync(int programNo, int pathNo = 1) => Task.FromResult(DownloadProgramSync(programNo, pathNo));

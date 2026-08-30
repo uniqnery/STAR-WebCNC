@@ -553,8 +553,8 @@ export const fileApi = {
   getFileHistory: (machineId: string, limit = 100) =>
     api.get(`/api/files/history?machineId=${encodeURIComponent(machineId)}&limit=${limit}`),
 
-  transfer: (machineId: string, direction: string, fileNames: string[], conflictPolicy: string, path = 1) =>
-    api.post('/api/files/transfer', { machineId, direction, fileNames, conflictPolicy, path }),
+  transfer: (machineId: string, direction: string, fileNames: string[], conflictPolicy: string, path = 1, targetProgramNos?: Record<string, string>, forceOverwrite?: boolean) =>
+    api.post('/api/files/transfer', { machineId, direction, fileNames, conflictPolicy, path, targetProgramNos, forceOverwrite }),
 };
 
 

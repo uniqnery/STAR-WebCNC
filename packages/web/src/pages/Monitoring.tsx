@@ -83,7 +83,7 @@ export function Monitoring() {
 
   return (
     <div
-      className="p-6 lg:p-4 space-y-4 lg:space-y-0 lg:gap-3 lg:h-full lg:flex lg:flex-col lg:overflow-hidden max-lg:landscape:p-1 max-lg:landscape:space-y-1 max-lg:landscape:pl-7 max-lg:portrait:overflow-x-hidden"
+      className="p-6 lg:p-4 space-y-4 lg:space-y-0 lg:gap-3 lg:h-full lg:flex lg:flex-col lg:overflow-hidden max-lg:landscape:p-1 max-lg:landscape:space-y-1 max-lg:landscape:pl-7 max-lg:portrait:h-[calc(100dvh-64px)] max-lg:portrait:min-h-0 max-lg:portrait:flex max-lg:portrait:flex-col max-lg:portrait:gap-2 max-lg:portrait:space-y-0 max-lg:portrait:overflow-hidden max-lg:portrait:p-3"
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >
@@ -100,10 +100,10 @@ export function Monitoring() {
       </div>
 
       {/* ── 상단 2분할: NC모니터(좌) + 카메라(우) ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 max-lg:landscape:grid-cols-2 gap-4 lg:flex-[4_1_0%] lg:min-h-0 max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 max-lg:portrait:overflow-x-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-2 max-lg:landscape:grid-cols-2 gap-4 lg:flex-[4_1_0%] lg:min-h-0 max-lg:portrait:flex-1 max-lg:portrait:min-h-0 max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 max-lg:portrait:overflow-hidden">
 
         {/* 좌측: NC 모니터 + 알람 + 탭 바 */}
-        <div className={`flex flex-col gap-2 max-lg:portrait:gap-1 overflow-hidden max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 lg:h-full max-lg:portrait:h-auto max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'monitor' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
+        <div className={`flex flex-col gap-2 max-lg:portrait:gap-1 overflow-hidden max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 lg:h-full max-lg:portrait:h-full max-lg:portrait:min-h-0 max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'monitor' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
           <div className="flex-1 min-h-0 max-lg:portrait:flex-none lg:flex-none lg:shrink-0">
             <NCMonitor
               path1={telemetry?.path1}
@@ -131,13 +131,13 @@ export function Monitoring() {
             ))}
           </div>
           {/* 모바일 portrait 전용 이벤트 로그 */}
-          <div className="lg:hidden landscape:hidden shrink-0 h-40 max-lg:portrait:mt-0">
+          <div className="lg:hidden landscape:hidden max-lg:portrait:flex-1 max-lg:portrait:min-h-[12rem] max-lg:portrait:mt-0 max-lg:portrait:overflow-hidden">
             <FocasEventLog events={focasEvents} />
           </div>
         </div>
 
         {/* 우측: 카메라 */}
-        <div className={`flex flex-col max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 lg:h-full max-lg:portrait:h-auto max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'camera' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
+        <div className={`flex flex-col max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 lg:h-full max-lg:portrait:h-full max-lg:portrait:min-h-0 max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'camera' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
           {cameraEnabled && camerasForMachine.length > 0 ? (
             <CameraMultiView cameras={camerasForMachine} className="flex-1 min-h-0 rounded-lg overflow-hidden" />
           ) : (
@@ -151,7 +151,7 @@ export function Monitoring() {
             </div>
           )}
           {/* 모바일 portrait 전용 이벤트 로그 */}
-          <div className="lg:hidden landscape:hidden shrink-0 h-40 max-lg:portrait:mt-0">
+          <div className="lg:hidden landscape:hidden max-lg:portrait:flex-1 max-lg:portrait:min-h-[12rem] max-lg:portrait:mt-0 max-lg:portrait:overflow-hidden">
             <FocasEventLog events={focasEvents} />
           </div>
         </div>

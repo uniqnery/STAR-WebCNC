@@ -1,4 +1,50 @@
 # BRIEFING.md
+
+## 현재 개발 방향
+
+- Star-WebCNC는 고객사별 일회성 커스텀 개발보다 설치형 기성 소프트웨어에 가깝게 완성한다.
+- 업체별 차이는 코드 분기보다 설정, 템플릿, 기능 활성화 옵션으로 흡수하는 방향을 우선한다.
+- 내부 개발/테스트 단계에서는 무선 네트워크를 사용할 수 있으나, 고객사 설치 기준은 유선 LAN 구성을 기본으로 한다.
+- 서버 PC는 필요 시 인터넷망과 설비망을 분리하는 dual NIC 구성을 권장한다.
+- 다중 설비 제어는 설비별 Agent, 설비별 MQTT topic, 설비별 설정을 기준으로 분리한다.
+- DNC 운전은 단순 파일 전송이 아니라 실시간/연속 데이터 공급 안정성이 중요하므로 별도 설계와 테스트가 필요하다.
+
+## 최근 결정사항
+
+- AI 작업 규칙 문서는 `AGENTS.md`와 `CLAUDE.md`로 유지한다.
+- 전체 프로젝트 구성과 현재 방향은 이 문서(`BRIEFING.md`)를 중심으로 관리한다.
+- `BRIEFING.md`는 매 작업마다 전체 정독하는 문서가 아니라, 방향성 판단이 필요한 작업에서 우선 확인하는 중심 문서로 사용한다.
+- `docs/` 아래 문서는 특정 기능 상세 또는 과거 요약 문서로 보고, 상시 읽기 대상이 아니라 필요할 때 참조한다.
+- FANUC FOCAS 통신 참고 문서는 `FOCAS_REFERENCE.md`로 별도 관리한다.
+- 새 문서를 계속 늘리기보다 기존 문서에 통합하는 것을 우선한다.
+- 작업 진행상황(예정/진행 중/완료)은 섹션 4(기능 표)·섹션 6(백로그)에 작업 시작 시 등록, 완료 시 갱신하는 방식으로 지속 관리한다.
+
+## 진행 중인 개발 항목
+
+- 스케줄러 기반 다중 설비 작업 실행 구조 정리
+- DNC 모드 운전 구조 검토
+- 고객사 설치형 소프트웨어 방향 정리
+- 유선 LAN 기준 서버 PC, 스위칭 허브, 장비별 허브, 카메라 연결 구성 검토
+
+## 앞으로 개발할 항목
+
+- DNC 실시간 스트리밍 구조 설계 및 구현 (현재 상태: BACKLOG-08 참조)
+- DNC 운전 중 데이터 공급 끊김, 지연, 재시도, 정지 조건 정의
+- feature flag 또는 site config 기반 기능 활성화 구조 설계
+- 템플릿 capabilities와 UI/API/Agent 권한 제한의 일관 적용
+- 설치형 초기 설정 절차 정리
+- 고객사 네트워크 설치 가이드 정리
+- FANUC FOCAS 공통 참고 문서 지속 갱신
+
+## 상세 문서 참조 기준
+
+- 스케줄러 작업: `docs/Scheduler.md`, `docs/scheduler-state-machine.md`
+- 설비 관리 화면 또는 설비 설정 작업: `docs/MachineAdmin.md`
+- SIMTOS 데모/전시 관련 작업: `docs/Simtos.md`
+- FOCAS, CNC 통신, PMC, 알람, 프로그램, DNC 관련 작업: `FOCAS_REFERENCE.md`를 먼저 확인하고 관련 Agent/Focas 코드를 함께 확인
+- 과거 상세 아키텍처 추적: `architecture.md`
+
+---
 # Star-WebCNC 프로젝트 브리핑 문서
 
 > 작업 시작 전 반드시 이 문서를 읽고 현재 상태를 파악할 것.
@@ -168,6 +214,7 @@ star-webcnc/server/scheduler/{machineId}      Server → Agent
 | 다중 CNC Agent 내 처리 | ❌ 미구현 | 현재 1 Agent = 1 CNC. 다중은 Agent 다중 실행으로 대응 |
 | TemplateEditor Section 8 (스케줄러 설정 UI) | ❌ 미구현 | 백엔드/Agent 스케줄러 설정 구조는 완성됨 |
 | cameraApi.create/update/delete (api.ts) | ⚠️ 미확인 | `cameraApi`에 WebRTC 관련 메서드가 남아있음 (실제 서버는 MJPEG만 지원) |
+| PC→CNC 업로드 O번호 지정 + 덮어쓰기 확인 | 🔧 구현완료·테스트 대기 (2026-08-17) | 웹(Transfer.tsx)/서버(files.ts)/Agent(CommandHandler.cs, FocasDataReader.cs) 코드 완료. Agent 재빌드·재시작 및 실기기 검증 전. 상세: BACKLOG-07 |
 
 ---
 
@@ -240,6 +287,42 @@ IS-C 4자리 소수점 스케일 검증 포함.
 ### [BACKLOG-06] E-STOP 출력 PMC 주소 확인
 
 현재 panelLayout에서 E_STOP의 reqAddr 미확인. SB-20R2 실기기 또는 FANUC 매뉴얼에서 확인 필요.
+
+### [BACKLOG-07] PC→CNC 업로드 O번호 지정 + 덮어쓰기 기능 실기기 테스트 (진행 중, 2026-08-17 코드 구현 완료)
+
+**구현 완료 (미테스트)**:
+- `Transfer.tsx`: PC→CNC 전송 시 O번호 편집 확인 다이얼로그(`PcToCncConfirmDialog`) + 번호 충돌 시 2차 덮어쓰기 확인(`OverwriteConfirmDialog`)
+- `files.ts`: `/transfer`에 `targetProgramNos`/`forceOverwrite` 파라미터, content의 `O####` 라인 치환(`replaceONumber`)
+- `CommandHandler.cs`: `UPLOAD_PROGRAM`에 `forceOverwrite` 처리 — content에서 O번호 파싱 후 `cnc_delete`로 기존 프로그램 삭제 후 업로드
+- `FocasDataReader.cs`: `DeleteProgramAsync`(`cnc_delete` 래핑) 추가
+
+**남은 작업**:
+- Agent 재빌드·재배포 (아직 미실행 — Agent Build & Deploy 절차 참조)
+- 실기기 검증: 정상 업로드, O번호 변경 업로드, 충돌 시 덮어쓰기 확인 플로우, `cnc_delete` 실패 케이스(EDIT 모드 아닐 때 등, I-02와 유사한 CNC 상태 의존성 가능성)
+- 통과 시 섹션 4 표 상태를 "✅ 완료"로 갱신하고 본 항목 제거
+
+### [BACKLOG-08] DNC 실시간 스트리밍 구조 설계 및 구현 (미착수, 2026-08-17 현황 점검)
+
+**현재 구현된 것** (`SchedulerManager.StartRowDnc()`, `Scheduler.tsx`, `routes/scheduler.ts`):
+- 설비별 Path1/Path2 독립 memory/dnc 모드 선택 + DNC 폴더 경로 설정 UI/저장
+- 행 시작 시 DNC 대상 파일 존재 확인(`File.Exists`) + CNC가 이미 DNC 모드(`aut==9`)인지 확인
+- Path2 선두 복귀(`cnc_rewind(path=2)`) 후 memory 모드와 공통된 head on/off, one-cycle stop, cycle start 흐름 재사용
+- 에러 코드 체계: `DNC_NO_PATHS`, `DNC_FILE_NOT_FOUND`, `DNC_MODE_INVALID`, `PATH2_REWIND_FAILED`
+
+**즉, 현재는 "CNC 자체 DNC 기능이 지정 경로를 읽고 있다"는 전제 하에 사이클 스타트만 트리거하는 준비 단계이며, 서버가 데이터를 직접 실시간 공급하는 구조는 아직 없다.**
+
+**미구현 항목**:
+- 서버 PC가 DNC 데이터를 실시간 line/block 스트림으로 CNC에 공급하는 구조 자체
+- 여러 CNC에 동시에 안정적으로 스트림을 공급하는 flow control
+- 스트림 중 끊김/지연/재시도/정지 조건 정의
+- 스트림 위치 추적, checksum, recovery 정책
+- CNC를 원격으로 MEM→DNC 모드 전환하는 명령 (현재는 운전자가 조작반에서 직접 전환해야 하고, 스케줄러는 현재 모드를 읽기만 함)
+- DNC 폴더 경로가 CNC에서 실제로 접근 가능한 네트워크 공유인지 검증/헬스체크
+- DNC 모드 관련 PMC 출력 주소 미확인 (SB-20R2 실기기 기준)
+
+**문서 불일치 (교차 확인 필요)**:
+- `SchedulerManager.cs` 코드 주석: "Path2 선두 복귀 방법은 실기 테스트 후 확정(현재 RESET 신호 사용)" ↔ 실제 코드는 `cnc_rewind` 사용 — 주석 미갱신 추정
+- `docs/scheduler-state-machine.md` 백로그: "DNC 모드 Path2 rewind 실기 검증" 미완료로 기재 ↔ `SchedulerManager.cs`에는 "실기 테스트 확인 완료(2026-03-22)"로 기재 — 실제 검증 여부 재확인 필요
 
 ---
 

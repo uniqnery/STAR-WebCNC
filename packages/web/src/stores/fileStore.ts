@@ -96,7 +96,7 @@ interface FileState {
   deleteFromShare: (fileNames: string[], machineId?: string) => Promise<void>;
   loadFileHistory: (machineId: string) => Promise<void>;
   upsertFileHistory: (item: FileOperationHistoryItem) => void;
-  startTransfer: (direction: TransferDirection, fileNames: string[], machineId: string, userName: string, path?: number) => void;
+  startTransfer: (direction: TransferDirection, fileNames: string[], machineId: string, userName: string, path?: number, targetProgramNos?: Record<string, string>, forceOverwrite?: boolean) => void;
   completeTransfer: (jobId: string) => void;
   clearCompletedTransfers: () => void;
 
@@ -301,7 +301,7 @@ export const useFileStore = create<FileState>((set, get) => ({
     }
   },
 
-  startTransfer: (direction, fileNames, machineId, userName, path = 1) => {
+  startTransfer: (direction, fileNames, machineId, userName, path = 1, targetProgramNos, forceOverwrite) => {
     const now = new Date().toISOString();
     const jobs: TransferJob[] = fileNames.map((fileName) => ({
       id: `transfer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -328,7 +328,7 @@ export const useFileStore = create<FileState>((set, get) => ({
 
     // Try real API
     void fileApi
-      .transfer(machineId, direction, fileNames, 'OVERWRITE', path)
+      .transfer(machineId, direction, fileNames, 'OVERWRITE', path, targetProgramNos, forceOverwrite)
       .then((res) => {
         if (res.success) {
           void get().loadFileHistory(machineId);

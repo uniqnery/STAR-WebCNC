@@ -219,6 +219,215 @@ function SimpleConfirmDialog({ title, description, fileNames, confirmLabel, conf
 }
 
 // ============================================================
+// PC→CNC 전송 확인 다이얼로그 (O번호 편집 + 중복 체크)
+// ============================================================
+
+interface PcToCncEntry {
+  fileName: string;
+  contentProgramNo: string;  // content에서 파싱한 O번호 (숫자만, ex "7001")
+  targetProgramNo: string;   // 실제 전송될 O번호 (사용자 편집 가능)
+  isEditing: boolean;
+  editingValue: string;
+}
+
+function parseOFromFilename(fileName: string): string {
+  const base = fileName.replace(/\.[^.]+$/, '');
+  const m = base.match(/O?(\d+)/i);
+  return m ? m[1].replace(/^0+(\d)/, '$1') : '';
+}
+
+function parseOFromContent(content: string): string {
+  for (const line of content.split('\n')) {
+    const t = line.trim();
+    if (!t || t === '%') continue;
+    const m = t.match(/^O(\d+)/i);
+    if (m) return m[1].replace(/^0+(\d)/, '$1');
+    break;
+  }
+  return '';
+}
+
+function formatONo(no: string): string {
+  const n = parseInt(no, 10);
+  return isNaN(n) ? no : `O${n.toString().padStart(4, '0')}`;
+}
+
+interface PcToCncConfirmDialogProps {
+  entries: PcToCncEntry[];
+  loading: boolean;
+  onUpdateEntry: (fileName: string, update: Partial<PcToCncEntry>) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+function PcToCncConfirmDialog({ entries, loading, onUpdateEntry, onConfirm, onCancel }: PcToCncConfirmDialogProps) {
+  const anyEditing = entries.some((e) => e.isEditing);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="bg-gray-800 rounded-lg shadow-xl w-[480px] max-h-[80vh] flex flex-col border border-gray-600">
+        <div className="px-5 py-4 border-b border-gray-700">
+          <h3 className="text-lg font-semibold text-white">전송 확인</h3>
+          <p className="text-xs text-blue-400 mt-0.5">PC → CNC</p>
+        </div>
+
+        <div className="px-5 py-4 flex-1 min-h-0 overflow-y-auto">
+          {/* 헤더 행 */}
+          <div className="grid grid-cols-[1fr_16px_1fr_56px] gap-2 text-[11px] text-gray-500 mb-2 px-1">
+            <span>PC 파일</span>
+            <span />
+            <span>CNC 저장 번호</span>
+            <span />
+          </div>
+
+          <div className="space-y-2">
+            {entries.map((entry) => (
+              <div
+                key={entry.fileName}
+                className="grid grid-cols-[1fr_16px_1fr_56px] gap-2 items-center bg-gray-900 rounded px-3 py-2"
+              >
+                {/* PC 파일명 */}
+                <span className="text-sm text-white font-mono truncate" title={entry.fileName}>
+                  {entry.fileName}
+                </span>
+
+                {/* 화살표 */}
+                <span className="text-gray-500 text-xs text-center">→</span>
+
+                {/* CNC 저장 번호 */}
+                {entry.isEditing ? (
+                  <div className="flex items-center gap-1 min-w-0">
+                    <span className="text-blue-400 text-sm font-mono shrink-0">O</span>
+                    <input
+                      type="text"
+                      value={entry.editingValue}
+                      onChange={(e) =>
+                        onUpdateEntry(entry.fileName, { editingValue: e.target.value.replace(/\D/g, '').slice(0, 4) })
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter')
+                          onUpdateEntry(entry.fileName, { targetProgramNo: entry.editingValue || entry.targetProgramNo, isEditing: false });
+                        if (e.key === 'Escape')
+                          onUpdateEntry(entry.fileName, { isEditing: false });
+                      }}
+                      className="w-full bg-gray-700 text-white font-mono text-sm px-2 py-0.5 rounded border border-blue-500 outline-none"
+                      maxLength={4}
+                      autoFocus
+                    />
+                  </div>
+                ) : (
+                  <span
+                    className={`text-sm font-mono ${
+                      loading
+                        ? 'text-gray-500'
+                        : entry.targetProgramNo !== entry.contentProgramNo
+                        ? 'text-yellow-400'
+                        : 'text-green-400'
+                    }`}
+                  >
+                    {loading ? '...' : formatONo(entry.targetProgramNo)}
+                  </span>
+                )}
+
+                {/* 편집/저장 버튼 */}
+                {entry.isEditing ? (
+                  <button
+                    onClick={() =>
+                      onUpdateEntry(entry.fileName, { targetProgramNo: entry.editingValue || entry.targetProgramNo, isEditing: false })
+                    }
+                    className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded"
+                  >
+                    저장
+                  </button>
+                ) : (
+                  <button
+                    disabled={loading}
+                    onClick={() =>
+                      onUpdateEntry(entry.fileName, { isEditing: true, editingValue: entry.targetProgramNo })
+                    }
+                    className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded disabled:opacity-40"
+                  >
+                    편집
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {loading && (
+            <p className="text-xs text-gray-500 mt-3 text-center">프로그램 번호 확인 중...</p>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t border-gray-700 flex items-center justify-end gap-3">
+          <button
+            onClick={onConfirm}
+            disabled={loading || anyEditing}
+            className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg transition-colors"
+          >
+            전송 실행
+          </button>
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-sm text-gray-400 hover:text-white bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+          >
+            취소
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OverwriteConfirmDialog({
+  conflicts,
+  onConfirm,
+  onCancel,
+}: {
+  conflicts: string[];
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70">
+      <div className="bg-gray-800 rounded-lg shadow-xl w-96 flex flex-col border border-red-700">
+        <div className="px-5 py-4 border-b border-gray-700 flex items-center gap-2">
+          <svg className="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          </svg>
+          <h3 className="text-lg font-semibold text-white">덮어쓰기 확인</h3>
+        </div>
+        <div className="px-5 py-4">
+          <p className="text-sm text-gray-300 mb-3">다음 프로그램이 이미 NC에 존재합니다:</p>
+          <div className="flex flex-wrap gap-2 mb-4">
+            {conflicts.map((c) => (
+              <span key={c} className="px-2 py-1 bg-red-900/40 text-red-300 font-mono text-sm rounded border border-red-700/50">
+                {c}
+              </span>
+            ))}
+          </div>
+          <p className="text-sm text-yellow-400">기존 프로그램을 삭제 후 덮어쓰겠습니까?</p>
+        </div>
+        <div className="px-5 py-3 border-t border-gray-700 flex items-center justify-end gap-3">
+          <button
+            onClick={onConfirm}
+            className="px-4 py-2 text-sm text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+          >
+            덮어쓰기
+          </button>
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-sm text-gray-400 hover:text-white bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+          >
+            취소
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // 파일 전송 섹션 (2분할: 좌측=CNC, 우측=PC)
 // ============================================================
 function TransferSection({ machineId, canTransfer }: { machineId: string; canTransfer: boolean }) {
@@ -247,11 +456,23 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
 
   const [cncPath, setCncPath] = useState<'path1' | 'path2' | 'path3'>('path1');
 
-  // Confirm 다이얼로그 상태
+  // CNC→PC 확인 다이얼로그
   const [confirmDialog, setConfirmDialog] = useState<{
     direction: TransferDirection;
     fileNames: string[];
     cncPath?: 'path1' | 'path2' | 'path3';
+  } | null>(null);
+
+  // PC→CNC 확인 다이얼로그 (O번호 편집)
+  const [pcToCncConfirm, setPcToCncConfirm] = useState<{
+    entries: PcToCncEntry[];
+    loading: boolean;
+  } | null>(null);
+
+  // 덮어쓰기 2차 확인
+  const [overwriteConfirm, setOverwriteConfirm] = useState<{
+    conflicts: string[];
+    onConfirm: () => void;
   } | null>(null);
 
   const [downloadConfirm, setDownloadConfirm] = useState<{ fileNames: string[] } | null>(null);
@@ -284,13 +505,76 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
     setConfirmDialog({ direction: 'CNC_TO_PC', fileNames: selectedCncFiles, cncPath });
   }, [selectedCncFiles, cncPath]);
 
-  // ← (왼쪽): PC → CNC — 확인 다이얼로그 표시
+  // ← (왼쪽): PC → CNC — O번호 파싱 후 확인 다이얼로그
   const handleTransferLeft = useCallback(() => {
     if (selectedShareFiles.length === 0) return;
-    setConfirmDialog({ direction: 'PC_TO_CNC', fileNames: selectedShareFiles });
+    const initial: PcToCncEntry[] = selectedShareFiles.map((fileName) => {
+      const no = parseOFromFilename(fileName);
+      return { fileName, contentProgramNo: no, targetProgramNo: no, isEditing: false, editingValue: '' };
+    });
+    setPcToCncConfirm({ entries: initial, loading: true });
+    void (async () => {
+      const results = await Promise.all(
+        selectedShareFiles.map(async (fileName) => {
+          try {
+            const res = await fileApi.readFile('TRANSFER_SHARE', '', fileName);
+            const content = (res.success ? (res.data as { content?: string })?.content : null) ?? '';
+            const no = parseOFromContent(content) || parseOFromFilename(fileName);
+            return { fileName, no };
+          } catch {
+            return { fileName, no: parseOFromFilename(fileName) };
+          }
+        })
+      );
+      setPcToCncConfirm((prev) =>
+        prev
+          ? {
+              ...prev,
+              loading: false,
+              entries: prev.entries.map((e) => {
+                const r = results.find((r) => r.fileName === e.fileName);
+                return r ? { ...e, contentProgramNo: r.no, targetProgramNo: r.no } : e;
+              }),
+            }
+          : null
+      );
+    })();
   }, [selectedShareFiles]);
 
-  // 확인 다이얼로그에서 전송 실행
+  // PC→CNC 전송 실행 (중복 체크 → 필요 시 2차 다이얼로그)
+  const handleConfirmPcToCnc = useCallback(() => {
+    if (!pcToCncConfirm) return;
+    const entries = pcToCncConfirm.entries;
+    const targetProgramNos: Record<string, string> = {};
+    entries.forEach((e) => { targetProgramNos[e.fileName] = e.targetProgramNo; });
+
+    const conflicts = entries.filter((e) => {
+      const targetNum = parseInt(e.targetProgramNo.replace(/^O/i, ''), 10);
+      return !isNaN(targetNum) && cncFiles.some((f) => {
+        const cncNum = parseInt((f.programNo ?? f.name ?? '').replace(/^O/i, ''), 10);
+        return cncNum === targetNum;
+      });
+    });
+
+    const doTransfer = (overwrite: boolean) => {
+      const userName = user?.username || 'unknown';
+      const pathNo = cncPath === 'path2' ? 2 : cncPath === 'path3' ? 3 : 1;
+      startTransfer('PC_TO_CNC', entries.map((e) => e.fileName), machineId, userName, pathNo, targetProgramNos, overwrite);
+      setPcToCncConfirm(null);
+      setOverwriteConfirm(null);
+    };
+
+    if (conflicts.length > 0) {
+      setOverwriteConfirm({
+        conflicts: conflicts.map((e) => formatONo(e.targetProgramNo)),
+        onConfirm: () => doTransfer(true),
+      });
+      return;
+    }
+    doTransfer(false);
+  }, [pcToCncConfirm, cncFiles, cncPath, machineId, startTransfer, user]);
+
+  // CNC→PC 확인 다이얼로그에서 전송 실행
   const handleConfirmTransfer = useCallback(() => {
     if (!confirmDialog) return;
     const userName = user?.username || 'unknown';
@@ -475,7 +759,33 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
         <TransferQueuePanel machineId={machineId} />
       </div>
 
-      {/* 전송 확인 다이얼로그 */}
+      {/* PC→CNC O번호 편집 확인 다이얼로그 */}
+      {pcToCncConfirm && (
+        <PcToCncConfirmDialog
+          entries={pcToCncConfirm.entries}
+          loading={pcToCncConfirm.loading}
+          onUpdateEntry={(fileName, update) =>
+            setPcToCncConfirm((prev) =>
+              prev
+                ? { ...prev, entries: prev.entries.map((e) => (e.fileName === fileName ? { ...e, ...update } : e)) }
+                : null
+            )
+          }
+          onConfirm={handleConfirmPcToCnc}
+          onCancel={() => setPcToCncConfirm(null)}
+        />
+      )}
+
+      {/* 덮어쓰기 2차 확인 다이얼로그 */}
+      {overwriteConfirm && (
+        <OverwriteConfirmDialog
+          conflicts={overwriteConfirm.conflicts}
+          onConfirm={overwriteConfirm.onConfirm}
+          onCancel={() => setOverwriteConfirm(null)}
+        />
+      )}
+
+      {/* CNC→PC 전송 확인 다이얼로그 */}
       {confirmDialog && (
         <TransferConfirmDialog
           direction={confirmDialog.direction}
