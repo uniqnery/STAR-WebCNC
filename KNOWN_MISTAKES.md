@@ -239,6 +239,26 @@
 
 ---
 
+## [M-22] PMC bit 읽기에 타입 무시하는 `ReadPmcR` 사용
+
+**증상**: 탑바 인터락 pill은 초록불(정상)로 표시되는데, 스케줄러 START 시 "인터락 조건 불충족"으로 계속 거부됨. X/Y/G 등 R이 아닌 타입 주소를 인터락에 추가했을 때만 발생.
+**원인**: `SchedulerManager.CheckInterlock()`, `CommandHandler.CheckInterlock()`, `DataCollectorService.DetectM20EdgeSync()`가 모두 `FocasDataReader.ReadPmcR(address, length)`를 사용했는데, 이 함수는 `pmc_rdpmcrng` type_no를 `5`(R영역)로 하드코딩함. `PmcAddress.Type`이 R이 아니면 완전히 엉뚱한 영역(예: X47.5 대신 R47.5)을 읽어 항상 틀린 값이 나옴. 반면 탑바 pill 표시는 타입별 영역을 구분하는 `ReadPmcBit(PmcAddress addr)`을 사용해서 정상 표시됨 — 판정 로직과 표시 로직이 서로 다른 함수를 쓰면서 결과가 어긋남.
+**재발 방지**:
+- PMC bit 하나를 읽을 때는 항상 `ReadPmcBit(PmcAddress addr)`을 사용한다. `ReadPmcR`은 R영역 여러 바이트를 한 번에 읽어야 하는 특수한 경우(예: 여러 비트를 한 호출로 묶어 읽기)에만 쓰고, 그 경우에도 대상이 확실히 R타입인지 먼저 확인한다.
+- 새 PMC 판정/감지 로직을 추가할 때 "화면에 정상 표시되는데 내부 로직만 실패한다"는 증상이 나오면, 표시 코드와 판정 코드가 서로 다른 읽기 함수를 쓰고 있지 않은지부터 확인한다.
+
+---
+
+## [M-23] FOCAS `ODBST.aut`(운전모드 코드) 값을 실기기 검증 없이 하드코딩
+
+**증상**: MC-002에서 CNC를 DNC(원격) 모드로 놓고 스케줄러 START를 해도 `DNC_MODE_INVALID` 오류로 계속 거부됨. 로그에는 `현재 aut=10`으로 찍힘.
+**원인**: `SchedulerManager`의 DNC 모드 확인 로직이 `status.Aut != 9`를 "DNC 아님" 판정 기준으로 하드코딩했었음. 실기기에서 읽은 값은 9가 아니라 10(RMT/원격운전) — 9는 REF(원점복귀)에 해당. FOCAS 문서상 aut 코드는 CNC 시리즈/펌웨어에 따라 값이 다를 수 있는데, 실기기 검증 없이 코드값을 가정해서 적었던 것이 원인.
+**재발 방지**:
+- FOCAS 상태 코드(aut, run, edit 등)처럼 정수 enum으로 CNC 상태를 판정하는 로직을 추가할 때는, 문서/추정값만으로 하드코딩하지 말고 실기기에서 실제 값을 로그로 찍어 확인한 뒤 반영한다.
+- 이미 하드코딩된 값이 있어도 "그 상태가 맞는데 코드가 거부한다"는 보고가 오면, 로그에 찍힌 실제 코드값과 하드코딩된 기대값을 우선 대조한다.
+
+---
+
 ## 체크리스트 (코드 작업 전)
 
 - [ ] FOCAS thread 내에서 `await` 사용 여부 확인

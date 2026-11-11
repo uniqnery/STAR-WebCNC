@@ -36,7 +36,10 @@ Codex는 현재 대화 맥락만으로 프로젝트 방향이 충분하지 않�
 - 스케줄러 작업: 필요 시 `docs/Scheduler.md`, `docs/scheduler-state-machine.md`를 확인한다.
 - 설비 관리 화면 또는 설비 설정 작업: 필요 시 `docs/MachineAdmin.md`를 확인한다.
 - SIMTOS 데모/전시 관련 작업: 필요 시 `docs/Simtos.md`를 확인한다.
-- FOCAS, CNC 통신, PMC, 알람, 프로그램, DNC 관련 작업: `FOCAS_REFERENCE.md`를 먼저 확인하고 관련 Agent/Focas 코드를 함께 확인한다.
+- FOCAS, CNC 통신, PMC, 알람, 프로그램 관련 작업: `FOCAS_REFERENCE.md`를 먼저 확인하고 관련 Agent/Focas 코드를 함께 확인한다.
+- DNC 관련 작업: `FOCAS_REFERENCE.md` 확인 후 `docs/DNC.md`의 현재 단계, 차단 항목, 최근 작업 이력을 반드시 확인한다.
+- DNC 작업 시작 시 `docs/DNC.md`의 대상 작업을 `진행 중`으로 갱신하고, 작업 완료 전 변경 파일, 검증 결과, 실기기 검증 여부, 남은 문제와 다음 작업을 같은 문서에 기록한다.
+- DNC 체크 항목은 코드 작성만으로 완료 처리하지 않고 빌드, 요구된 테스트, 실기기 검증 등 완료 근거가 있을 때만 체크한다.
 - 과거 상세 아키텍처 추적이 필요할 때만 `architecture.md`를 확인한다.
 
 ## UI/레이아웃 변경 요청 처리

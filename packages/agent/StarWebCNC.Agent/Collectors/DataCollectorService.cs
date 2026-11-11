@@ -37,6 +37,9 @@ public class DataCollectorService : BackgroundService
     private bool _lastM20State = false;
     // alarmNo → AlarmInfo: raise 시 전체 정보를 보존, clear 시 category/typeCode 로그에 사용
     private readonly Dictionary<int, AlarmInfo> _activeAlarms = new();
+    private bool _alarmStateInitialized;
+    private DateTime _lastAlarmSnapshot = DateTime.MinValue;
+    private static readonly TimeSpan AlarmSnapshotInterval = TimeSpan.FromSeconds(10);
 
     // rdopmsg2 안전성 플래그 — ProbeOpMsg2() 결과로 설정
     // false = 아직 미검증 또는 블로킹 의심 → 수집 루프 호출 금지
@@ -377,8 +380,22 @@ public class DataCollectorService : BackgroundService
     {
         if (!_connection.IsConnected) return;
 
-        var currentAlarms = _dataReader.ReadAlarms();
+        if (!_dataReader.TryReadAlarms(out var currentAlarms)) return;
+
         var currentAlarmNos = currentAlarms.Select(a => a.AlarmNo).ToHashSet();
+        var stateChanged = false;
+
+        if (!_alarmStateInitialized)
+        {
+            _activeAlarms.Clear();
+            foreach (var alarm in currentAlarms)
+                _activeAlarms[alarm.AlarmNo] = alarm;
+
+            PublishAlarmSnapshot(currentAlarms);
+            _alarmStateInitialized = true;
+            _lastAlarmSnapshot = DateTime.UtcNow;
+            _logger.LogInformation("[ALARM-SNAPSHOT] initialized count={Count}", currentAlarms.Count);
+        }
 
         // ── RAISE: 새로 발생한 알람 ──────────────────────────────────────
         foreach (var alarm in currentAlarms)
@@ -386,6 +403,7 @@ public class DataCollectorService : BackgroundService
             if (_activeAlarms.ContainsKey(alarm.AlarmNo)) continue;
 
             _activeAlarms[alarm.AlarmNo] = alarm; // 전체 AlarmInfo 보존 (clear 시 로그용)
+            stateChanged = true;
 
             var alarmEvent = new AlarmEventMessage
             {
@@ -426,6 +444,7 @@ public class DataCollectorService : BackgroundService
         {
             _activeAlarms.TryGetValue(alarmNo, out var savedAlarm);
             _activeAlarms.Remove(alarmNo);
+            stateChanged = true;
 
             var alarmEvent = new AlarmEventMessage
             {
@@ -442,6 +461,12 @@ public class DataCollectorService : BackgroundService
             _logger.LogInformation(
                 "[ALARM-CLEARED] no={No} cat={Cat}(typeCode={TypeCode})",
                 alarmNo, savedAlarm?.Category ?? "?", savedAlarm?.Type ?? -1);
+        }
+
+        if (!stateChanged && DateTime.UtcNow - _lastAlarmSnapshot >= AlarmSnapshotInterval)
+        {
+            PublishAlarmSnapshot(currentAlarms);
+            _lastAlarmSnapshot = DateTime.UtcNow;
         }
 
         // ── 오퍼레이터 메시지 수집 (rdopmsg2 / 1000ms 주기) ─────────────
@@ -472,6 +497,23 @@ public class DataCollectorService : BackgroundService
                 Message = m.Message,
             }).ToList();
         }
+    }
+
+    private void PublishAlarmSnapshot(IEnumerable<AlarmInfo> alarms)
+    {
+        var snapshot = new AlarmSnapshotMessage
+        {
+            MachineId = _settings.MachineId,
+            Alarms = alarms.Select(alarm => new AlarmSnapshotItem
+            {
+                AlarmNo = alarm.AlarmNo,
+                AlarmMsg = alarm.Message,
+                Category = alarm.Category,
+                AlarmTypeCode = alarm.Type,
+            }).ToList(),
+        };
+
+        _mqttService.PublishAlarmSnapshotAsync(snapshot).GetAwaiter().GetResult();
     }
 
     /// <summary>
@@ -572,10 +614,12 @@ public class DataCollectorService : BackgroundService
 
         if (m20Address != null)
         {
-            var pmcData = _dataReader.ReadPmcR(m20Address.Address, 1);
-            if (pmcData != null && pmcData.Length > 0)
+            // ReadPmcR는 R영역만 읽으므로 M20Addr가 R타입이 아니면 항상 틀린 값을 읽는다.
+            // 타입별 영역을 구분하는 ReadPmcBit를 사용한다.
+            var m20Bit = _dataReader.ReadPmcBit(m20Address);
+            if (m20Bit != null)
             {
-                bool currentM20State = (pmcData[0] & (1 << m20Address.Bit)) != 0;
+                bool currentM20State = m20Bit == 1;
 
                 if (currentM20State && !_lastM20State)
                 {

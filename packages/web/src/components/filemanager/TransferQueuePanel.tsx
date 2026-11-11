@@ -101,9 +101,9 @@ function getOperationLabel(type: string): { label: string; color: string } {
     case 'TRANSFER_CNC_TO_PC':
       return { label: 'CNC→PC', color: 'text-green-400' };
     case 'DELETE_REPO':
-      return { label: 'DNC 삭제', color: 'text-red-400' };
+      return { label: '저장소 삭제', color: 'text-red-400' };
     case 'EDIT_REPO':
-      return { label: 'DNC 저장', color: 'text-amber-300' };
+      return { label: '저장소 저장', color: 'text-amber-300' };
     default:
       return { label: type, color: 'text-gray-400' };
   }

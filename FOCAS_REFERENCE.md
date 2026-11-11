@@ -44,6 +44,10 @@ Web UI
 
 ### 1. 1 Agent = 1 CNC
 
+단독 DNC 시작은 파일·전용 핸들·Path1 준비 → 모드/STOP/알람/인터락 재검사 → 작업자가 설비 조작반 Cycle Start를 직접 누름 → `cnc_dncstart2` CNC 요청 확인 → 전송 순서로 처리한다. 웹·Agent는 단독 테스트에서 Cycle Start PMC를 출력하지 않는다. `awaiting_cycle_start` 상태로 최대 60초 대기하고, 시간초과 또는 사용자가 취소하면 데이터 공급 세션을 종료한다. `cnc_dncstart2`의 `char*`는 선택한 PC 파일명 입력이 아니라 CNC 요청명 출력 버퍼다. 비어 있지 않은 M198 요청이면 단독 파일 공급을 차단한다. 스케줄러 자동 시작 순서는 아직 별도 검증이 필요하다.
+
+MC-002에서 확인한 `cnc_statinfo.aut` 기준은 `10=RMT/DNC`, `9=REF`이다. DNC 시작 검사와 `CncStatus.ModeString` 표시를 동일하게 유지한다. `run=1`은 현재 코드에서 HOLD로 표시하며, 단독 DNC 시작은 `run=0`만 허용한다.
+
 현재 구조는 한 Agent 프로세스가 한 CNC를 담당하는 방식이다. 여러 장비를 연결할 때는 Agent를 여러 개 실행하고, 각 Agent가 서로 다른 MachineId, CNC IP, MQTT topic을 사용한다.
 
 다중 CNC를 한 Agent 내부에서 동시에 처리하는 구조는 현재 구현되어 있지 않다.
@@ -175,6 +179,9 @@ PMC bit를 telemetry에 넣으면 UI 램프와 interlock 표시가 telemetry 주
 현재 동작:
 
 - 현재 CNC alarm message를 읽고 MQTT/WebSocket으로 전달한다.
+- Agent는 최초 정상 읽기와 이후 10초 주기로 현재 알람 전체 스냅샷을 발행한다.
+- Server는 정상 스냅샷과 DB의 미해제 알람을 대조하여 재시작 중 누락된 해제 상태를 복구한다.
+- FOCAS 읽기 실패는 빈 알람 목록과 구분하며, 읽기 실패 시 DB 알람을 해제하지 않는다.
 - AlarmStrip UI는 안정적인 CNC alarm 기반으로 표시한다.
 
 주의:
@@ -245,6 +252,9 @@ PMC bit를 telemetry에 넣으면 UI 램프와 interlock 표시가 telemetry 주
 현재 구현:
 
 - PATH1/PATH2 프로그램 목록 조회
+- V1 목록에 없는 사용자 프로그램(O0001~O7999) 코멘트는 `cnc_upstart3`/`cnc_upload3` 헤더 조회로 보완하고 5분간 캐시
+- 비축 파라미터 `3202#4(NE9)`를 `cnc_rdparam(handle, 3202, 0, 8, ...)`으로 읽어 O9000~O9999 보호 상태를 판정
+- `NE9=1`이면 O9000~O9999를 목록에서 숨기지 않고 `isProtected=true`로 반환하며, 파라미터 읽기 실패도 안전상 보호 상태로 취급
 - 프로그램 번호 search
 - path 변경 후 작업하고 다시 path 1 복귀
 - memory mode scheduler row 시작 시 search + rewind
@@ -252,7 +262,10 @@ PMC bit를 telemetry에 넣으면 UI 램프와 interlock 표시가 telemetry 주
 주의:
 
 - PATH2 작업 후 path 1 복귀를 빠뜨리지 않는다.
+- V2/V3 디렉터리 API는 일부 실장비에서 블로킹되므로 코멘트 조회에 사용하지 않는다.
 - HOLD/run 상태에서는 `cnc_search`/`cnc_rewind`가 EW_OK를 반환해도 실제 적용되지 않을 수 있으므로 상태 확인이 필요하다.
+- O9000~O9999 보호 상태에서는 CNC 대상 `SEARCH_PROGRAM`, 업로드, 다운로드와 백업 추출을 Agent에서 최종 차단한다. PC 공용·DNC 저장소의 파일 관리는 이 파라미터의 적용 대상이 아니다.
+- `3202#4` 비트 방향과 `axis=0` 읽기 성공 여부는 CNC 시리즈별 실기기에서 화면 보호 상태와 대조한다.
 
 ### 프로그램 업로드/다운로드/백업
 
@@ -271,6 +284,7 @@ PMC bit를 telemetry에 넣으면 UI 램프와 interlock 표시가 telemetry 주
 - force overwrite 시 기존 O번호 삭제 후 업로드
 - CNC -> PC 프로그램 다운로드
 - 프로그램 목록 기반 backup zip 생성
+- `3202#4(NE9)` 보호 또는 확인 불가 상태에서는 O9000~O9999를 업로드·다운로드·백업 대상에서 제외
 
 주의:
 
@@ -324,6 +338,8 @@ PMC bit를 telemetry에 넣으면 UI 램프와 interlock 표시가 telemetry 주
 - write 기능은 CNC 상태와 실제 반영 여부를 실기기에서 검증해야 한다.
 
 ### 스케줄러와 DNC 관련 현재 상태
+
+> DNC의 상세 구현 계획, 진행 체크리스트, 실기기 검증 결과와 작업 이력은 `docs/DNC.md`에서 관리한다. 이 문서는 DNC 작업에 적용되는 FOCAS 공통 기술 기준을 제공한다.
 
 구현 위치: `SchedulerManager.cs`, `FocasDataReader.cs`, server scheduler route
 

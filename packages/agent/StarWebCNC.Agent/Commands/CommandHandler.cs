@@ -83,6 +83,7 @@ public class CommandHandler
                 "WRITE_MACRO"            => await ExecuteWriteMacroAsync(command),
                 "RELOAD_TEMPLATE"        => await ExecuteReloadTemplateAsync(command),
                 "LIST_PROGRAMS"          => await ExecuteListProgramsAsync(command),
+                "GET_PROGRAM_PROTECTION" => ExecuteGetProgramProtection(command),
                 "UPLOAD_PROGRAM"         => await ExecuteUploadProgramAsync(command),
                 "DOWNLOAD_PROGRAM"       => await ExecuteDownloadProgramAsync(command),
                 // ── NC 데이터 (Offset / Counter / Tool-Life) ──
@@ -152,9 +153,11 @@ public class CommandHandler
 
         return page.Evaluate(addr =>
         {
-            var pmcData = _dataReader.ReadPmcR(addr.Address, 1);
-            if (pmcData == null || pmcData.Length == 0) return null;
-            return (pmcData[0] & (1 << addr.Bit)) != 0;
+            // ReadPmcR는 R영역만 읽으므로 X/Y/G 등 다른 타입 주소에서 항상 틀린 값을 읽는다.
+            // 탑바 인터락 pill과 동일하게 타입별 영역을 구분하는 ReadPmcBit를 사용한다.
+            var bit = _dataReader.ReadPmcBit(addr);
+            if (bit == null) return null;
+            return bit == 1;
         });
     }
 
@@ -264,6 +267,7 @@ public class CommandHandler
             int.TryParse(pObj?.ToString(), out int parsedPath) && parsedPath >= 1)
             pathNo = parsedPath;
 
+        var protection = _dataReader.ReadProgram9000Protection();
         var programs = _dataReader.ListPrograms(pathNo);
         if (programs == null)
             return Task.FromResult(CreateFailureResult(command, "CNC_NOT_CONNECTED", "CNC에 연결되어 있지 않습니다."));
@@ -283,10 +287,28 @@ public class CommandHandler
                     modifiedAt  = DateTime.UtcNow.ToString("o"),
                     programNo   = p.ProgramNo,
                     comment     = p.Comment,
+                    isProtected = IsProtectedProgram(p.Number, protection),
                 }).ToList(),
                 count = programs.Count,
+                program9000Protection = ProtectionStateName(protection),
             },
         });
+    }
+
+    private CommandResultMessage ExecuteGetProgramProtection(CommandMessage command)
+    {
+        var protection = _dataReader.ReadProgram9000Protection();
+        return new CommandResultMessage
+        {
+            MachineId = _settings.MachineId,
+            CorrelationId = command.CorrelationId,
+            Status = "success",
+            Result = new
+            {
+                program9000Protection = ProtectionStateName(protection),
+                protected9000 = protection != Program9000ProtectionState.Unprotected,
+            },
+        };
     }
 
     /// <summary>
@@ -304,6 +326,10 @@ public class CommandHandler
 
         command.Params.TryGetValue("fileName", out var fileNameObj);
         string fileName = fileNameObj?.ToString() ?? "unknown.nc";
+        int targetProgramNo = ExtractProgramNoFromContent(content);
+        CommandResultMessage? protectionFailure = ValidateProtectedProgramOperation(command, targetProgramNo);
+        if (protectionFailure != null)
+            return protectionFailure;
 
         bool forceOverwrite = false;
         if (command.Params.TryGetValue("forceOverwrite", out var foObj))
@@ -314,7 +340,7 @@ public class CommandHandler
 
         if (forceOverwrite)
         {
-            int targetNo = ExtractProgramNoFromContent(content);
+            int targetNo = targetProgramNo;
             if (targetNo > 0)
             {
                 _logger.LogInformation("UPLOAD_PROGRAM: forceOverwrite → deleting O{No:D4} first", targetNo);
@@ -361,6 +387,10 @@ public class CommandHandler
                                    .TrimStart('O', 'o');
         if (!int.TryParse(raw, out int programNo))
             return CreateFailureResult(command, "INVALID_PARAMS", $"O번호를 파싱할 수 없습니다: {fileName}");
+
+        CommandResultMessage? protectionFailure = ValidateProtectedProgramOperation(command, programNo);
+        if (protectionFailure != null)
+            return protectionFailure;
 
         int pathNo = 1;
         if (command.Params.TryGetValue("path", out var pObj) &&
@@ -649,7 +679,10 @@ public class CommandHandler
         _logger.LogInformation("CREATE_BACKUP start: type={Type} id={Id}", backupType, backupId);
 
         // 1. 프로그램 목록
-        var programs = _dataReader.ListPrograms() ?? new List<ProgramDirectoryEntry>();
+        var backupProtection = _dataReader.ReadProgram9000Protection();
+        var programs = (_dataReader.ListPrograms() ?? new List<ProgramDirectoryEntry>())
+            .Where(program => !IsProtectedProgram(program.Number, backupProtection))
+            .ToList();
 
         // 2. EDIT 모드 여부 확인
         var status   = _dataReader.ReadStatus();
@@ -865,6 +898,10 @@ public class CommandHandler
             pathNo = parsedPath;
         }
 
+        CommandResultMessage? protectionFailure = ValidateProtectedProgramOperation(command, programNo);
+        if (protectionFailure != null)
+            return protectionFailure;
+
         bool ok = _dataReader.SearchProgram(programNo, pathNo);
         if (!ok)
             return CreateFailureResult(command, "SEARCH_FAILED",
@@ -922,7 +959,38 @@ public class CommandHandler
         };
     }
 
+    private static string? ReadCommandString(CommandMessage command, string key)
+    {
+        return command.Params?.TryGetValue(key, out var value) == true
+            ? value?.ToString()
+            : null;
+    }
+
     #endregion
+
+    private CommandResultMessage? ValidateProtectedProgramOperation(CommandMessage command, int programNo)
+    {
+        if (programNo < 9000 || programNo > 9999)
+            return null;
+
+        Program9000ProtectionState protection = _dataReader.ReadProgram9000Protection();
+        return protection switch
+        {
+            Program9000ProtectionState.Unprotected => null,
+            Program9000ProtectionState.Protected => CreateFailureResult(command, "PROGRAM_9000_PROTECTED", $"O{programNo:D4}은 파라미터 3202#4(NE9)로 보호되어 있습니다."),
+            _ => CreateFailureResult(command, "PROGRAM_PROTECTION_UNKNOWN", $"O{programNo:D4} 보호 상태를 확인할 수 없어 작업을 차단했습니다."),
+        };
+    }
+
+    private static bool IsProtectedProgram(int programNo, Program9000ProtectionState protection) =>
+        programNo >= 9000 && programNo <= 9999 && protection != Program9000ProtectionState.Unprotected;
+
+    private static string ProtectionStateName(Program9000ProtectionState protection) => protection switch
+    {
+        Program9000ProtectionState.Protected => "protected",
+        Program9000ProtectionState.Unprotected => "unprotected",
+        _ => "unknown",
+    };
 
     private CommandResultMessage CreateFailureResult(CommandMessage command, string errorCode, string errorMessage)
     {

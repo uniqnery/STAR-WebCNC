@@ -123,6 +123,10 @@ export interface SchedulerConfig {
     // preset: 목표 수량을 NC에서 읽는 변수
     presetMacroNo: number;           // 프리셋 변수 번호 (기본 #10000)
     presetVarType: 'macro' | 'pcode';
+    counterEnableMacroNo: number;     // 설비 자체 카운터 ON/OFF 변수 (기본 P10002)
+    counterEnableVarType: 'macro' | 'pcode';
+    counterEnableOnValue: number;
+    counterEnableOffValue: number;
     // cycle time: PMC D 어드레스 기반
     cycleTimeAddr: string;           // PMC 주소 (예: "D96"), 빈값이면 수집 안함
     cycleTimeMultiplier: number;     // 래더 주기 → ms 배수 (파라미터 No.11930: 4 또는 8)
@@ -395,6 +399,24 @@ function loadFromStorage(): CncTemplate[] | null {
   }
 }
 
+function migrateSchedulerConfig(config: SchedulerConfig): SchedulerConfig {
+  return {
+    ...config,
+    countDisplay: Object.assign({
+      countMacroNo: 900,
+      countVarType: 'macro',
+      presetMacroNo: 10000,
+      presetVarType: 'pcode',
+      counterEnableMacroNo: 10002,
+      counterEnableVarType: 'pcode',
+      counterEnableOnValue: 1,
+      counterEnableOffValue: 0,
+      cycleTimeAddr: 'D96',
+      cycleTimeMultiplier: 4,
+    }, config.countDisplay),
+  };
+}
+
 // ── JSONC Utilities ───────────────────────────────────────
 
 function stripJsoncComments(text: string): string {
@@ -482,7 +504,7 @@ function createDefaultTemplate(): CncTemplate {
     schedulerConfig: {
       cycleStartAddr: '',
       m20Addr: '',
-      countDisplay: { countMacroNo: 900, countVarType: 'macro' as const, presetMacroNo: 10000, presetVarType: 'pcode' as const, cycleTimeAddr: 'D96', cycleTimeMultiplier: 4 },
+      countDisplay: { countMacroNo: 900, countVarType: 'macro' as const, presetMacroNo: 10000, presetVarType: 'pcode' as const, counterEnableMacroNo: 10002, counterEnableVarType: 'pcode' as const, counterEnableOnValue: 1, counterEnableOffValue: 0, cycleTimeAddr: 'D96', cycleTimeMultiplier: 4 },
       resetAddr: '',
       oneCycleStopAddr: '',
       oneCycleStopStatusAddr: '',
@@ -634,7 +656,7 @@ const _MOCK_SB20R2_STUB: Partial<CncTemplate> = {
   schedulerConfig: {
     cycleStartAddr: 'R6105.4',     // 사이클 스타트 출력 (실기기 확인값)
     m20Addr: 'R6002.4',            // M20 완료 신호 (실기기 확인값)
-    countDisplay: { countMacroNo: 900, countVarType: 'macro' as const, presetMacroNo: 10000, presetVarType: 'pcode' as const, cycleTimeAddr: 'D96', cycleTimeMultiplier: 4 },
+    countDisplay: { countMacroNo: 900, countVarType: 'macro' as const, presetMacroNo: 10000, presetVarType: 'pcode' as const, counterEnableMacroNo: 10002, counterEnableVarType: 'pcode' as const, counterEnableOnValue: 1, counterEnableOffValue: 0, cycleTimeAddr: 'D96', cycleTimeMultiplier: 4 },
     resetAddr: 'R6103.0',          // RESET 신호 (실기기 확인값)
     oneCycleStopAddr: '',          // 원사이클 스톱 출력 (미확인)
     oneCycleStopStatusAddr: '',    // 원사이클 스톱 상태 (미확인)
@@ -761,7 +783,7 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
       // 로컬 데이터 우선 (사용자 편집 내용 보존)
       const savedId = localStorage.getItem(SELECTED_KEY);
       const restoredId = stored.find(t => t.id === savedId)?.id ?? stored[0].id;
-      set({ templates: stored, selectedTemplateId: restoredId });
+      set({ templates: stored.map((template) => ({ ...template, schedulerConfig: migrateSchedulerConfig(template.schedulerConfig) })), selectedTemplateId: restoredId });
     }
 
     // 항상 서버에서 최신 템플릿 로드 (로컬 캐시 덮어쓰기)
@@ -772,6 +794,7 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
           const migrated = serverTemplates.map((t) => ({
             ...t,
             topBarInterlock: migrateTopBarInterlock(t.topBarInterlock as unknown),
+            schedulerConfig: migrateSchedulerConfig(t.schedulerConfig),
           }));
           saveToStorage(migrated);
           set((s) => ({

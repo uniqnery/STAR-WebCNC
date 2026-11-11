@@ -18,7 +18,7 @@ import schedulerRoutes, {
   handleSchedulerError,
   handleSchedulerControlDenied,
 } from './routes/scheduler';
-import alarmRoutes, { storeAlarm } from './routes/alarms';
+import alarmRoutes, { reconcileAlarmSnapshot, storeAlarm } from './routes/alarms';
 import transferRoutes from './routes/transfer';
 import backupRoutes, { updateBackupStatus } from './routes/backup';
 import productionRoutes from './routes/production';
@@ -259,7 +259,7 @@ app.use('/api/audit', auditRoutes);
 // Template Routes
 app.use('/api/templates', templateRoutes);
 
-// File Management Routes (DNC 저장소 / 공유 폴더)
+// File Management Routes (프로그램 저장소 / 공유 폴더)
 app.use('/api/files', fileRoutes);
 app.use('/api/user-activities', userActivityRoutes);
 
@@ -332,16 +332,39 @@ function setupMqttHandlers(): void {
 
   // Handle alarms from agents
   mqttService.on<AlarmMessage>(TOPICS.AGENT_ALARM, async (_topic, message) => {
-    const { machineId, alarmNo, alarmMsg, type, category, alarmTypeCode } = message;
+    const { machineId, alarmNo, alarmMsg, type, category, alarmTypeCode, alarms } = message;
+
+    if (!machineId) return;
+
+    if (type === 'snapshot') {
+      if (!Array.isArray(alarms)) return;
+
+      const changes = await reconcileAlarmSnapshot({ machineId, alarms });
+      for (const alarm of changes.occurred) {
+        wsService.sendAlarm(machineId, { ...alarm, type: 'occurred' });
+      }
+      for (const alarm of changes.cleared) {
+        wsService.sendAlarm(machineId, { ...alarm, type: 'cleared' });
+      }
+      if (changes.occurred.length > 0 || changes.cleared.length > 0) {
+        console.log(
+          `[Alarms] Snapshot reconciled ${machineId}: occurred=${changes.occurred.length}, cleared=${changes.cleared.length}`
+        );
+      }
+      return;
+    }
+
+    if ((type !== 'occurred' && type !== 'cleared') || alarmNo === undefined) return;
+    const normalizedAlarmMsg = alarmMsg ?? '';
 
     // Forward to WebSocket clients
-    wsService.sendAlarm(machineId, { alarmNo, alarmMsg, type, category, alarmTypeCode });
+    wsService.sendAlarm(machineId, { alarmNo, alarmMsg: normalizedAlarmMsg, type, category, alarmTypeCode });
 
     // Store alarm in database
     await storeAlarm({
       machineId,
       alarmNo,
-      alarmMsg,
+      alarmMsg: normalizedAlarmMsg,
       type: type === 'occurred' ? 'occur' : 'clear',
     });
 
@@ -349,7 +372,7 @@ function setupMqttHandlers(): void {
     if (type === 'occurred') {
       const machine = await prisma.machine.findUnique({ where: { machineId }, select: { name: true } });
       const machineName = machine?.name ?? machineId;
-      void pushService.sendAlarmNotification(machineId, machineName, alarmNo, alarmMsg);
+      void pushService.sendAlarmNotification(machineId, machineName, alarmNo, normalizedAlarmMsg);
     }
 
     // Publish to Redis for other server instances

@@ -873,13 +873,13 @@ router.put('/:id/tool-life', asyncHandler(async (
   }
 }));
 
-// ── DNC Config 라우트 ─────────────────────────────────────────────
+// ── Program Transfer Config 라우트 ────────────────────────────────
 
 /**
- * GET /machines/:id/dnc-config
- * DNC 경로 설정 조회
+ * GET /machines/:id/program-transfer-config
+ * 프로그램 파일전송 설정 조회
  */
-router.get('/:id/dnc-config', asyncHandler(async (
+router.get(['/:id/program-transfer-config', '/:id/dnc-config'], asyncHandler(async (
   req: Request,
   res: Response<ApiResponse>
 ) => {
@@ -887,28 +887,32 @@ router.get('/:id/dnc-config', asyncHandler(async (
 
   const machine = await prisma.machine.findFirst({
     where: { OR: [{ id }, { machineId: id }] },
-    select: { id: true, machineId: true, dncConfig: true },
+    select: { id: true, machineId: true, programTransferConfig: true },
   });
   if (!machine) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '장비를 찾을 수 없습니다.' } });
 
-  return res.json({ success: true, data: { machineId: machine.machineId, dncConfig: machine.dncConfig } });
+  return res.json({ success: true, data: { machineId: machine.machineId, programTransferConfig: machine.programTransferConfig, dncConfig: machine.programTransferConfig } });
 }));
 
 /**
- * PUT /machines/:id/dnc-config
- * DNC 경로 설정 저장 (Admin/HQ_ENGINEER)
+ * PUT /machines/:id/program-transfer-config
+ * 프로그램 파일전송 설정 저장 (Admin/HQ_ENGINEER)
  * body: { path1: string, path2: string, path3?: string }
  */
-router.put('/:id/dnc-config',
+router.put(['/:id/program-transfer-config', '/:id/dnc-config'],
   authorize(UserRole.ADMIN, UserRole.HQ_ENGINEER),
   asyncHandler(async (req: Request, res: Response<ApiResponse>) => {
     const { id } = req.params;
-    const { path1, path2, path3, mainMode, subMode } = req.body as {
+    const { path1, path2, path3, mainMode, subMode, mainTempProgramNo, mainParkingProgramNo, subTempProgramNo, subParkingProgramNo } = req.body as {
       path1: string;
       path2: string;
       path3?: string;
-      mainMode?: 'memory' | 'dnc';
-      subMode?: 'memory' | 'dnc';
+      mainMode?: 'memory' | 'transfer' | 'dnc';
+      subMode?: 'memory' | 'transfer' | 'dnc';
+      mainTempProgramNo?: number;
+      mainParkingProgramNo?: number;
+      subTempProgramNo?: number;
+      subParkingProgramNo?: number;
     };
 
     const machine = await prisma.machine.findFirst({
@@ -916,23 +920,27 @@ router.put('/:id/dnc-config',
     });
     if (!machine) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '장비를 찾을 수 없습니다.' } });
 
-    const existing = (machine.dncConfig ?? {}) as Record<string, unknown>;
-    const dncConfig = {
+    const existing = (machine.programTransferConfig ?? {}) as Record<string, unknown>;
+    const programTransferConfig = {
       ...existing,
       path1: path1 || '',
       path2: path2 || '',
       ...(path3 !== undefined && { path3 }),
-      mainMode: mainMode ?? (existing.mainMode as string) ?? (existing.executionMode as string) ?? 'memory',
-      subMode:  subMode  ?? (existing.subMode  as string) ?? 'memory',
+      mainMode: (mainMode === 'dnc' ? 'transfer' : mainMode) ?? ((existing.mainMode as string) === 'dnc' ? 'transfer' : existing.mainMode as string) ?? ((existing.executionMode as string) === 'dnc' ? 'transfer' : existing.executionMode as string) ?? 'memory',
+      subMode:  (subMode === 'dnc' ? 'transfer' : subMode) ?? ((existing.subMode as string) === 'dnc' ? 'transfer' : existing.subMode as string) ?? 'memory',
+      mainTempProgramNo: mainTempProgramNo ?? Number(existing.mainTempProgramNo ?? 7777),
+      mainParkingProgramNo: mainParkingProgramNo ?? Number(existing.mainParkingProgramNo ?? 7776),
+      subTempProgramNo: subTempProgramNo ?? Number(existing.subTempProgramNo ?? 7775),
+      subParkingProgramNo: subParkingProgramNo ?? Number(existing.subParkingProgramNo ?? 7774),
     };
 
     const updated = await prisma.machine.update({
       where: { id: machine.id },
-      data: { dncConfig },
-      select: { machineId: true, dncConfig: true },
+      data: { programTransferConfig },
+      select: { machineId: true, programTransferConfig: true },
     });
 
-    return res.json({ success: true, data: { machineId: updated.machineId, dncConfig: updated.dncConfig } });
+    return res.json({ success: true, data: { machineId: updated.machineId, programTransferConfig: updated.programTransferConfig, dncConfig: updated.programTransferConfig } });
   })
 );
 

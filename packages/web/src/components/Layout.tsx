@@ -57,10 +57,10 @@ export function Layout({ children }: LayoutProps) {
   ];
 
   const machineSubMenus = [
-    { path: '/remote', label: 'Remote Panel', icon: RemotePanelIcon },
-    { path: '/scheduler', label: 'Scheduler', icon: SchedulerIcon },
-    { path: '/monitoring', label: 'Monitoring', icon: MonitoringIcon },
-    { path: '/transfer', label: 'File Transfer', icon: TransferIcon },
+    { path: '/remote', label: 'Remote Panel', icon: RemotePanelIcon, desktopOnly: false },
+    { path: '/scheduler', label: 'Scheduler', icon: SchedulerIcon, desktopOnly: false },
+    { path: '/monitoring', label: 'Monitoring', icon: MonitoringIcon, desktopOnly: false },
+    { path: '/transfer', label: 'File Transfer', icon: TransferIcon, desktopOnly: false },
   ];
 
   return (
@@ -146,7 +146,7 @@ export function Layout({ children }: LayoutProps) {
                   {machineSubMenus.map((item) => {
                     const isActive = location.pathname === item.path;
                     return (
-                      <li key={item.path}>
+                      <li key={item.path} className={item.desktopOnly ? 'max-lg:hidden' : undefined}>
                         <Link
                           to={item.path}
                           onClick={handleNavClick}

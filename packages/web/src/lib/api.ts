@@ -116,6 +116,15 @@ class ApiClient {
     });
   }
 
+  async patch<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
+    return this.request<T>(`${this.baseUrl}${path}`, {
+      method: 'PATCH',
+      headers: this.getHeaders(),
+      credentials: 'include',
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
   async delete<T>(path: string): Promise<ApiResponse<T>> {
     return this.request<T>(`${this.baseUrl}${path}`, {
       method: 'DELETE',
@@ -271,6 +280,12 @@ export const schedulerApi = {
 
   addRow: (data: { machineId: string; mainProgramNo: string; subProgramNo?: string; preset: number }) =>
     api.post('/api/scheduler/rows', data),
+
+  batchRegister: (data: { machineId: string; programNos: string[]; subProgramNo?: string; preset?: number }) =>
+    api.post('/api/scheduler/rows/batch-register', data),
+
+  resyncProgramRow: (rowId: string) =>
+    api.post(`/api/scheduler/rows/${rowId}/resync-program`),
 
   updateRow: (rowId: string, data: { mainProgramNo?: string; subProgramNo?: string | null; preset?: number; count?: number }) =>
     api.put(`/api/scheduler/rows/${rowId}`, data),
@@ -468,19 +483,19 @@ export const cameraApi = {
     api.get(`/api/cameras/${id}/status`),
 };
 
-// DNC Config API
-export const dncApi = {
+// Program Transfer Config API
+export const programTransferApi = {
   // 서버 파일시스템 폴더 목록 조회
   listFolders: (basePath: string) =>
     api.get(`/api/filesystem/list?path=${encodeURIComponent(basePath)}`),
 
-  // 장비 DNC 경로 설정 조회
+  // 장비 프로그램 파일전송 설정 조회
   getConfig: (machineId: string) =>
-    api.get(`/api/machines/${machineId}/dnc-config`),
+    api.get(`/api/machines/${machineId}/program-transfer-config`),
 
-  // 장비 DNC 경로 설정 저장 (관리자 전용)
-  saveConfig: (machineId: string, config: { path1: string; path2: string; path3?: string; mainMode?: 'memory' | 'dnc'; subMode?: 'memory' | 'dnc' }) =>
-    api.put(`/api/machines/${machineId}/dnc-config`, config),
+  // 장비 프로그램 파일전송 설정 저장 (관리자 전용)
+  saveConfig: (machineId: string, config: { path1: string; path2: string; path3?: string; mainMode?: 'memory' | 'transfer'; subMode?: 'memory' | 'transfer'; mainTempProgramNo?: number; mainParkingProgramNo?: number; subTempProgramNo?: number; subParkingProgramNo?: number }) =>
+    api.put(`/api/machines/${machineId}/program-transfer-config`, config),
 };
 
 // NC Data API (Offset / Count / Tool-Life)
@@ -513,9 +528,25 @@ export const ncDataApi = {
 
 // File Management API (저장소/트랜스퍼/뷰어)
 export const fileApi = {
-  // DNC 저장소 파일 목록
+  // 프로그램 저장소 파일 목록
   listRepoFiles: (machineId: string, pathKey: string) =>
     api.get(`/api/files/repo/${machineId}/${pathKey}`),
+
+  getRepoPath1Info: (machineId: string) =>
+    api.get(`/api/files/repo/${machineId}/path1/info`),
+
+  // 외부 PC → 장비별 Path1 프로그램 저장소 파일 업로드
+  uploadRepoFile: (machineId: string, file: File, options?: { targetProgramNo?: string; comment?: string; overwrite?: boolean }) => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    if (options?.targetProgramNo) form.append('targetProgramNo', options.targetProgramNo);
+    if (options?.comment) form.append('comment', options.comment);
+    form.append('overwrite', String(options?.overwrite ?? false));
+    return api.postForm(`/api/files/repo/${machineId}/path1/upload`, form);
+  },
+
+  updateRepoComment: (machineId: string, programNo: string, comment: string) =>
+    api.patch(`/api/files/repo/${machineId}/path1/${encodeURIComponent(programNo)}/comment`, { comment }),
 
   // PC 공용 저장소 파일 목록
   listShareFiles: () =>
@@ -534,16 +565,16 @@ export const fileApi = {
     api.get(`/api/transfer/${machineId}/programs?path=${path}`),
 
   // 파일 내용 읽기
-  readFile: (root: string, machineId: string, fileName: string) =>
-    api.get(`/api/files/read?root=${root}&machineId=${machineId}&name=${encodeURIComponent(fileName)}`),
+  readFile: (root: string, machineId: string, fileName: string, pathKey?: string) =>
+    api.get(`/api/files/read?root=${root}&machineId=${machineId}&name=${encodeURIComponent(fileName)}${pathKey ? `&pathKey=${pathKey}` : ''}`),
 
   // 파일 저장
-  writeFile: (root: string, machineId: string, fileName: string, content: string) =>
-    api.put('/api/files/write', { root, machineId, fileName, content }),
+  writeFile: (root: string, machineId: string, fileName: string, content: string, pathKey?: string) =>
+    api.put('/api/files/write', { root, machineId, pathKey, fileName, content }),
 
   // 파일 삭제
-  deleteFiles: (root: string, machineId: string, fileNames: string[]) =>
-    api.post('/api/files/delete', { root, machineId, fileNames }),
+  deleteFiles: (root: string, machineId: string, fileNames: string[], pathKey?: string) =>
+    api.post('/api/files/delete', { root, machineId, pathKey, fileNames }),
 
   // CNC 프로그램 내용 미리보기 (동기 응답)
   readCncProgram: (machineId: string, programNo: number, path = 1) =>
@@ -556,7 +587,6 @@ export const fileApi = {
   transfer: (machineId: string, direction: string, fileNames: string[], conflictPolicy: string, path = 1, targetProgramNos?: Record<string, string>, forceOverwrite?: boolean) =>
     api.post('/api/files/transfer', { machineId, direction, fileNames, conflictPolicy, path, targetProgramNos, forceOverwrite }),
 };
-
 
 // User Activity History API
 export const userActivityApi = {

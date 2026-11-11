@@ -431,7 +431,7 @@
     "_monitoring_description": "실시간 모니터링 지원",
 
     "scheduler": true,
-    "_scheduler_description": "스케줄러(DNC/Memory 순차실행) 지원",
+    "_scheduler_description": "스케줄러(CNC 저장/파일전송 순차실행) 지원",
 
     "fileTransfer": true,
     "_fileTransfer_description": "NC 프로그램 전송 지원",

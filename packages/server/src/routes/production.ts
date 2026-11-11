@@ -197,6 +197,8 @@ export async function recordProduction(data: {
   partsCount: number;
   status: string;
   errorCode?: string;
+  programComment?: string;
+  programSha256?: string;
 }): Promise<void> {
   try {
     const machine = await prisma.machine.findUnique({ where: { machineId: data.machineId } });
@@ -206,6 +208,11 @@ export async function recordProduction(data: {
     }
 
     const cycleTime = Math.round((data.endTime.getTime() - data.startTime.getTime()) / 1000);
+    const schedulerSnapshot = await prisma.schedulerRow.findFirst({
+      where: { machineDbId: machine.id, mainProgramNo: data.programNo },
+      orderBy: { updatedAt: 'desc' },
+      select: { mainProgramComment: true, mainProgramSha256: true },
+    });
 
     await prisma.productionLog.create({
       data: {
@@ -217,6 +224,8 @@ export async function recordProduction(data: {
         partsCount: data.partsCount,
         status:     data.status,
         errorCode:  data.errorCode,
+        programComment: data.programComment ?? schedulerSnapshot?.mainProgramComment,
+        programSha256: data.programSha256 ?? schedulerSnapshot?.mainProgramSha256,
       },
     });
   } catch (error) {

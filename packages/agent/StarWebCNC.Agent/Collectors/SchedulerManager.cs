@@ -1,4 +1,6 @@
 using System.Threading.Channels;
+using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StarWebCNC.Agent.Configuration;
@@ -31,9 +33,10 @@ public class SchedulerManager
     private bool _waitingForPath2OnlyM20 = false; // Path2Only 완료 M20 대기 (카운트 미반영)
 
     // ── 실행 모드 설정 (START 수신 시 저장) ─────────────────────
-    private string _mainMode = "memory";   // Path1 실행 모드: "memory" | "dnc"
-    private string _subMode  = "memory";   // Path2 실행 모드: "memory" | "dnc"
-    private DncPathsPayload? _dncPaths;    // DNC 경로 설정
+    private string _mainMode = "memory";   // Path1 실행 모드: "memory" | "transfer"
+    private string _subMode  = "memory";   // Path2 실행 모드: "memory" | "transfer"
+    private readonly Dictionary<string, ProgramTransferPayload> _transferPrograms = new();
+    private ProgramTransferConfigPayload _transferConfig = new();
 
     // ── 스케줄러 명령 큐 (MQTT 스레드 → FOCAS 스레드) ─────────
     private readonly Channel<SchedulerMessage> _commandChannel =
@@ -120,10 +123,7 @@ public class SchedulerManager
         {
             _waitingForPath2OnlyM20 = false;
             _logger.LogInformation("[Scheduler] M20: Path2Only 완료 M20 수신 — 카운트 미반영, 행 완료");
-            var rowId = _currentRow.Id;
-            _currentRow.Status = "COMPLETED";
-            PublishSchedulerRowCompleted(rowId);
-            ExecuteNextPendingRow(CancellationToken.None);
+            FinishCurrentRow(CancellationToken.None);
             return true;
         }
 
@@ -207,6 +207,13 @@ public class SchedulerManager
                     _logger.LogWarning("[Scheduler] PAUSE ignored: not RUNNING (state={State})", _state);
                 break;
 
+            case "QUEUE_UPDATE":
+                if (_state == SchedulerRunState.RUNNING || _state == SchedulerRunState.PAUSED)
+                    HandleQueueUpdate(cmd);
+                else
+                    _logger.LogWarning("[Scheduler] QUEUE_UPDATE ignored: state={State}", _state);
+                break;
+
             case "CANCEL":
                 HandleCancel();
                 break;
@@ -224,10 +231,20 @@ public class SchedulerManager
             return;
         }
 
-        // DNC 실행 설정 저장 (행 시작 전 반드시 먼저)
-        _mainMode  = string.IsNullOrEmpty(cmd.MainMode) ? "memory" : cmd.MainMode.ToLower();
-        _subMode   = string.IsNullOrEmpty(cmd.SubMode)  ? "memory" : cmd.SubMode.ToLower();
-        _dncPaths  = cmd.DncPaths;
+        // 프로그램 실행 설정 저장 (행 시작 전 반드시 먼저)
+        _mainMode  = NormalizeExecutionMode(cmd.MainMode);
+        _subMode   = NormalizeExecutionMode(cmd.SubMode);
+        _transferPrograms.Clear();
+        foreach (ProgramTransferPayload program in cmd.EffectiveTransferPrograms)
+            _transferPrograms[ProgramKey(program.RowId, program.Path)] = program;
+        _transferConfig = cmd.TransferConfig ?? new ProgramTransferConfigPayload();
+
+        if (!DisableMachineCounter(cfg))
+        {
+            ReportError(null, "MACHINE_COUNTER_DISABLE_FAILED",
+                "설비 자체 카운터를 OFF로 전환하지 못했습니다. 템플릿의 카운터 ON/OFF 변수 설정을 확인하세요.");
+            return;
+        }
 
         _logger.LogInformation("[Scheduler] START: mainMode={Main} subMode={Sub}", _mainMode, _subMode);
         PublishEvent("SCHEDULER_STARTED", null, null, "스케줄러 시작");
@@ -253,6 +270,46 @@ public class SchedulerManager
         _currentRow             = null;
         SetState(SchedulerRunState.RUNNING);
         ExecuteNextPendingRow(ct);
+    }
+
+    private void HandleQueueUpdate(SchedulerMessage cmd)
+    {
+        foreach (ProgramTransferPayload program in cmd.EffectiveTransferPrograms)
+            _transferPrograms[ProgramKey(program.RowId, program.Path)] = program;
+
+        foreach (SchedulerRowPayload payload in cmd.Rows ?? new List<SchedulerRowPayload>())
+        {
+            SchedulerRowInfo? existing = _rows.FirstOrDefault(row => row.Id == payload.Id);
+            if (existing == null)
+            {
+                _rows.Add(new SchedulerRowInfo
+                {
+                    Id = payload.Id,
+                    Order = payload.Order,
+                    MainProgramNo = payload.MainProgramNo,
+                    SubProgramNo = payload.SubProgramNo,
+                    Preset = payload.Preset,
+                    Count = payload.Count,
+                    Status = payload.Status,
+                });
+                continue;
+            }
+
+            if (ReferenceEquals(existing, _currentRow) || existing.Status == "RUNNING")
+                continue;
+
+            existing.Order = payload.Order;
+            existing.MainProgramNo = payload.MainProgramNo;
+            existing.SubProgramNo = payload.SubProgramNo;
+            existing.Preset = payload.Preset;
+            existing.Count = payload.Count;
+            existing.Status = payload.Status;
+        }
+
+        _rows.Sort((left, right) => left.Order.CompareTo(right.Order));
+        _logger.LogInformation("[Scheduler] QUEUE_UPDATE applied: rows={RowCount}, manifests={ManifestCount}",
+            cmd.Rows?.Count ?? 0, cmd.EffectiveTransferPrograms.Count);
+        PublishEvent("SCHEDULER_QUEUE_UPDATED", null, null, "대기 프로그램 추가·갱신");
     }
 
     private void HandleResume(CancellationToken ct)
@@ -436,33 +493,23 @@ public class SchedulerManager
 
     /// <summary>
     /// Path1/Path2 실행 모드를 독립적으로 처리합니다.
-    /// mainMode: "memory" → cnc_search + 선두 복귀 / "dnc" → DNC 파일 확인 (선두 복귀 불필요)
-    /// subMode:  "memory" → cnc_search(path=2) / "dnc" → DNC 파일 확인
+    /// mainMode/subMode: "memory" → CNC 저장 프로그램 선택, "transfer" → 저장소 파일을 임시 O번호로 전송 후 선택
     ///           subProgramNo 있을 때만 Path2 처리. 모드 무관 cnc_rewind(path=2) 수행.
     /// </summary>
     private bool StartRowExec(SchedulerRowInfo row, SchedulerConfig cfg)
     {
         // ── [4] Path1 프로그램 설정 ──────────────────────────────
-        if (_mainMode == "dnc")
+        int mainProgramNo;
+        if (_mainMode == "transfer")
         {
-            if (_dncPaths == null)
-            {
-                ReportError(row.Id, "DNC_NO_PATHS", "DNC 경로 설정이 없습니다 (START 시 미전달).");
-                return false;
-            }
-            string path1File = ResolveDncFilePath(_dncPaths.Path1, row.MainProgramNo);
-            _logger.LogInformation("[Scheduler][DNC] Path1 파일 경로: {Path}", path1File);
-            if (!string.IsNullOrEmpty(path1File) && !System.IO.File.Exists(path1File))
-            {
-                ReportError(row.Id, "DNC_FILE_NOT_FOUND", $"Path1 DNC 파일 없음: {path1File}");
-                return false;
-            }
-            // DNC는 파일 선두부터 스트리밍 → 선두 복귀 불필요
+            mainProgramNo = _transferConfig.MainTempProgramNo;
+            if (!PrepareTransferredProgram(row, 1, mainProgramNo, _transferConfig.MainParkingProgramNo)) return false;
+            row.MainTransferred = true;
         }
-        else // memory
+        else
         {
-            int progNo = ParseProgramNo(row.MainProgramNo);
-            if (progNo > 0 && !_dataReader.SearchProgram(progNo, 1))
+            mainProgramNo = ParseProgramNo(row.MainProgramNo);
+            if (mainProgramNo > 0 && !_dataReader.SearchProgram(mainProgramNo, 1))
             {
                 ReportError(row.Id, "SEARCH_FAILED", $"프로그램 검색 실패: {row.MainProgramNo}");
                 return false;
@@ -472,22 +519,12 @@ public class SchedulerManager
         // ── [4] Path2 프로그램 설정 (subProgramNo 있을 때만) ─────
         if (!string.IsNullOrEmpty(row.SubProgramNo))
         {
-            if (_subMode == "dnc")
+            if (_subMode == "transfer")
             {
-                if (_dncPaths == null)
-                {
-                    ReportError(row.Id, "DNC_NO_PATHS", "DNC 경로 설정이 없습니다.");
-                    return false;
-                }
-                string path2File = ResolveDncFilePath(_dncPaths.Path2, row.SubProgramNo);
-                _logger.LogInformation("[Scheduler][DNC] Path2 파일 경로: {Path}", path2File);
-                if (!string.IsNullOrEmpty(path2File) && !System.IO.File.Exists(path2File))
-                {
-                    ReportError(row.Id, "DNC_FILE_NOT_FOUND", $"Path2 DNC 파일 없음: {path2File}");
-                    return false;
-                }
+                if (!PrepareTransferredProgram(row, 2, _transferConfig.SubTempProgramNo, _transferConfig.SubParkingProgramNo)) return false;
+                row.SubTransferred = true;
             }
-            else // memory
+            else
             {
                 int subProgNo = ParseProgramNo(row.SubProgramNo);
                 if (subProgNo > 0 && !_dataReader.SearchProgram(subProgNo, 2))
@@ -507,12 +544,10 @@ public class SchedulerManager
             }
         }
 
-        // ── [5] Path1 선두 복귀 (memory 모드만) ─────────────────
-        // DNC는 파일을 선두부터 스트리밍하므로 불필요
-        if (_mainMode == "memory")
+        // ── [5] Path1 선두 복귀 ────────────────────────────────
+        if (mainProgramNo > 0)
         {
-            int progNo = ParseProgramNo(row.MainProgramNo);
-            if (!RewindProgram(progNo, cfg.ResetAddr))
+            if (!RewindProgram(mainProgramNo, cfg.ResetAddr))
             {
                 ReportError(row.Id, "REWIND_FAILED", "프로그램 선두 복귀 실패");
                 return false;
@@ -522,142 +557,95 @@ public class SchedulerManager
         return true;
     }
 
-    // ── Memory 모드 행 시작 (Step 4~5) ────────────────────────────────────────
-
-    /// <summary>
-    /// Memory 모드: cnc_search로 프로그램 번호 변경 + 선두 복귀
-    /// returns false if error occurred (ReportError already called)
-    /// </summary>
-    private bool StartRowMemory(SchedulerRowInfo row, SchedulerConfig cfg)
+    private bool PrepareTransferredProgram(SchedulerRowInfo row, int pathNo, int tempProgramNo, int parkingProgramNo)
     {
-        int progNo = ParseProgramNo(row.MainProgramNo);
-        if (progNo > 0)
+        if (tempProgramNo <= 0 || parkingProgramNo <= 0 || tempProgramNo == parkingProgramNo)
         {
-            if (!_dataReader.SearchProgram(progNo, 1))
-            {
-                ReportError(row.Id, "SEARCH_FAILED", $"프로그램 검색 실패: {row.MainProgramNo}");
-                return false;
-            }
-        }
-
-        if (!string.IsNullOrEmpty(row.SubProgramNo))
-        {
-            int subProgNo = ParseProgramNo(row.SubProgramNo);
-            if (subProgNo > 0 && !_dataReader.SearchProgram(subProgNo, 2))
-            {
-                ReportError(row.Id, "SEARCH_FAILED", $"서브 프로그램 검색 실패: {row.SubProgramNo}");
-                return false;
-            }
-        }
-
-        // [5] 프로그램 선두 복귀 (3단계 fallback)
-        if (!RewindProgram(progNo, cfg.ResetAddr))
-        {
-            ReportError(row.Id, "REWIND_FAILED", "프로그램 선두 복귀 실패");
+            ReportError(row.Id, "TRANSFER_CONFIG_INVALID", $"Path{pathNo} 임시/대피 프로그램 번호 설정이 올바르지 않습니다.");
             return false;
         }
 
+        if (!_transferPrograms.TryGetValue(ProgramKey(row.Id, pathNo), out ProgramTransferPayload? program))
+        {
+            ReportError(row.Id, "TRANSFER_MANIFEST_MISSING", $"Path{pathNo} 파일전송 프로그램 정보가 없습니다.");
+            return false;
+        }
+
+        if (!ValidateTransferFile(program, out string fileError))
+        {
+            ReportError(row.Id, "TRANSFER_FILE_INVALID", fileError);
+            return false;
+        }
+
+        bool tempExists = _dataReader.ListPrograms(pathNo)?.Any(item => item.Number == tempProgramNo) == true;
+        if (tempExists)
+        {
+            if (!_dataReader.SearchProgram(parkingProgramNo, pathNo))
+            {
+                ReportError(row.Id, "PARKING_PROGRAM_SEARCH_FAILED", $"Path{pathNo} 대피 프로그램 O{parkingProgramNo:D4} 선택 실패");
+                return false;
+            }
+            if (!_dataReader.DeleteProgramAsync(tempProgramNo, pathNo).GetAwaiter().GetResult())
+            {
+                ReportError(row.Id, "TEMP_PROGRAM_DELETE_FAILED", $"Path{pathNo} 기존 임시 프로그램 O{tempProgramNo:D4} 삭제 실패");
+                return false;
+            }
+        }
+
+        string converted;
+        try
+        {
+            string content = File.ReadAllText(program.FilePath);
+            converted = ReplaceProgramNumber(content, tempProgramNo);
+        }
+        catch (Exception ex)
+        {
+            ReportError(row.Id, "PROGRAM_CONVERT_FAILED", $"Path{pathNo} 프로그램 번호 변환 실패: {ex.Message}");
+            return false;
+        }
+
+        if (!_dataReader.UploadProgramAsync(converted, pathNo).GetAwaiter().GetResult())
+        {
+            ReportError(row.Id, "PROGRAM_TRANSFER_FAILED", $"Path{pathNo} 임시 프로그램 O{tempProgramNo:D4} 전송 실패");
+            return false;
+        }
+        if (!_dataReader.SearchProgram(tempProgramNo, pathNo))
+        {
+            ReportError(row.Id, "TEMP_PROGRAM_SEARCH_FAILED", $"Path{pathNo} 임시 프로그램 O{tempProgramNo:D4} 선택 실패");
+            return false;
+        }
+
+        _logger.LogInformation("[Scheduler][Transfer] Path{Path} {Original} → O{Temp:D4} 전송/선택 완료",
+            pathNo, program.ProgramNo, tempProgramNo);
         return true;
     }
 
-    // ── DNC 모드 행 시작 (Step 4~5) ───────────────────────────────────────────
+    private static string ProgramKey(string rowId, int pathNo) => $"{rowId}:{pathNo}";
 
-    /// <summary>
-    /// DNC 모드: 파일 존재 확인 + CNC DNC 상태 확인 + Path2 선두 복귀
-    /// returns false if error occurred (ReportError already called)
-    /// DESIGN: Path2 선두 복귀 방법은 실기 테스트 후 확정 (현재 RESET 신호 사용)
-    /// </summary>
-    private bool StartRowDnc(SchedulerRowInfo row, SchedulerConfig cfg)
+    private static string ReplaceProgramNumber(string content, int targetProgramNo)
     {
-        if (_dncPaths == null)
-        {
-            ReportError(row.Id, "EXECUTION_MODE_UNKNOWN", "DNC 경로 설정이 전달되지 않았습니다.");
-            return false;
-        }
-
-        // [4-DNC] Path1 파일 존재 확인
-        string path1File = ResolveDncFilePath(_dncPaths.Path1, row.MainProgramNo);
-        _logger.LogInformation("[Scheduler][DNC] Path1 파일 경로: {Path}", path1File);
-
-        if (!string.IsNullOrEmpty(path1File) && !System.IO.File.Exists(path1File))
-        {
-            ReportError(row.Id, "DNC_FILE_NOT_FOUND", $"Path1 DNC 파일 없음: {path1File}");
-            return false;
-        }
-
-        // [4-DNC] Path2 파일 존재 확인 (subProgramNo 있는 경우)
-        if (!string.IsNullOrEmpty(row.SubProgramNo))
-        {
-            string path2File = ResolveDncFilePath(_dncPaths.Path2, row.SubProgramNo);
-            _logger.LogInformation("[Scheduler][DNC] Path2 파일 경로: {Path}", path2File);
-
-            if (!string.IsNullOrEmpty(path2File) && !System.IO.File.Exists(path2File))
-            {
-                ReportError(row.Id, "DNC_FILE_NOT_FOUND", $"Path2 DNC 파일 없음: {path2File}");
-                return false;
-            }
-        }
-
-        // [4-DNC] CNC DNC 모드 확인 (aut=9)
-        var status = _dataReader.ReadStatus();
-        if (status != null && status.Aut != 9)
-        {
-            _logger.LogWarning("[Scheduler][DNC] CNC가 DNC 모드가 아님: aut={Aut}", status.Aut);
-            ReportError(row.Id, "DNC_MODE_INVALID", $"CNC가 DNC 모드가 아닙니다. (현재 aut={status.Aut}, DNC=9)");
-            return false;
-        }
-
-        // [5-DNC] Path1은 새 파일 호출 시 항상 선두에서 시작 — 선두 복귀 불필요
-        // [5-DNC] Path2 선두 복귀: cnc_rewind(path=2) — 실기 테스트 확인 완료 (2026-03-22)
-        // ※ 실패 시 반드시 중단: Path1=선두, Path2=M20 위치 불일치 → waiting M코드 알람 발생
-        if (!string.IsNullOrEmpty(row.SubProgramNo))
-        {
-            _logger.LogInformation("[Scheduler][DNC] Path2 선두 복귀: cnc_rewind(path=2)");
-            if (!_dataReader.RewindProgram(2))
-            {
-                ReportError(row.Id, "PATH2_REWIND_FAILED",
-                    "Path2 선두 복귀 실패. Path1과 동기 코드 위치가 어긋나 실행 불가.");
-                return false;
-            }
-            _logger.LogInformation("[Scheduler][DNC] Path2 선두 복귀 완료");
-        }
-
-        return true;
+        var pattern = new Regex(@"(?m)^(\s*)O\d+(\s*(?:\([^\r\n)]*\))?)", RegexOptions.IgnoreCase);
+        if (!pattern.IsMatch(content))
+            throw new InvalidDataException("프로그램 본문에서 O번호를 찾을 수 없습니다.");
+        return pattern.Replace(content, match => $"{match.Groups[1].Value}O{targetProgramNo:D4}{match.Groups[2].Value}", 1);
     }
 
-    /// <summary>
-    /// DNC 폴더 경로 + 프로그램 파일명으로 전체 파일 경로 생성
-    /// 파일명 후보: "O1234", "O1234.nc", "O1234.cnc", "O1234.prg"
-    /// </summary>
-    private string ResolveDncFilePath(string folderPath, string? programNo)
+    private static bool ValidateTransferFile(ProgramTransferPayload program, out string error)
     {
-        if (string.IsNullOrEmpty(folderPath) || string.IsNullOrEmpty(programNo))
-            return "";
-
-        // 확장자 후보 (우선순위 순)
-        string[] extensions = { "", ".nc", ".cnc", ".prg", ".txt" };
-        string baseName = programNo.TrimStart('O', 'o');
-
-        foreach (var ext in extensions)
-        {
-            // "O0001" 형식 시도
-            string path1 = System.IO.Path.Combine(folderPath, $"O{baseName}{ext}");
-            if (System.IO.File.Exists(path1)) return path1;
-
-            // 숫자만 형식 시도 ("0001")
-            string path2 = System.IO.Path.Combine(folderPath, $"{baseName}{ext}");
-            if (System.IO.File.Exists(path2)) return path2;
-        }
-
-        // 존재하지 않으면 기본 경로 반환 (호출자가 File.Exists로 판단)
-        return System.IO.Path.Combine(folderPath, $"O{baseName}.nc");
+        error = "";
+        var file = new FileInfo(program.FilePath);
+        if (!file.Exists) { error = $"프로그램 파일이 없습니다: {program.FileName}"; return false; }
+        if (file.Length != program.FileSize) { error = $"프로그램 파일 크기가 변경되었습니다: {program.FileName}"; return false; }
+        using var stream = file.OpenRead();
+        string sha256 = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+        if (!string.Equals(sha256, program.Sha256, StringComparison.OrdinalIgnoreCase))
+        { error = $"프로그램 파일 내용이 START 이후 변경되었습니다: {program.FileName}"; return false; }
+        return true;
     }
 
     private void CompleteCurrentRow(CancellationToken ct)
     {
         if (_currentRow == null) return;
-        var rowId = _currentRow.Id;
-        _currentRow.Status = "COMPLETED";
         _logger.LogInformation("[Scheduler] 행 완료: {ProgramNo} count={Count}", _currentRow.MainProgramNo, _currentRow.Count);
 
         // path2 only 시퀀스: subProgramNo 있고 path2OnlyConfirmAddr 있으면 실행
@@ -672,8 +660,55 @@ public class SchedulerManager
             }
         }
 
-        PublishSchedulerRowCompleted(rowId);
+        FinishCurrentRow(ct);
+    }
+
+    private void FinishCurrentRow(CancellationToken ct)
+    {
+        if (_currentRow == null) return;
+        SchedulerRowInfo row = _currentRow;
+        if (!CleanupTransferredPrograms(row)) return;
+
+        row.Status = "COMPLETED";
+        PublishSchedulerRowCompleted(row.Id);
         ExecuteNextPendingRow(ct);
+    }
+
+    private bool CleanupTransferredPrograms(SchedulerRowInfo row)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline && _dataReader.ReadStatus()?.Run != 0)
+            Thread.Sleep(100);
+
+        if (_dataReader.ReadStatus()?.Run != 0)
+        {
+            ReportError(row.Id, "PROGRAM_CLEANUP_NOT_STOPPED", "임시 프로그램 삭제 전 CNC STOP 상태를 확인하지 못했습니다.");
+            return false;
+        }
+
+        if (row.MainTransferred && !CleanupTransferredProgram(row, 1, _transferConfig.MainTempProgramNo, _transferConfig.MainParkingProgramNo))
+            return false;
+        if (row.SubTransferred && !CleanupTransferredProgram(row, 2, _transferConfig.SubTempProgramNo, _transferConfig.SubParkingProgramNo))
+            return false;
+        return true;
+    }
+
+    private bool CleanupTransferredProgram(SchedulerRowInfo row, int pathNo, int tempProgramNo, int parkingProgramNo)
+    {
+        if (!_dataReader.SearchProgram(parkingProgramNo, pathNo))
+        {
+            ReportError(row.Id, "PARKING_PROGRAM_SEARCH_FAILED", $"Path{pathNo} 삭제 전 대피 프로그램 O{parkingProgramNo:D4} 선택 실패");
+            return false;
+        }
+
+        bool exists = _dataReader.ListPrograms(pathNo)?.Any(item => item.Number == tempProgramNo) == true;
+        if (exists && !_dataReader.DeleteProgramAsync(tempProgramNo, pathNo).GetAwaiter().GetResult())
+        {
+            ReportError(row.Id, "TEMP_PROGRAM_DELETE_FAILED", $"Path{pathNo} 임시 프로그램 O{tempProgramNo:D4} 삭제 실패");
+            return false;
+        }
+        _logger.LogInformation("[Scheduler][Transfer] Path{Path} O{Temp:D4} 정리 완료", pathNo, tempProgramNo);
+        return true;
     }
 
     // ── Path2 Only 시퀀스 (Section 7-3) ───────────────────────────────────────
@@ -776,9 +811,11 @@ public class SchedulerManager
         var page = tpl.TopBarInterlock.Scheduler;
         return page.Evaluate(addr =>
         {
-            var data = _dataReader.ReadPmcR(addr.Address, 1);
-            if (data == null || data.Length == 0) return null;
-            return (data[0] & (1 << addr.Bit)) != 0;
+            // ReadPmcR는 R영역만 읽으므로 X/Y/G 등 다른 타입 주소에서 항상 틀린 값을 읽는다.
+            // 탑바 인터락 pill과 동일하게 타입별 영역을 구분하는 ReadPmcBit를 사용한다.
+            var bit = _dataReader.ReadPmcBit(addr);
+            if (bit == null) return null;
+            return bit == 1;
         });
     }
 
@@ -880,6 +917,35 @@ public class SchedulerManager
         if (!ok)
             _logger.LogWarning("[Scheduler] WriteVar 실패: {Label} type={Type} no={No}", label, varType, varNo);
     }
+
+    private bool DisableMachineCounter(SchedulerConfig cfg)
+    {
+        CountDisplay countDisplay = cfg.CountDisplay;
+        int? current = _dataReader.ReadPartsCount(countDisplay.CounterEnableMacroNo, countDisplay.CounterEnableVarType);
+        if (!current.HasValue)
+        {
+            _logger.LogError("[Scheduler] 설비 카운터 ON/OFF 변수 읽기 실패: type={Type} no={No}",
+                countDisplay.CounterEnableVarType, countDisplay.CounterEnableMacroNo);
+            return false;
+        }
+
+        if (current.Value == countDisplay.CounterEnableOffValue)
+            return true;
+
+        WriteSchedulerVar(countDisplay.CounterEnableVarType, countDisplay.CounterEnableMacroNo,
+            countDisplay.CounterEnableOffValue, "machine-counter-off");
+        int? verified = _dataReader.ReadPartsCount(countDisplay.CounterEnableMacroNo, countDisplay.CounterEnableVarType);
+        bool success = verified == countDisplay.CounterEnableOffValue;
+        _logger.LogInformation("[Scheduler] 설비 카운터 OFF 검증: before={Before}, after={After}, success={Success}",
+            current, verified, success);
+        return success;
+    }
+
+    private static string NormalizeExecutionMode(string? mode)
+        => string.Equals(mode, "transfer", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(mode, "dnc", StringComparison.OrdinalIgnoreCase)
+            ? "transfer"
+            : "memory";
 
     /// <summary>
     /// 행 시작 시 CNC에 count + preset 초기값을 동기화합니다.
@@ -1251,4 +1317,6 @@ public class SchedulerRowInfo
     public int     Preset        { get; set; }
     public int     Count         { get; set; }
     public string  Status        { get; set; } = "PENDING";
+    public bool    MainTransferred { get; set; }
+    public bool    SubTransferred  { get; set; }
 }

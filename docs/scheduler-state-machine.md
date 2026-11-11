@@ -11,6 +11,34 @@
 | OneCycle | 원사이클 버튼 (ON 시 M20에서 장비 정지) |
 | ClearCycle | 목표 수량 완료 후 Head2만 ON + CycleStart 1회 (잔재 클리어) |
 
+### 0.1 2026-09-28 개편 기준
+
+현재 구현된 M20·Path2Only 상태 머신을 유지하면서 DNC 분기를 운영 경로에서 제거하고 MEM 기반 프로그램 공급 단계를 추가했다. 아래 상태명은 현재 enum을 늘리지 않고 `START`/행 완료 처리 내부의 하위 절차로 구현한다.
+
+```text
+PRECHECK
+→ DISABLE_MACHINE_COUNTER
+→ PREPARE_PROGRAM
+   ├─ CNC 저장: 존재 확인 → 선택 → 선두 복귀
+   └─ 파일전송: 잔존 확인 → 조건부 삭제 → 번호 변환 → 전송 → 검증 → 선택 → 선두 복귀
+→ SYNC_COUNT
+→ PANEL_ALIGN
+→ CYCLE_START
+→ RUNNING
+→ COUNT_CHECK
+→ CLEARING(Path2Only, 필요 시)
+→ CLEANUP_PROGRAM(파일전송인 Path만)
+→ ROW_DONE
+```
+
+메인과 서브는 각각 `파일전송` 또는 `CNC 저장` 공급 방식을 가진다. 파일전송 방식은 설비별 실행용 임시 번호와 삭제 전 전환 프로그램 번호를 사용하며, 이력에는 원본 O번호·코멘트를 기록한다.
+
+`DISABLE_MACHINE_COUNTER`에서는 템플릿에 지정된 설비 자체 카운트 ON/OFF 변수(SR-20J2B 기본 P10002)를 읽고 1이면 0으로 변경한다. 스케줄러 RUNNING·PAUSED·정지·완료·취소·오류 후에도 복원하지 않는다.
+
+`CLEANUP_PROGRAM`은 단순히 `pcCount >= preset` 시점에 진입하지 않는다. 서브가 있는 행은 Path2Only 완료 M20까지 받은 뒤 CNC STOP과 전환 프로그램 선택을 확인하고 임시 프로그램을 삭제한다. 서브가 없는 행은 메인 최종 정지 확인 후 바로 정리한다.
+
+M20 count authority, Ghost M20 제외, `pcCount == preset - 1`에서 OneCycle ON 정책은 유지한다. 짧은 M20 펄스 누락 가능성은 알려진 제한사항이며 이번 개편 범위에서는 래치+ACK를 구현하지 않는다.
+
 ---
 
 ## 1. 상태 머신 (State Machine)
@@ -55,15 +83,17 @@
 | 상태 | 설명 | 진입 조건 | 탈출 조건 |
 |------|------|-----------|-----------|
 | `IDLE` | 대기. 스케줄러 미실행 | 초기 / 완료 / 사용자 정지 | 사용자가 [시작] 클릭 |
-| `PRECHECK` | 인터록+모드+CNC카운터 사전 검증 | IDLE에서 시작 요청 | 모든 조건 통과 → PREPARE_PROGRAM / 실패 → IDLE |
-| `PREPARE_PROGRAM` | 프로그램 선택/등록/선두 이동 | PRECHECK 통과 | 프로그램 등록 확인 → SYNC_COUNT / 실패 → IDLE(에러) |
+| `PRECHECK` | 인터록+MEM 모드+STOP 상태 사전 검증 | IDLE에서 시작 요청 | 모든 조건 통과 → DISABLE_MACHINE_COUNTER / 실패 → IDLE |
+| `DISABLE_MACHINE_COUNTER` | 설비 자체 카운트 기능을 OFF로 고정 | PRECHECK 통과 | P10002 계열 설정값 OFF 확인 → PREPARE_PROGRAM |
+| `PREPARE_PROGRAM` | 공급 방식에 따라 기존 프로그램 선택 또는 잔존 삭제·변환 전송·검증·선두 이동 | 카운터 OFF 확인 | 준비 완료 → SYNC_COUNT / 실패 → IDLE(에러) |
 | `SYNC_COUNT` | Preset/Count를 CNC 매크로에 동기화 | PREPARE_PROGRAM 완료 | 동기화 확인 → PANEL_ALIGN |
 | `PANEL_ALIGN` | OneCycle OFF 확인, Head ALL ON 보장 | SYNC_COUNT 완료 | 패널 정렬 완료 → CYCLE_START |
 | `CYCLE_START` | 사이클 스타트 실행 | PANEL_ALIGN 완료 | CNC 운전 시작 확인 → RUNNING |
 | `RUNNING` | 가공 중. M20 감시 + 인터록 감시 | CYCLE_START 성공 | M20 감지 → COUNT_CHECK / 인터록 위반 → INTERRUPTED |
 | `COUNT_CHECK` | M20 수신 후 카운트 판정 | RUNNING에서 M20 감지 | Ghost → RUNNING / 유효 → pcCount++ → 미완료:RUNNING / 완료:CLEARING / Preset-1:OneCycle ON 후 RUNNING |
 | `CLEARING` | 목표 완료 후 Head2 Only + CycleStart 1회 | COUNT_CHECK에서 완료 판정 | 클리어 M20 감지 → ROW_DONE |
-| `ROW_DONE` | 현재 Row 완료 처리 | CLEARING 완료 | 다음 Row 있음 → NEXT_ROW / 없음 → COMPLETED |
+| `CLEANUP_PROGRAM` | Path2Only까지 끝난 뒤 파일전송 임시 프로그램을 안전 삭제 | CLEARING 완료 또는 서브 없는 행의 메인 최종 정지 | 정리 완료 → ROW_DONE / 실패 → ERROR(정리 필요) |
+| `ROW_DONE` | 현재 Row 완료 처리 및 원본 프로그램 메타데이터 기록 | CLEANUP_PROGRAM 완료 | 다음 Row 있음 → NEXT_ROW / 없음 → COMPLETED |
 | `NEXT_ROW` | 다음 Row로 전환 | ROW_DONE에서 다음 Row 존재 | 커서 이동 완료 → PRECHECK (다음 Row) |
 | `COMPLETED` | 모든 Row 완료 | ROW_DONE에서 다음 Row 없음 | 사용자 확인 → IDLE |
 | `INTERRUPTED` | 인터록 위반으로 중단 | 모든 상태에서 인터록 위반 | 인터록 복구 → RESUMING |
@@ -80,8 +110,8 @@
 |------|------|------|-----------|-----------|-----------|
 | S01 | PRECHECK | 인터록 전체 AND 확인 | PMC Read (인터록 주소들) | 모든 조건 true | 불충족 조건 메시지 → IDLE |
 | S02 | PRECHECK | 운전모드 확인 (MEM/DNC) | `cnc_statinfo` | mode == MEM or DNC | "운전모드를 MEM/DNC로 변경하세요" → IDLE |
-| S03 | PRECHECK | CNC Parts Counter OFF 확인 | PMC Read / `cnc_rdparam` | Parts Counter == OFF | "CNC 카운터를 OFF로 설정하세요" → IDLE |
-| S04 | PREPARE_PROGRAM | 프로그램 선택 (MEM모드) | `cnc_pdf_slctmain` / `cnc_wrpmcrng` | 프로그램 번호 일치 확인 | 재시도 1회 → 실패 시 IDLE |
+| S03 | DISABLE_MACHINE_COUNTER | 설비 카운트 ON/OFF 변수 확인 후 OFF 고정 | 템플릿 변수 Read/Write | OFF 값 확인 | 쓰기·재확인 실패 → IDLE |
+| S04 | PREPARE_PROGRAM | CNC 저장은 기존 번호 선택, 파일전송은 잔존 임시 프로그램 조건부 삭제 후 변환 전송 | Program Search/Delete/Upload | 대상 임시 또는 기존 프로그램 확인 | 실패 시 IDLE |
 | S05 | PREPARE_PROGRAM | 프로그램 선두 확인/이동 | `cnc_rdexecprog` + 블록 확인 | 블록 == 선두 (N00000 등) | EDIT 전환 → 선두 이동 → MEM/DNC 복귀 |
 | S06 | PREPARE_PROGRAM | (필요 시) EDIT 전환 | `cnc_wrpmcrng` (모드 변경 PMC) | mode == EDIT | "모드 전환 실패" → IDLE |
 | S07 | PREPARE_PROGRAM | (필요 시) 선두 이동 후 MEM/DNC 복귀 | 모드 변경 PMC Write | mode == MEM or DNC | "모드 복귀 실패" → IDLE |
@@ -100,8 +130,9 @@
 | S20 | CLEARING | OneCycle ON 유지 확인 | PMC Read | OneCycle == ON | ON 아니면 ON으로 설정 |
 | S21 | CLEARING | CycleStart 1회 실행 | PMC Write (CycleStart) | 실행 확인 | 재시도 |
 | S22 | CLEARING | 클리어 M20 대기 | PMC Read (M20 감시) | M20 감지 | 타임아웃 → 경고 |
-| S23 | ROW_DONE | Row 완료 기록 | DB 저장 / 이벤트 로그 | 저장 성공 | - |
-| S24 | NEXT_ROW | 다음 Row 존재 확인 | (내부 로직) | 있음 → S01로 | 없음 → COMPLETED |
+| S23 | CLEANUP_PROGRAM | CNC STOP 및 전환 프로그램 선택 후 파일전송 임시 프로그램 삭제 | Program Search/Delete | 임시 프로그램 미존재 확인 | 실패 → 정리 필요 ERROR |
+| S24 | ROW_DONE | 원본 O번호·코멘트·해시로 Row 완료 기록 | DB 저장 / 이벤트 로그 | 저장 성공 | - |
+| S25 | NEXT_ROW | 다음 Row 존재 확인 | (내부 로직) | 있음 → S01로 | 없음 → COMPLETED |
 
 ---
 

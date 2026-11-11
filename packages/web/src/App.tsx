@@ -103,6 +103,7 @@ function clearStaleMockCache() {
       'star-webcnc-machines',
       'star-webcnc-scheduler-jobs',
       'star-webcnc-dnc-config',
+      'star-webcnc-program-transfer-config',
       'star-webcnc-templates',
     ];
     keysToRemove.forEach((k) => localStorage.removeItem(k));
@@ -118,11 +119,44 @@ clearStaleMockCache();
 function WsConnector() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const accessToken = useAuthStore((s) => s.accessToken);
+  const setAuth = useAuthStore((s) => s.setAuth);
   const setAccessToken = useAuthStore((s) => s.setAccessToken);
   const logout = useAuthStore((s) => s.logout);
   const initWebSocket = useMachineStore((s) => s.initWebSocket);
   const destroyWebSocket = useMachineStore((s) => s.destroyWebSocket);
   const fetchMachines = useMachineStore((s) => s.fetchMachines);
+
+  // iOS PWA가 localStorage 인증 상태를 잃어도 refresh token 쿠키가 남아 있으면 세션 복구
+  useEffect(() => {
+    if (isAuthenticated) return;
+
+    const restoreSession = async () => {
+      try {
+        const refreshResponse = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+        if (!refreshResponse.ok) return;
+        const refreshData = await refreshResponse.json() as { success: boolean; data?: { accessToken: string } };
+        const restoredAccessToken = refreshData.data?.accessToken;
+        if (!refreshData.success || !restoredAccessToken) return;
+
+        const meResponse = await fetch('/api/auth/me', {
+          credentials: 'include',
+          headers: { Authorization: `Bearer ${restoredAccessToken}` },
+        });
+        if (!meResponse.ok) return;
+        const meData = await meResponse.json() as {
+          success: boolean;
+          data?: { id: string; username: string; email: string; role: 'USER' | 'ADMIN' | 'HQ_ENGINEER' };
+        };
+        if (meData.success && meData.data) {
+          setAuth(meData.data, restoredAccessToken);
+        }
+      } catch {
+        // 쿠키가 없거나 네트워크가 끊긴 경우 로그인 화면 유지
+      }
+    };
+
+    void restoreSession();
+  }, [isAuthenticated, setAuth]);
 
   // 페이지 새로고침 시 accessToken이 없으면 refresh token 쿠키로 재발급
   useEffect(() => {

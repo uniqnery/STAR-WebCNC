@@ -5,13 +5,34 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { authApi } from '../lib/api';
 
+const REMEMBERED_USERNAME_KEY = 'star-webcnc-remembered-username';
+
+function getRememberedUsername(): string {
+  try {
+    return localStorage.getItem(REMEMBERED_USERNAME_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function saveRememberedUsername(username: string | null): void {
+  try {
+    if (username) localStorage.setItem(REMEMBERED_USERNAME_KEY, username);
+    else localStorage.removeItem(REMEMBERED_USERNAME_KEY);
+  } catch {
+    // 저장소를 사용할 수 없는 경우에도 로그인은 계속 진행
+  }
+}
+
 export function Login() {
   const navigate = useNavigate();
   const setAuth = useAuthStore((state) => state.setAuth);
   const devLogin = useAuthStore((state) => state.devLogin);
 
-  const [username, setUsername] = useState('');
+  const rememberedUsername = getRememberedUsername();
+  const [username, setUsername] = useState(rememberedUsername);
   const [password, setPassword] = useState('');
+  const [rememberUsername, setRememberUsername] = useState(Boolean(rememberedUsername));
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -29,6 +50,11 @@ export function Login() {
       const response = await authApi.login(username, password);
 
       if (response.success && response.data) {
+        if (rememberUsername) {
+          saveRememberedUsername(username.trim());
+        } else {
+          saveRememberedUsername(null);
+        }
         setAuth(response.data.user, response.data.accessToken);
         navigate('/');
       } else {
@@ -64,7 +90,7 @@ export function Login() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" autoComplete="on">
             <div>
               <label
                 htmlFor="username"
@@ -74,6 +100,7 @@ export function Login() {
               </label>
               <input
                 id="username"
+                name="username"
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
@@ -83,6 +110,8 @@ export function Login() {
                 placeholder="사용자명 입력"
                 required
                 autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
               />
             </div>
 
@@ -95,6 +124,7 @@ export function Login() {
               </label>
               <input
                 id="password"
+                name="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -106,6 +136,16 @@ export function Login() {
                 autoComplete="current-password"
               />
             </div>
+
+            <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+              <input
+                type="checkbox"
+                checked={rememberUsername}
+                onChange={(e) => setRememberUsername(e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              아이디 기억
+            </label>
 
             <button
               type="submit"

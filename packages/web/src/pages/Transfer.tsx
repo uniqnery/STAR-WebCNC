@@ -1,7 +1,7 @@
 // Transfer Page - 2분할 파일 전송 + 백업 (v2)
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useMachineStore, useDncConfig } from '../stores/machineStore';
+import { useMachineStore, useProgramTransferConfig } from '../stores/machineStore';
 import { useAuthStore } from '../stores/authStore';
 import { useFileStore } from '../stores/fileStore';
 import { backupApi, fileApi } from '../lib/api';
@@ -438,6 +438,7 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
     shareLoading,
     cncLoading,
     cncError,
+    program9000Protection,
     selectedShareFiles,
     selectedCncFiles,
     loadShareFiles,
@@ -451,8 +452,8 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
     openViewer,
   } = useFileStore();
 
-  const dncConfig = useDncConfig(machineId);
-  const pathCount = dncConfig?.pathCount || 2;
+  const programTransferConfig = useProgramTransferConfig(machineId);
+  const pathCount = programTransferConfig?.pathCount || 2;
 
   const [cncPath, setCncPath] = useState<'path1' | 'path2' | 'path3'>('path1');
 
@@ -479,8 +480,8 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
   const [deleteConfirm, setDeleteConfirm]   = useState<{ fileNames: string[] } | null>(null);
 
   // CNC Path 경로 텍스트
-  const cncPathComment = dncConfig?.dncPaths?.[cncPath]
-    ? `${dncConfig.dncPaths[cncPath]}`
+  const cncPathComment = programTransferConfig?.repositoryPaths?.[cncPath]
+    ? `${programTransferConfig.repositoryPaths[cncPath]}`
     : `//CNC/${machineId}/${cncPath.toUpperCase()}`;
 
   const pcPathComment = '//SERVER/share/programs';
@@ -545,6 +546,14 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
   const handleConfirmPcToCnc = useCallback(() => {
     if (!pcToCncConfirm) return;
     const entries = pcToCncConfirm.entries;
+    const protectedTarget = entries.find((entry) => {
+      const number = Number(entry.targetProgramNo.replace(/^O/i, ''));
+      return number >= 9000 && number <= 9999 && program9000Protection !== 'unprotected';
+    });
+    if (protectedTarget) {
+      alert(`${formatONo(protectedTarget.targetProgramNo)}은 파라미터 3202#4(NE9) 보호 상태이므로 전송할 수 없습니다.`);
+      return;
+    }
     const targetProgramNos: Record<string, string> = {};
     entries.forEach((e) => { targetProgramNos[e.fileName] = e.targetProgramNo; });
 
@@ -572,7 +581,7 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
       return;
     }
     doTransfer(false);
-  }, [pcToCncConfirm, cncFiles, cncPath, machineId, startTransfer, user]);
+  }, [pcToCncConfirm, cncFiles, cncPath, machineId, startTransfer, user, program9000Protection]);
 
   // CNC→PC 확인 다이얼로그에서 전송 실행
   const handleConfirmTransfer = useCallback(() => {
@@ -750,6 +759,8 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
           onDelete={canTransfer ? handleShareDelete : undefined}
           onUpload={canTransfer ? handleShareUpload : undefined}
           pathComment={pcPathComment}
+          showComment
+          showActualFileName
           className="max-lg:portrait:min-h-[18rem]"
         />
       </div>

@@ -28,6 +28,8 @@ interface FileListPanelProps {
   className?: string;
   /** CNC 모드: 크기/수정일 대신 코멘트 컬럼 표시 */
   showComment?: boolean;
+  /** 코멘트 표시 시 프로그램 번호 대신 실제 파일명 표시 */
+  showActualFileName?: boolean;
 }
 
 function formatFileSize(bytes: number): string {
@@ -65,16 +67,19 @@ export function FileListPanel({
   headerSlot,
   className,
   showComment = false,
+  showActualFileName = false,
 }: FileListPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name));
-  const allSelected = sorted.length > 0 && selectedFiles.length === sorted.length;
+  const selectableFiles = sorted.filter((file) => !file.isProtected);
+  const allSelected = selectableFiles.length > 0 && selectableFiles.every((file) => selectedFiles.includes(file.name));
 
   const handleSelectAll = (checked: boolean) => {
-    onSelectFiles?.(checked ? sorted.map((f) => f.name) : []);
+    onSelectFiles?.(checked ? selectableFiles.map((file) => file.name) : []);
   };
 
   const handleToggle = (name: string, checked: boolean) => {
+    if (files.find((file) => file.name === name)?.isProtected) return;
     if (checked) {
       onSelectFiles?.([...selectedFiles, name]);
     } else {
@@ -166,7 +171,7 @@ export function FileListPanel({
       {/* 테이블 헤더 */}
       <div className={`grid ${
         showComment
-          ? selectable ? 'grid-cols-[32px_120px_1fr]' : 'grid-cols-[120px_1fr]'
+          ? selectable ? 'grid-cols-[32px_1fr]' : 'grid-cols-[1fr]'
           : selectable ? 'grid-cols-[32px_1fr_64px_80px]' : 'grid-cols-[1fr_64px_80px]'
       } px-3 py-1.5 bg-gray-800 text-xs font-medium text-gray-400 border-b border-gray-700 flex-shrink-0`}>
         {selectable && (
@@ -179,14 +184,11 @@ export function FileListPanel({
             />
           </div>
         )}
-        <div>프로그램 번호</div>
-        {showComment
-          ? <div className="text-gray-500">코멘트</div>
-          : <>
+        <div>{showComment ? '프로그램 번호 / 코멘트' : '프로그램 번호'}</div>
+        {!showComment && <>
               <div className="text-right">크기</div>
               <div className="text-right">수정일</div>
-            </>
-        }
+            </>}
       </div>
 
       {/* 파일 목록 - 남은 공간 전체 사용 + 스크롤 */}
@@ -208,46 +210,50 @@ export function FileListPanel({
         ) : (
           sorted.map((file) => {
             const isSelected = selectedFiles.includes(file.name);
+            const isProtected = file.isProtected === true;
             return (
               <div
                 key={file.name}
                 className={`grid ${
                   showComment
-                    ? selectable ? 'grid-cols-[32px_120px_1fr]' : 'grid-cols-[120px_1fr]'
+                    ? selectable ? 'grid-cols-[32px_1fr]' : 'grid-cols-[1fr]'
                     : selectable ? 'grid-cols-[32px_1fr_64px_80px]' : 'grid-cols-[1fr_64px_80px]'
-                } px-3 text-sm border-b border-gray-800 cursor-pointer hover:bg-gray-700/50 transition-colors items-center select-none max-lg:[--file-row-height:22px] ${
+                } px-3 text-sm border-b border-gray-800 transition-colors items-center select-none max-lg:[--file-row-height:22px] ${
+                  isProtected ? 'cursor-not-allowed bg-gray-950/60 opacity-45' : 'cursor-pointer hover:bg-gray-700/50'
+                } ${
                   isSelected ? 'bg-blue-900/30' : ''
                 }`}
                 style={{ height: `var(--file-row-height, ${ROW_HEIGHT_PX}px)` }}
-                onDoubleClick={() => onDoubleClick?.(file)}
+                onDoubleClick={() => { if (!isProtected) onDoubleClick?.(file); }}
+                title={isProtected ? '파라미터 3202#4(NE9)로 보호된 9000번대 프로그램' : undefined}
               >
                 {selectable && (
                   <div className="flex items-center">
                     <input
                       type="checkbox"
                       checked={isSelected}
+                      disabled={isProtected}
                       onChange={(e) => handleToggle(file.name, e.target.checked)}
                       className="w-3.5 h-3.5"
                     />
                   </div>
                 )}
-                <div className="font-mono text-white truncate flex items-center gap-1.5">
+                <div className={`font-mono truncate flex items-center gap-1.5 ${isProtected ? 'text-gray-500' : 'text-white'}`} title={showComment && file.comment ? `${showActualFileName ? file.name : (file.programNo ?? file.name)} (${file.comment})` : file.name}>
                   <FileIcon />
-                  {file.name}
+                  <span className="truncate">
+                    {showComment ? (showActualFileName ? file.name : (file.programNo ?? file.name.replace(/\.nc$/i, ''))) : file.name}
+                    {showComment && file.comment ? <span className="ml-1.5 text-gray-400">({file.comment})</span> : null}
+                    {isProtected ? <span className="ml-1.5 text-[10px] text-yellow-500">🔒 보호</span> : null}
+                  </span>
                 </div>
-                {showComment
-                  ? <div className="text-gray-400 text-xs truncate italic">
-                      {file.comment ? `(${file.comment})` : ''}
-                    </div>
-                  : <>
+                {!showComment && <>
                       <div className="text-right text-gray-400">
                         {formatFileSize(file.size)}
                       </div>
                       <div className="text-right text-gray-400 text-xs">
                         {formatDate(file.modifiedAt)}
                       </div>
-                    </>
-                }
+                    </>}
               </div>
             );
           })

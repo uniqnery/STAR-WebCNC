@@ -134,6 +134,11 @@ public class MqttService : IAsyncDisposable
         await PublishAsync(Topics.Alarm(_settings.MachineId), alarm);
     }
 
+    public async Task PublishAlarmSnapshotAsync(AlarmSnapshotMessage snapshot)
+    {
+        await PublishAsync(Topics.Alarm(_settings.MachineId), snapshot);
+    }
+
     /// <summary>
     /// 명령 실행 결과 발행
     /// </summary>
@@ -422,6 +427,20 @@ public class AlarmEventMessage : MqttMessage
     public short AlarmTypeCode { get; set; }
 }
 
+public class AlarmSnapshotMessage : MqttMessage
+{
+    public string Type { get; set; } = "snapshot";
+    public List<AlarmSnapshotItem> Alarms { get; set; } = new();
+}
+
+public class AlarmSnapshotItem
+{
+    public int AlarmNo { get; set; }
+    public string AlarmMsg { get; set; } = "";
+    public string? Category { get; set; }
+    public short AlarmTypeCode { get; set; }
+}
+
 public class CommandMessage : MqttMessage
 {
     public string? CorrelationId { get; set; }
@@ -458,23 +477,50 @@ public class EventMessage : MqttMessage
 /// </summary>
 public class SchedulerMessage : MqttMessage
 {
-    /// <summary>START | RESUME | PAUSE | CANCEL</summary>
+    /// <summary>START | QUEUE_UPDATE | RESUME | PAUSE | CANCEL</summary>
     public string Type { get; set; } = "";
     /// <summary>START 시 큐 행 목록</summary>
     public List<SchedulerRowPayload>? Rows { get; set; }
-    /// <summary>메인(Path1) 실행 모드 — "memory" | "dnc"</summary>
+    /// <summary>메인(Path1) 실행 모드 — "memory" | "transfer" (구버전 "dnc" 호환)</summary>
     public string MainMode { get; set; } = "memory";
-    /// <summary>서브(Path2) 실행 모드 — "memory" | "dnc"</summary>
+    /// <summary>서브(Path2) 실행 모드 — "memory" | "transfer" (구버전 "dnc" 호환)</summary>
     public string SubMode { get; set; } = "memory";
-    /// <summary>DNC 경로 설정 (mainMode 또는 subMode == "dnc" 시 사용)</summary>
-    public DncPathsPayload? DncPaths { get; set; }
+    /// <summary>START 시 서버가 검증한 프로그램 파일전송 매니페스트</summary>
+    public List<ProgramTransferPayload>? TransferPrograms { get; set; }
+    /// <summary>이전 Server가 보내는 dncPrograms 필드와의 전환기 호환</summary>
+    [JsonProperty("dncPrograms")]
+    public List<ProgramTransferPayload>? LegacyDncPrograms { get; set; }
+    [JsonIgnore]
+    public IReadOnlyList<ProgramTransferPayload> EffectiveTransferPrograms
+    {
+        get
+        {
+            if (TransferPrograms != null) return TransferPrograms;
+            if (LegacyDncPrograms != null) return LegacyDncPrograms;
+            return Array.Empty<ProgramTransferPayload>();
+        }
+    }
+    /// <summary>Path별 파일전송용 임시/대피 프로그램 번호</summary>
+    public ProgramTransferConfigPayload? TransferConfig { get; set; }
 }
 
-public class DncPathsPayload
+public class ProgramTransferConfigPayload
 {
-    public string Path1 { get; set; } = "";
-    public string Path2 { get; set; } = "";
-    public string? Path3 { get; set; }
+    public int MainTempProgramNo { get; set; }
+    public int MainParkingProgramNo { get; set; }
+    public int SubTempProgramNo { get; set; }
+    public int SubParkingProgramNo { get; set; }
+}
+
+public class ProgramTransferPayload
+{
+    public string RowId { get; set; } = "";
+    public int Path { get; set; } = 1;
+    public string ProgramNo { get; set; } = "";
+    public string FileName { get; set; } = "";
+    public string FilePath { get; set; } = "";
+    public long FileSize { get; set; }
+    public string Sha256 { get; set; } = "";
 }
 
 public class SchedulerRowPayload

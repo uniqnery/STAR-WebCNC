@@ -10,7 +10,7 @@ import { useTemplateStore, type SchedulerConfig } from '../stores/templateStore'
 const EMPTY: SchedulerConfig = {
   cycleStartAddr: '',
   m20Addr: '',
-  countDisplay: { countMacroNo: 900, countVarType: 'macro' as const, presetMacroNo: 10000, presetVarType: 'pcode' as const, cycleTimeAddr: 'D96', cycleTimeMultiplier: 4 },
+  countDisplay: { countMacroNo: 900, countVarType: 'macro' as const, presetMacroNo: 10000, presetVarType: 'pcode' as const, counterEnableMacroNo: 10002, counterEnableVarType: 'pcode' as const, counterEnableOnValue: 1, counterEnableOffValue: 0, cycleTimeAddr: 'D96', cycleTimeMultiplier: 4 },
   resetAddr: '',
   oneCycleStopAddr: '',
   oneCycleStopStatusAddr: '',
@@ -192,7 +192,7 @@ export function SchedulerConfig() {
   useEffect(() => {
     const tpl = templates.find((t) => t.id === selectedTemplateId);
     if (tpl?.schedulerConfig) {
-      setCfg({ ...EMPTY, ...tpl.schedulerConfig });
+      setCfg({ ...EMPTY, ...tpl.schedulerConfig, countDisplay: { ...EMPTY.countDisplay, ...tpl.schedulerConfig.countDisplay } });
       setDirty(false);
     }
   }, [selectedTemplateId, templates]);
@@ -368,6 +368,25 @@ export function SchedulerConfig() {
                       <option value="pcode">P코드 변수 (P)</option>
                     </select>
                   </div>
+                  <NumInput
+                    label="설비 카운터 ON/OFF 변수"
+                    value={cfg.countDisplay.counterEnableMacroNo}
+                    onChange={(v) => patch({ countDisplay: { ...cfg.countDisplay, counterEnableMacroNo: v } })}
+                    min={1}
+                  />
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400 whitespace-nowrap shrink-0">ON/OFF 타입</span>
+                    <select
+                      value={cfg.countDisplay.counterEnableVarType}
+                      onChange={(e) => patch({ countDisplay: { ...cfg.countDisplay, counterEnableVarType: e.target.value as 'macro' | 'pcode' } })}
+                      className="px-2 py-1 text-xs border border-gray-600 rounded bg-gray-700 text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                      <option value="macro">커스텀 매크로 (#)</option>
+                      <option value="pcode">P코드 변수 (P)</option>
+                    </select>
+                  </div>
+                  <NumInput label="ON 값" value={cfg.countDisplay.counterEnableOnValue} onChange={(v) => patch({ countDisplay: { ...cfg.countDisplay, counterEnableOnValue: v } })} />
+                  <NumInput label="OFF 값" value={cfg.countDisplay.counterEnableOffValue} onChange={(v) => patch({ countDisplay: { ...cfg.countDisplay, counterEnableOffValue: v } })} />
                 </div>
               </div>
             </div>
@@ -416,8 +435,8 @@ export function SchedulerConfig() {
             index={4}
             title="프로그램 번호 변경"
             color="blue"
-            badge="memory / DNC 모드"
-            subtitle="memory 모드: cnc_search(programNo). DNC 모드: 파일 존재 확인."
+            badge="CNC 저장 / 파일전송 모드"
+            subtitle="CNC 저장 모드: cnc_search(programNo). 파일전송 모드: 저장소 파일을 임시 번호로 전송합니다."
           />
 
           <FlowArrow />

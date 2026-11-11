@@ -7,6 +7,8 @@ import { authenticate, requireRole } from '../middleware/auth';
 import { mqttService, TOPICS } from '../lib/mqtt';
 import { redisService, REDIS_KEYS } from '../lib/redis';
 import { wsService } from '../lib/websocket';
+import { buildProgramTransferManifest, formatProgramNo, normalizeProgramNo, resolveProgramRepositoryPath1 } from '../lib/programRepository';
+import { isProgram9000, isProgram9000OperationBlocked } from '../lib/programProtection';
 
 const router = Router();
 router.use(authenticate);
@@ -19,6 +21,8 @@ function rowToDto(row: {
   order: number;
   mainProgramNo: string;
   subProgramNo: string | null;
+  mainProgramComment: string | null;
+  mainProgramSha256: string | null;
   preset: number;
   count: number;
   status: string;
@@ -37,6 +41,8 @@ function rowToDto(row: {
     order: row.order,
     mainProgramNo: row.mainProgramNo,
     subProgramNo: row.subProgramNo ?? undefined,
+    mainProgramComment: row.mainProgramComment ?? undefined,
+    mainProgramSha256: row.mainProgramSha256 ?? undefined,
     preset: row.preset,
     count: row.count,
     status: row.status,
@@ -65,6 +71,33 @@ async function syncRedisRows(machineId: string) {
   await redisService.set(REDIS_KEYS.SCHEDULER_ROWS(machineId), rows.map(r => rowToDto(r, machineId)));
 }
 
+async function broadcastSchedulerRows(machineId: string, machineDbId: string) {
+  await syncRedisRows(machineId);
+  const rows = await prisma.schedulerRow.findMany({
+    where: { machineDbId },
+    orderBy: { order: 'asc' },
+  });
+  const rowDtos = rows.map((row) => rowToDto(row, machineId));
+  wsService.sendSchedulerUpdate(machineId, rowDtos);
+  return rowDtos;
+}
+
+async function publishQueueUpdate(
+  machineId: string,
+  rows: ReturnType<typeof rowToDto>[],
+  transferPrograms: Awaited<ReturnType<typeof buildProgramTransferManifest>>[],
+) {
+  const state = await redisService.get<string>(REDIS_KEYS.SCHEDULER_STATE(machineId)) ?? 'IDLE';
+  if (state !== 'RUNNING' && state !== 'PAUSED') return;
+  await mqttService.publish(TOPICS.SERVER_SCHEDULER(machineId), {
+    timestamp: new Date().toISOString(),
+    type: 'QUEUE_UPDATE',
+    rows,
+    transferPrograms,
+    dncPrograms: transferPrograms,
+  });
+}
+
 // ─── GET /rows?machineId= ────────────────────────────────────────────────────
 
 router.get('/rows', async (req: Request, res: Response) => {
@@ -78,7 +111,6 @@ router.get('/rows', async (req: Request, res: Response) => {
     if (!machine) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '장비를 찾을 수 없습니다' } });
     }
-
     const rows = await prisma.schedulerRow.findMany({
       where: { machineDbId: machine.id },
       orderBy: { order: 'asc' },
@@ -118,7 +150,6 @@ router.post('/rows', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, r
     if (!machine) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '장비를 찾을 수 없습니다' } });
     }
-
     // 큐 크기 확인 (template schedulerConfig.maxQueueSize)
     const count = await prisma.schedulerRow.count({ where: { machineDbId: machine.id, status: { in: ['PENDING', 'RUNNING'] } } });
     const template = machine.templateId ? await prisma.template.findUnique({ where: { id: machine.templateId } }) : null;
@@ -160,6 +191,155 @@ router.post('/rows', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, r
   }
 });
 
+// ─── POST /rows/batch-register ──────────────────────────────────────────────
+
+router.post('/rows/batch-register', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, res: Response) => {
+  try {
+    const { machineId, programNos, subProgramNo, preset } = req.body as {
+      machineId?: string;
+      programNos?: string[];
+      subProgramNo?: string;
+      preset?: number;
+    };
+    if (!machineId || !Array.isArray(programNos) || programNos.length === 0) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: '등록할 프로그램을 선택하세요.' } });
+    }
+
+    const normalizedPrograms = programNos.map((programNo) => normalizeProgramNo(programNo));
+    if (normalizedPrograms.some((programNo) => !programNo)) {
+      return res.status(400).json({ success: false, error: { code: 'INVALID_PROGRAM', message: '유효하지 않은 프로그램 번호가 포함되어 있습니다.' } });
+    }
+    const canonicalPrograms = normalizedPrograms.map((programNo) => formatProgramNo(programNo!));
+    const machine = await getMachineByMachineId(machineId);
+    if (!machine) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '장비를 찾을 수 없습니다.' } });
+    const programTransferConfig = (machine.programTransferConfig ?? {}) as Record<string, unknown>;
+    const mainMode = (programTransferConfig.mainMode as string) ?? (programTransferConfig.executionMode as string) ?? 'memory';
+    if (mainMode !== 'transfer' && mainMode !== 'dnc') {
+      return res.status(409).json({ success: false, error: { code: 'TRANSFER_MODE_REQUIRED', message: '메인 운전 모드를 파일전송으로 설정한 후 등록하세요.' } });
+    }
+    const path1 = resolveProgramRepositoryPath1(machineId, programTransferConfig);
+    const metadata = await prisma.programRepositoryFile.findMany({
+      where: { machineDbId: machine.id, programNo: { in: [...new Set(canonicalPrograms)] } },
+    });
+    const metadataByProgram = new Map(metadata.map((program) => [program.programNo, program]));
+    const missingProgram = canonicalPrograms.find((programNo) => !metadataByProgram.has(programNo));
+    if (missingProgram) {
+      return res.status(409).json({ success: false, error: { code: 'PROGRAM_REPOSITORY_NOT_FOUND', message: `${missingProgram} 프로그램이 저장소에 없습니다.` } });
+    }
+
+    const manifests = await Promise.all(canonicalPrograms.map((programNo, index) =>
+      buildProgramTransferManifest(path1, `pending-${index}`, programNo)
+    ));
+    const pendingCount = await prisma.schedulerRow.count({
+      where: { machineDbId: machine.id, status: { in: ['PENDING', 'RUNNING'] } },
+    });
+    const emptyRows = await prisma.schedulerRow.findMany({
+      where: { machineDbId: machine.id, status: 'PENDING', mainProgramNo: '' },
+      orderBy: { order: 'asc' },
+    });
+    const template = machine.templateId ? await prisma.template.findUnique({ where: { id: machine.templateId } }) : null;
+    const maxQueueSize = (template?.schedulerConfig as Record<string, unknown> | null)?.maxQueueSize as number ?? 15;
+    const newRowCount = Math.max(0, canonicalPrograms.length - emptyRows.length);
+    if (pendingCount + newRowCount > maxQueueSize) {
+      return res.status(409).json({ success: false, error: { code: 'QUEUE_FULL', message: `선택한 프로그램을 등록하면 최대 큐 ${maxQueueSize}개를 초과합니다.` } });
+    }
+
+    const targetPreset = Number.isFinite(preset) && Number(preset) > 0 ? Math.floor(Number(preset)) : 10;
+    const targetSubProgram = subProgramNo?.trim() || null;
+    const lastRow = await prisma.schedulerRow.findFirst({ where: { machineDbId: machine.id }, orderBy: { order: 'desc' } });
+    let nextOrder = (lastRow?.order ?? 0) + 1;
+    const changedRows = await prisma.$transaction(async (transaction) => {
+      const rows = [];
+      for (let index = 0; index < canonicalPrograms.length; index += 1) {
+        const programNo = canonicalPrograms[index];
+        const item = metadataByProgram.get(programNo)!;
+        const manifest = manifests[index];
+        const emptyRow = emptyRows[index];
+        if (emptyRow) {
+          rows.push(await transaction.schedulerRow.update({
+            where: { id: emptyRow.id },
+            data: {
+              mainProgramNo: programNo,
+              subProgramNo: targetSubProgram,
+              preset: targetPreset,
+              count: 0,
+              mainProgramComment: item.comment,
+              mainProgramSha256: manifest.sha256,
+              lastError: null,
+              lastErrorCode: null,
+              lastErrorAt: null,
+            },
+          }));
+        } else {
+          rows.push(await transaction.schedulerRow.create({
+            data: {
+              machineDbId: machine.id,
+              order: nextOrder++,
+              mainProgramNo: programNo,
+              subProgramNo: targetSubProgram,
+              preset: targetPreset,
+              count: 0,
+              status: 'PENDING',
+              mainProgramComment: item.comment,
+              mainProgramSha256: manifest.sha256,
+              createdBy: req.user!.username,
+            },
+          }));
+        }
+      }
+      return rows;
+    });
+
+    const allRows = await broadcastSchedulerRows(machineId, machine.id);
+    const changedIds = new Set(changedRows.map((row) => row.id));
+    const changedDtos = allRows.filter((row) => changedIds.has(row.id));
+    const queueManifests = changedRows.map((row, index) => ({ ...manifests[index], rowId: row.id }));
+    if (((programTransferConfig.subMode as string) === 'transfer' || (programTransferConfig.subMode as string) === 'dnc') && targetSubProgram) {
+      queueManifests.push(...await Promise.all(changedRows.map((row) =>
+        buildProgramTransferManifest(path1, row.id, targetSubProgram, 2)
+      )));
+    }
+    await publishQueueUpdate(machineId, changedDtos, queueManifests);
+    return res.status(201).json({ success: true, data: { rows: changedDtos } });
+  } catch (error) {
+    console.error('[Scheduler] batch register error:', error);
+    return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: error instanceof Error ? error.message : '일괄 등록 실패' } });
+  }
+});
+
+// ─── POST /rows/:id/resync-program ──────────────────────────────────────────
+
+router.post(['/rows/:id/resync-program', '/rows/:id/resync-dnc'], requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, res: Response) => {
+  try {
+    const row = await prisma.schedulerRow.findUnique({ where: { id: req.params.id }, include: { machine: true } });
+    if (!row) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '행을 찾을 수 없습니다.' } });
+    if (row.status === 'RUNNING' || row.status === 'PAUSED') {
+      return res.status(409).json({ success: false, error: { code: 'INVALID_STATUS', message: '현재 실행 중인 행은 재동기화할 수 없습니다.' } });
+    }
+    const path1 = resolveProgramRepositoryPath1(row.machine.machineId, (row.machine.programTransferConfig ?? {}) as Record<string, unknown>);
+    const manifest = await buildProgramTransferManifest(path1, row.id, row.mainProgramNo);
+    const metadata = await prisma.programRepositoryFile.findUnique({
+      where: { machineDbId_programNo: { machineDbId: row.machineDbId, programNo: formatProgramNo(normalizeProgramNo(row.mainProgramNo)!) } },
+    });
+    const updated = await prisma.schedulerRow.update({
+      where: { id: row.id },
+      data: {
+        mainProgramComment: metadata?.comment ?? '',
+        mainProgramSha256: manifest.sha256,
+        lastError: null,
+        lastErrorCode: null,
+        lastErrorAt: null,
+      },
+    });
+    const allRows = await broadcastSchedulerRows(row.machine.machineId, row.machineDbId);
+    const dto = allRows.find((item) => item.id === updated.id)!;
+    await publishQueueUpdate(row.machine.machineId, [dto], [manifest]);
+    return res.json({ success: true, data: dto });
+  } catch (error) {
+    return res.status(409).json({ success: false, error: { code: 'PROGRAM_REPOSITORY_INVALID', message: error instanceof Error ? error.message : '재동기화 실패' } });
+  }
+});
+
 // ─── PUT /rows/:id ───────────────────────────────────────────────────────────
 
 router.put('/rows/:id', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, res: Response) => {
@@ -183,11 +363,13 @@ router.put('/rows/:id', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request
       preset?: number;
       count?: number;
     };
-
     const updated = await prisma.schedulerRow.update({
       where: { id: row.id },
       data: {
         mainProgramNo: mainProgramNo ?? row.mainProgramNo,
+        ...(mainProgramNo !== undefined && mainProgramNo !== row.mainProgramNo
+          ? { mainProgramComment: null, mainProgramSha256: null, lastError: null, lastErrorCode: null, lastErrorAt: null }
+          : {}),
         subProgramNo: subProgramNo !== undefined ? (subProgramNo || null) : row.subProgramNo,
         preset: preset ?? row.preset,
         count: count !== undefined ? count : row.count,
@@ -318,6 +500,10 @@ router.post('/start', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, 
     if (pendingRows.length === 0) {
       return res.status(400).json({ success: false, error: { code: 'NO_PENDING_ROWS', message: '실행할 행이 없습니다' } });
     }
+    const protectedPendingProgram = pendingRows.flatMap((row) => [row.mainProgramNo, row.subProgramNo]).find((programNo) => programNo && isProgram9000(programNo));
+    if (protectedPendingProgram && await isProgram9000OperationBlocked(machineId, protectedPendingProgram)) {
+      return res.status(423).json({ success: false, error: { code: 'PROGRAM_9000_PROTECTED', message: `${protectedPendingProgram}은 파라미터 3202#4(NE9) 보호 상태이므로 실행할 수 없습니다.` } });
+    }
 
     // Control Lock 확인
     const lock = await redisService.getControlLock(machineId);
@@ -332,16 +518,87 @@ router.post('/start', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, 
     });
     const rowDtos = allRows.map(r => rowToDto(r, machineId));
 
-    // DNC 설정 — START payload에 포함 (Agent가 API 조회 없이 사용)
-    const dncCfg = (machine.dncConfig ?? {}) as Record<string, unknown>;
+    // 프로그램 파일전송 설정 — START payload에 포함 (Agent가 API 조회 없이 사용)
+    const programTransferConfig = (machine.programTransferConfig ?? {}) as Record<string, unknown>;
     // 하위호환: 구버전 executionMode → mainMode fallback
-    const mainMode = (dncCfg.mainMode as string) ?? (dncCfg.executionMode as string) ?? 'memory';
-    const subMode  = (dncCfg.subMode  as string) ?? 'memory';
-    const dncPaths = {
-      path1: (dncCfg.path1 as string) ?? '',
-      path2: (dncCfg.path2 as string) ?? '',
-      ...(dncCfg.path3 !== undefined && { path3: dncCfg.path3 as string }),
+    const normalizeMode = (value: unknown) => value === 'dnc' ? 'transfer' : value === 'transfer' ? 'transfer' : 'memory';
+    const mainMode = normalizeMode(programTransferConfig.mainMode ?? programTransferConfig.executionMode);
+    const subMode  = normalizeMode(programTransferConfig.subMode);
+    const transferConfig = {
+      mainTempProgramNo: Number(programTransferConfig.mainTempProgramNo ?? 7777),
+      mainParkingProgramNo: Number(programTransferConfig.mainParkingProgramNo ?? 7776),
+      subTempProgramNo: Number(programTransferConfig.subTempProgramNo ?? 7775),
+      subParkingProgramNo: Number(programTransferConfig.subParkingProgramNo ?? 7774),
     };
+    const pathConfigs = [
+      { enabled: mainMode === 'transfer', temp: transferConfig.mainTempProgramNo, parking: transferConfig.mainParkingProgramNo, label: '메인' },
+      { enabled: subMode === 'transfer', temp: transferConfig.subTempProgramNo, parking: transferConfig.subParkingProgramNo, label: '서브' },
+    ];
+    const invalidTransferConfig = pathConfigs.find(({ enabled, temp, parking }) =>
+      enabled && (!Number.isInteger(temp) || !Number.isInteger(parking) || temp < 1 || temp > 7999 || parking < 1 || parking > 7999 || temp === parking)
+    );
+    if (invalidTransferConfig) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'TRANSFER_CONFIG_INVALID', message: `${invalidTransferConfig.label} 임시·대피 프로그램 번호는 서로 다른 O0001~O7999여야 합니다.` },
+      });
+    }
+    const path1 = resolveProgramRepositoryPath1(machineId, programTransferConfig);
+    let transferPrograms: Awaited<ReturnType<typeof buildProgramTransferManifest>>[] = [];
+    if (mainMode === 'transfer' || subMode === 'transfer') {
+      try {
+        transferPrograms = (await Promise.all(pendingRows.map(async (row) => {
+          const manifests = [];
+          if (mainMode === 'transfer') manifests.push(await buildProgramTransferManifest(path1, row.id, row.mainProgramNo, 1));
+          if (subMode === 'transfer' && row.subProgramNo) manifests.push(await buildProgramTransferManifest(path1, row.id, row.subProgramNo, 2));
+          return manifests;
+        }))).flat();
+        const metadata = await prisma.programRepositoryFile.findMany({
+          where: { machineDbId: machine.id, programNo: { in: transferPrograms.filter((program) => program.path === 1).map((program) => program.programNo) } },
+        });
+        const metadataByProgram = new Map(metadata.map((program) => [program.programNo, program]));
+        const manifestByRow = new Map(transferPrograms.filter((program) => program.path === 1).map((program) => [program.rowId, program]));
+        const changedRow = pendingRows.find((row) => {
+          const manifest = manifestByRow.get(row.id);
+          return Boolean(row.mainProgramSha256 && manifest && row.mainProgramSha256 !== manifest.sha256);
+        });
+        if (changedRow) {
+          await prisma.schedulerRow.update({
+            where: { id: changedRow.id },
+            data: {
+              lastErrorCode: 'PROGRAM_REPOSITORY_FILE_MISMATCH',
+              lastError: '등록 이후 프로그램 저장소 파일이 변경되었습니다. 재확인 후 실행하세요.',
+              lastErrorAt: new Date(),
+            },
+          });
+          return res.status(409).json({
+            success: false,
+            error: { code: 'PROGRAM_REPOSITORY_FILE_MISMATCH', message: `${changedRow.mainProgramNo} 프로그램이 등록 이후 변경되었습니다.` },
+          });
+        }
+        await Promise.all(transferPrograms.filter((program) => program.path === 1).map((program) => {
+          const item = metadataByProgram.get(program.programNo);
+          return prisma.schedulerRow.update({
+            where: { id: program.rowId },
+            data: { mainProgramComment: item?.comment ?? '', mainProgramSha256: program.sha256 },
+          });
+        }));
+        for (const row of rowDtos) {
+          const program = transferPrograms.find((item) => item.rowId === row.id && item.path === 1);
+          if (!program) continue;
+          row.mainProgramComment = metadataByProgram.get(program.programNo)?.comment ?? '';
+          row.mainProgramSha256 = program.sha256;
+        }
+      } catch (error) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'PROGRAM_REPOSITORY_INVALID',
+            message: error instanceof Error ? error.message : 'Path1 프로그램 저장소 검증에 실패했습니다.',
+          },
+        });
+      }
+    }
 
     await redisService.set(REDIS_KEYS.SCHEDULER_ROWS(machineId), rowDtos);
     await redisService.set(REDIS_KEYS.SCHEDULER_STATE(machineId), 'RUNNING', 86400);
@@ -352,7 +609,9 @@ router.post('/start', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, 
       rows: rowDtos,
       mainMode,
       subMode,
-      dncPaths,
+      transferPrograms,
+      dncPrograms: transferPrograms,
+      transferConfig,
     });
 
     wsService.sendSchedulerState(machineId, 'RUNNING');

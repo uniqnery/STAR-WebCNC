@@ -19,6 +19,7 @@ interface MachineTopBarProps {
   pageTitle: string;
   pageId?: TopBarPageId;
   settingsContent?: ReactNode;
+  settingsAdjacentContent?: ReactNode;
   rightSlot?: ReactNode; // Row 2 우측 패널을 커스텀 컨텐츠로 대체
   lockDisabled?: boolean; // true면 제어권 획득 불가 (해제는 항상 가능)
 }
@@ -36,7 +37,7 @@ function getPillOk(
   return field.contact === 'A' ? raw === 1 : raw === 0;
 }
 
-export function MachineTopBar({ pageTitle, pageId, settingsContent, rightSlot, lockDisabled = false }: MachineTopBarProps) {
+export function MachineTopBar({ pageTitle, pageId, settingsContent, settingsAdjacentContent, rightSlot, lockDisabled = false }: MachineTopBarProps) {
   const user = useAuthStore((s) => s.user);
   const {
     machines,
@@ -191,6 +192,7 @@ export function MachineTopBar({ pageTitle, pageId, settingsContent, rightSlot, l
       <div className="flex items-center justify-between py-2">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{pageTitle}</h1>
         <div className="flex items-center gap-2">
+          {settingsAdjacentContent}
           {settingsContent && (
             <div className="relative" ref={settingsRef}>
               <button

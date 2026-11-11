@@ -9,6 +9,7 @@ interface ProgramEntry {
   programNo: string;   // "O0001"
   comment:   string;
   size?:     number;
+  isProtected?: boolean;
 }
 
 interface ProgramListModalProps {
@@ -69,6 +70,7 @@ export function ProgramListModal({ machineId, activePath, onClose }: ProgramList
   };
 
   const openProgram = async (programNo: string) => {
+    if (programs.find((program) => program.programNo === programNo)?.isProtected) return;
     setLoading(true);
     setError(null);
     try {
@@ -94,6 +96,7 @@ export function ProgramListModal({ machineId, activePath, onClose }: ProgramList
   const selectProgram = async (programNo?: string) => {
     const target = programNo ?? (view === 'content' ? openedProgram : highlighted);
     if (!target) return;
+    if (programs.find((program) => program.programNo === target)?.isProtected) return;
     const oNo = parseInt(target.replace(/^O0*/, '') || '0', 10);
     if (oNo === 0) return;
     setSelecting(true);
@@ -113,9 +116,10 @@ export function ProgramListModal({ machineId, activePath, onClose }: ProgramList
   };
 
   const pathLabel = selectedPath === 1 ? 'PATH1 (MAIN)' : 'PATH2 (SUB)';
-  const canOpen   = view === 'list' && highlighted !== null && !loading;
+  const highlightedProgram = programs.find((program) => program.programNo === highlighted);
+  const canOpen   = view === 'list' && highlighted !== null && !highlightedProgram?.isProtected && !loading;
   const canSelect = !selecting && (
-    (view === 'list' && highlighted !== null) ||
+    (view === 'list' && highlighted !== null && !highlightedProgram?.isProtected) ||
     (view === 'content' && openedProgram !== null)
   );
 
@@ -222,8 +226,7 @@ export function ProgramListModal({ machineId, activePath, onClose }: ProgramList
                 <table className="w-full">
                   <thead className="sticky top-0 bg-gray-800 border-b border-gray-700">
                     <tr>
-                      <th className="text-left px-3 py-1.5 text-gray-400 font-medium w-20">프로그램</th>
-                      <th className="text-left px-3 py-1.5 text-gray-400 font-medium">코멘트</th>
+                      <th className="text-left px-3 py-1.5 text-gray-400 font-medium">프로그램 / 코멘트</th>
                       <th className="text-right px-3 py-1.5 text-gray-400 font-medium w-24">크기</th>
                     </tr>
                   </thead>
@@ -231,20 +234,20 @@ export function ProgramListModal({ machineId, activePath, onClose }: ProgramList
                     {programs.map((p) => (
                       <tr
                         key={p.programNo}
-                        onClick={() => setHighlighted(p.programNo)}
-                        onDoubleClick={() => void openProgram(p.programNo)}
+                        onClick={() => { if (!p.isProtected) setHighlighted(p.programNo); }}
+                        onDoubleClick={() => { if (!p.isProtected) void openProgram(p.programNo); }}
                         style={{ height: '30px' }}
-                        className={`cursor-pointer border-b border-gray-800 hover:bg-gray-700/50 transition-colors ${
+                        title={p.isProtected ? '파라미터 3202#4(NE9)로 보호된 9000번대 프로그램' : undefined}
+                        className={`border-b border-gray-800 transition-colors ${p.isProtected ? 'cursor-not-allowed bg-gray-950/60 opacity-45' : 'cursor-pointer hover:bg-gray-700/50'} ${
                           highlighted === p.programNo ? 'bg-blue-900/40 border-blue-700/50' : ''
                         }`}
                       >
                         <td className="px-3">
-                          <div className="flex items-center gap-1.5 font-mono font-semibold text-white">
+                          <div className={`flex items-center gap-1.5 font-mono font-semibold ${p.isProtected ? 'text-gray-500' : 'text-white'}`}>
                             <FileIcon />
-                            {p.programNo}
+                            <span>{p.programNo}{p.comment ? <span className="ml-1.5 font-normal text-gray-300">({p.comment})</span> : null}{p.isProtected ? <span className="ml-2 text-[10px] text-yellow-500">🔒 보호</span> : null}</span>
                           </div>
                         </td>
-                        <td className="px-3 text-gray-300">{p.comment || <span className="text-gray-600">—</span>}</td>
                         <td className="px-3 text-gray-500 text-right tabular-nums">
                           {p.size ? `${p.size}B` : '—'}
                         </td>

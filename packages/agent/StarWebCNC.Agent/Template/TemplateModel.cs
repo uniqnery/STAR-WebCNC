@@ -297,6 +297,16 @@ public class CountDisplay
     /// <summary>프리셋 변수 타입: "macro" | "pcode"</summary>
     public string PresetVarType { get; set; } = "pcode";
 
+    // ── 설비 자체 카운터 ON/OFF ─────────────────────────────
+    /// <summary>설비 자체 카운터 ON/OFF 변수 번호 (기본 P10002)</summary>
+    public int CounterEnableMacroNo { get; set; } = 10002;
+    /// <summary>설비 자체 카운터 ON/OFF 변수 타입: "macro" | "pcode"</summary>
+    public string CounterEnableVarType { get; set; } = "pcode";
+    /// <summary>설비 자체 카운터 ON 값</summary>
+    public int CounterEnableOnValue { get; set; } = 1;
+    /// <summary>설비 자체 카운터 OFF 값</summary>
+    public int CounterEnableOffValue { get; set; } = 0;
+
     // ── 사이클타임 (PMC D 어드레스 기반) ─────────────────────
     /// <summary>사이클타임 PMC 주소 (예: "D96"). 빈값이면 수집 스킵.</summary>
     public string CycleTimeAddr { get; set; } = "D96";

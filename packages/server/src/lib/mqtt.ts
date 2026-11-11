@@ -50,13 +50,19 @@ export interface TelemetryMessage extends MqttMessage {
 
 export interface AlarmMessage extends MqttMessage {
   machineId: string;
-  eventId: string;
-  type: 'occurred' | 'cleared';
-  alarmNo: number;
-  alarmMsg: string;
+  eventId?: string;
+  type: 'occurred' | 'cleared' | 'snapshot';
+  alarmNo?: number;
+  alarmMsg?: string;
   category?: string;
   /** FOCAS alarm type code: 3=PS (P/S) = #3006 macro alarm candidate */
   alarmTypeCode?: number;
+  alarms?: Array<{
+    alarmNo: number;
+    alarmMsg: string;
+    category?: string;
+    alarmTypeCode?: number;
+  }>;
 }
 
 export interface CommandMessage extends MqttMessage {

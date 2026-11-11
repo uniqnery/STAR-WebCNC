@@ -1,6 +1,7 @@
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using StarWebCNC.Agent.Mqtt;
 using StarWebCNC.Agent.Template;
@@ -15,6 +16,9 @@ public class FocasDataReader
     private readonly ILogger<FocasDataReader> _logger;
     private readonly FocasConnection _connection;
     private bool _fsdiagDone = false;
+    private readonly Dictionary<(int PathNo, int ProgramNo), ProgramCommentCacheEntry> _programCommentCache = new();
+    private static readonly TimeSpan ProgramCommentCacheLifetime = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan ProgramCommentEnrichmentBudget = TimeSpan.FromSeconds(8);
 
     public FocasDataReader(
         ILogger<FocasDataReader> logger,
@@ -305,6 +309,36 @@ public class FocasDataReader
     }
 
     /// <summary>
+    /// CNC 파라미터 No.3202 bit4(NE9)를 읽어 O9000~O9999 보호 상태를 반환한다.
+    /// NE9=1이면 9000번대 프로그램 표시/편집 보호가 활성화된 상태다.
+    /// </summary>
+    public Program9000ProtectionState ReadProgram9000Protection()
+    {
+        if (!_connection.IsConnected)
+            return Program9000ProtectionState.Unknown;
+
+        try
+        {
+            var param = new Focas1.IODBPSD();
+            short ret = Focas1.cnc_rdparam(_connection.Handle, 3202, 0, 8, param);
+            if (ret == Focas1.EW_OK)
+            {
+                bool protected9000 = ((param.u.cdata >> 4) & 1) == 1;
+                _logger.LogInformation("Param 3202 raw byte=0x{Raw:X2}, NE9={Ne9}", param.u.cdata, protected9000 ? 1 : 0);
+                return protected9000 ? Program9000ProtectionState.Protected : Program9000ProtectionState.Unprotected;
+            }
+
+            _logger.LogWarning("cnc_rdparam(3202) failed: ret={Ret}", ret);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reading O9000 program protection (param 3202#4)");
+        }
+
+        return Program9000ProtectionState.Unknown;
+    }
+
+    /// <summary>
     /// 경로별 상세 데이터 읽기 (프로그램 번호, 시퀀스, 절대좌표, F/S, 실행 블록 내용)
     /// 멀티-패스 CNC용: pathNo=1 → Path1(주축), pathNo=2 → Path2(부축)
     /// </summary>
@@ -526,9 +560,15 @@ public class FocasDataReader
     /// </summary>
     public List<AlarmInfo> ReadAlarms()
     {
-        var alarms = new List<AlarmInfo>();
+        TryReadAlarms(out var alarms);
+        return alarms;
+    }
+
+    public bool TryReadAlarms(out List<AlarmInfo> alarms)
+    {
+        alarms = new List<AlarmInfo>();
         if (!_connection.IsConnected)
-            return alarms;
+            return false;
 
         try
         {
@@ -541,7 +581,7 @@ public class FocasDataReader
             if (ret != Focas1.EW_OK)
             {
                 _logger.LogWarning("cnc_rdalmmsg2 failed: {ErrorCode}", ret);
-                return alarms;
+                return false;
             }
 
             // ODBALMMSG2는 msg1..msg10 으로 접근
@@ -567,13 +607,14 @@ public class FocasDataReader
                     });
                 }
             }
+
+            return true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error reading alarms");
+            return false;
         }
-
-        return alarms;
     }
 
     /// <summary>
@@ -1410,7 +1451,8 @@ public class FocasDataReader
 
             _logger.LogInformation("ListPrograms: found {Count} programs", result.Count);
             // cnc_rdprogdir3(V3) / cnc_rdprogdir2(V2) 모두 이 CNC에서 TCP 블로킹 발생.
-            // V1 ASCII 텍스트에 코멘트가 포함된 경우 위 정규식으로 추출. 없으면 빈 문자열.
+            // V1에 없는 코멘트는 사용자 프로그램만 upload3 헤더에서 제한적으로 보강한다.
+            EnrichProgramComments(result, pathNo);
             return result;
         }
         catch (Exception ex)
@@ -1427,6 +1469,111 @@ public class FocasDataReader
                 Focas1.cnc_setpath(_connection.Handle, 1);
         }
     }
+
+    private void EnrichProgramComments(List<ProgramDirectoryEntry> programs, int pathNo)
+    {
+        DateTime now = DateTime.UtcNow;
+        var startedAt = System.Diagnostics.Stopwatch.StartNew();
+
+        // O8000~O8999(매크로/시스템 영역)는 제외하되, O9000~O9999(NE9 보호 대상, DNC-76)는
+        // 일반 사용자 프로그램처럼 관리되므로 코멘트 보강 대상에 포함한다.
+        foreach (ProgramDirectoryEntry program in programs.Where(program => program.Number < 8000 || program.Number >= 9000))
+        {
+            var cacheKey = (pathNo, program.Number);
+            if (_programCommentCache.TryGetValue(cacheKey, out ProgramCommentCacheEntry? cached) &&
+                now - cached.ReadAt < ProgramCommentCacheLifetime)
+            {
+                program.Comment = cached.Comment;
+                continue;
+            }
+
+            if (startedAt.Elapsed >= ProgramCommentEnrichmentBudget)
+                break;
+
+            string? comment = ReadProgramCommentViaUpload3(program.Number, pathNo);
+            if (comment == null)
+                continue;
+
+            program.Comment = comment;
+            _programCommentCache[cacheKey] = new ProgramCommentCacheEntry(comment, DateTime.UtcNow);
+        }
+    }
+
+    private string? ReadProgramCommentViaUpload3(int programNo, int pathNo)
+    {
+        ushort handle = _connection.Handle;
+        bool pathSwitched = false;
+
+        if (pathNo > 1)
+        {
+            short setPathResult = Focas1.cnc_setpath(handle, (short)pathNo);
+            if (setPathResult != Focas1.EW_OK)
+            {
+                _logger.LogWarning("Program comment: cnc_setpath({Path}) failed EW={Ret}", pathNo, setPathResult);
+                return null;
+            }
+            pathSwitched = true;
+        }
+
+        try
+        {
+            foreach (short type in new short[] { 17, 0 })
+            {
+                short ret = Focas1.cnc_upstart3(handle, type, programNo, programNo);
+                if (ret != Focas1.EW_OK)
+                    continue;
+
+                var header = new StringBuilder();
+                byte[] buffer = new byte[512];
+                DateTime deadline = DateTime.UtcNow.AddSeconds(2);
+
+                try
+                {
+                    while (DateTime.UtcNow < deadline && header.Length < 4096)
+                    {
+                        int size = buffer.Length;
+                        ret = FocasUpload3.Read(handle, ref size, buffer);
+                        if (ret == Focas1.EW_OK && size > 0)
+                        {
+                            header.Append(Encoding.ASCII.GetString(buffer, 0, size));
+                            Match match = Regex.Match(
+                                header.ToString(),
+                                $@"(?m)^[ \t]*O0*{programNo}[ \t]*(?:\(([^)\r\n]*)\))?[ \t]*(?:\r?\n|$)");
+                            if (match.Success)
+                                return match.Groups[1].Success ? match.Groups[1].Value.Trim() : string.Empty;
+                        }
+                        else if (ret == (short)Focas1.focas_ret.EW_BUFFER ||
+                                 (ret == Focas1.EW_OK && size == 0))
+                        {
+                            Thread.Sleep(25);
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                }
+                finally
+                {
+                    Focas1.cnc_upend(handle);
+                }
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Program comment read failed: path={Path}, O{ProgramNo:D4}", pathNo, programNo);
+            return null;
+        }
+        finally
+        {
+            if (pathSwitched)
+                Focas1.cnc_setpath(handle, 1);
+        }
+    }
+
+    private sealed record ProgramCommentCacheEntry(string Comment, DateTime ReadAt);
 
     /// <summary>
     /// V3 API로 프로그램 목록의 사이즈 + 코멘트를 보강한다.
@@ -1504,15 +1651,18 @@ public class FocasDataReader
     /// NC 프로그램 전송 (PC → CNC, FOCAS "download")
     /// content: % ~ % 형식의 NC 텍스트
     /// </summary>
-    public Task<bool> UploadProgramAsync(string content) => Task.FromResult(UploadProgramSync(content));
+    public Task<bool> UploadProgramAsync(string content, int pathNo = 1) => Task.FromResult(UploadProgramSync(content, pathNo));
 
-    private bool UploadProgramSync(string content)
+    private bool UploadProgramSync(string content, int pathNo)
     {
         if (!_connection.IsConnected)
             return false;
 
         try
         {
+            if (pathNo > 1 && Focas1.cnc_setpath(_connection.Handle, (short)pathNo) != Focas1.EW_OK)
+                return false;
+
             string nc = PrepareNcContent(content);
 
             // 다운로드 시작 (type=0: CNC 메모리)
@@ -1568,6 +1718,7 @@ public class FocasDataReader
                 return false;
             }
 
+            _programCommentCache.Clear();
             return true;
         }
         catch (Exception ex)
@@ -1575,15 +1726,20 @@ public class FocasDataReader
             _logger.LogError(ex, "Error uploading program to CNC");
             return false;
         }
+        finally
+        {
+            if (pathNo > 1)
+                Focas1.cnc_setpath(_connection.Handle, 1);
+        }
     }
 
     /// <summary>
     /// NC 프로그램 삭제 (cnc_delete) — forceOverwrite 시 업로드 전 호출
     /// EDIT 모드 필요
     /// </summary>
-    public Task<bool> DeleteProgramAsync(int programNo) => Task.FromResult(DeleteProgramSync(programNo));
+    public Task<bool> DeleteProgramAsync(int programNo, int pathNo = 1) => Task.FromResult(DeleteProgramSync(programNo, pathNo));
 
-    private bool DeleteProgramSync(int programNo)
+    private bool DeleteProgramSync(int programNo, int pathNo)
     {
         if (!_connection.IsConnected)
             return false;
@@ -1596,6 +1752,9 @@ public class FocasDataReader
 
         try
         {
+            if (pathNo > 1 && Focas1.cnc_setpath(_connection.Handle, (short)pathNo) != Focas1.EW_OK)
+                return false;
+
             short ret = Focas1.cnc_delete(_connection.Handle, (short)programNo);
             if (ret != Focas1.EW_OK)
             {
@@ -1603,12 +1762,18 @@ public class FocasDataReader
                 return false;
             }
             _logger.LogInformation("cnc_delete O{ProgramNo:D4} success", programNo);
+            _programCommentCache.Clear();
             return true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting program O{ProgramNo:D4}", programNo);
             return false;
+        }
+        finally
+        {
+            if (pathNo > 1)
+                Focas1.cnc_setpath(_connection.Handle, 1);
         }
     }
 
@@ -2154,7 +2319,8 @@ public class CncStatus
         5 => "JOG",
         6 => "JOG_HANDLE",
         7 => "REF",
-        9 => "DNC",
+        9 => "REF",
+        10 => "DNC",
         _ => $"UNKNOWN({Aut})"
     };
 
@@ -2225,6 +2391,13 @@ public class ProgramDirectoryEntry
     public int    Number    { get; set; }         // 1
     public int    Size      { get; set; }         // bytes
     public string Comment   { get; set; } = "";
+}
+
+public enum Program9000ProtectionState
+{
+    Unknown,
+    Unprotected,
+    Protected,
 }
 
 public class WearOffsetEntry

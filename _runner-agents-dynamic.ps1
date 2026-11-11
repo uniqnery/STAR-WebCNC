@@ -12,12 +12,30 @@ if (-not (Test-Path $LogDir)) {
 
 Write-Host "[agents] Fetching machine list from $ServerUrl ..."
 
-try {
-    $loginBody = "{`"username`":`"$Username`",`"password`":`"$Password`"}"
-    $login = Invoke-RestMethod -Uri "$ServerUrl/api/auth/login" -Method POST -ContentType "application/json" -Body $loginBody
-    $token = $login.data.accessToken
-} catch {
-    Write-Host "[agents] ERROR: Server login failed - $_"
+$loginBody = "{`"username`":`"$Username`",`"password`":`"$Password`"}"
+$loginError = $null
+$token = $null
+
+for ($attempt = 1; $attempt -le 10; $attempt++) {
+    try {
+        $login = Invoke-RestMethod -Uri "$ServerUrl/api/auth/login" -Method POST -ContentType "application/json" -Body $loginBody -TimeoutSec 3
+        $token = $login.data.accessToken
+        if ($token) {
+            break
+        }
+        $loginError = "Login response did not include an access token."
+    } catch {
+        $loginError = $_
+    }
+
+    if ($attempt -lt 10) {
+        Write-Host "[agents] Server login attempt $attempt/10 failed. Retrying in 2 seconds..."
+        Start-Sleep -Seconds 2
+    }
+}
+
+if (-not $token) {
+    Write-Host "[agents] ERROR: Server login failed after 10 attempts - $loginError"
     exit 1
 }
 

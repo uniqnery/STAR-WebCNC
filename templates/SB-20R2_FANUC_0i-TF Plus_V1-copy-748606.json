@@ -547,15 +547,15 @@
           "id": "DNC",
           "size": "normal",
           "color": "gray",
-          "label": "DNCCC",
+          "label": "DNC",
           "timing": {
             "holdMs": 300,
             "timeoutMs": 2000,
             "longPressMs": 1000
           },
           "hasLamp": true,
-          "reqAddr": "R0.0",
-          "lampAddr": "R0.0"
+          "reqAddr": "R6135.0",
+          "lampAddr": "D8.6"
         }
       ],
       "name": "MODE"
@@ -735,27 +735,6 @@
           "contact": "A",
           "enabled": true,
           "pmcAddr": "X47.5"
-        },
-        {
-          "id": "tbi-1774959969310-jypr",
-          "label": "메모리 모드",
-          "contact": "A",
-          "enabled": true,
-          "pmcAddr": "Y52.2"
-        },
-        {
-          "id": "sc-estop",
-          "label": "도어 닫힘",
-          "contact": "A",
-          "enabled": true,
-          "pmcAddr": "R7.3"
-        },
-        {
-          "id": "tbi-1774959968935-e3tz",
-          "label": "절삭유S/W ON",
-          "contact": "A",
-          "enabled": true,
-          "pmcAddr": "X47.2"
         },
         {
           "id": "tbi-1774961826472-1hzx",

@@ -239,4 +239,81 @@ export async function storeAlarm(data: {
   }
 }
 
+export interface AlarmSnapshotItem {
+  alarmNo: number;
+  alarmMsg: string;
+  category?: string;
+  alarmTypeCode?: number;
+}
+
+export async function reconcileAlarmSnapshot(data: {
+  machineId: string;
+  alarms: AlarmSnapshotItem[];
+}): Promise<{ occurred: AlarmSnapshotItem[]; cleared: AlarmSnapshotItem[] }> {
+  const machine = await prisma.machine.findUnique({
+    where: { machineId: data.machineId },
+    select: { id: true },
+  });
+
+  if (!machine) {
+    console.warn(`[Alarms] Machine not found for snapshot: ${data.machineId}`);
+    return { occurred: [], cleared: [] };
+  }
+
+  const currentByNo = new Map(data.alarms.map((alarm) => [alarm.alarmNo, alarm]));
+  const currentAlarms = [...currentByNo.values()];
+  const now = new Date();
+
+  return prisma.$transaction(async (transaction) => {
+    const activeAlarms = await transaction.alarm.findMany({
+      where: { machineDbId: machine.id, clearedAt: null },
+      select: { id: true, alarmNo: true, alarmMsg: true, category: true },
+    });
+    const activeByNo = new Map(activeAlarms.map((alarm) => [alarm.alarmNo, alarm]));
+    const occurred: AlarmSnapshotItem[] = [];
+    const cleared = activeAlarms
+      .filter((alarm) => !currentByNo.has(alarm.alarmNo))
+      .map((alarm) => ({
+        alarmNo: alarm.alarmNo,
+        alarmMsg: alarm.alarmMsg,
+        category: alarm.category ?? undefined,
+      }));
+
+    const clearedIds = activeAlarms
+      .filter((alarm) => !currentByNo.has(alarm.alarmNo))
+      .map((alarm) => alarm.id);
+
+    if (clearedIds.length > 0) {
+      await transaction.alarm.updateMany({
+        where: { id: { in: clearedIds }, clearedAt: null },
+        data: { clearedAt: now },
+      });
+    }
+
+    for (const alarm of currentAlarms) {
+      const active = activeByNo.get(alarm.alarmNo);
+      if (!active) {
+        await transaction.alarm.create({
+          data: {
+            machineDbId: machine.id,
+            alarmNo: alarm.alarmNo,
+            alarmMsg: alarm.alarmMsg,
+            alarmType: 'ALARM',
+            category: alarm.category,
+            occurredAt: now,
+          },
+        });
+        occurred.push(alarm);
+      } else if (active.alarmMsg !== alarm.alarmMsg || active.category !== alarm.category) {
+        await transaction.alarm.update({
+          where: { id: active.id },
+          data: { alarmMsg: alarm.alarmMsg, category: alarm.category },
+        });
+      }
+    }
+
+    return { occurred, cleared };
+  });
+}
+
 export default router;

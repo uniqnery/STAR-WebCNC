@@ -205,20 +205,24 @@ export interface ToolLifeData {
   path2Tools: ToolLifeEntry[];
 }
 
-// DNC 경로 설정 (Path 단위)
-export interface DncPathConfig {
-  path1: string;   // Path 1 DNC 폴더 경로
-  path2: string;   // Path 2 DNC 폴더 경로
-  path3?: string;  // Path 3 DNC 폴더 경로 (장비가 지원할 때만)
+// 프로그램 저장소 경로 설정 (Path 단위)
+export interface ProgramRepositoryPathConfig {
+  path1: string;
+  path2: string;
+  path3?: string;
 }
 
-// 장비별 DNC 설정
-export interface MachineDncConfig {
+// 장비별 프로그램 파일전송 설정
+export interface MachineProgramTransferConfig {
   machineId: string;
   pathCount: number;               // 2 또는 3
-  mainMode: 'memory' | 'dnc';     // Path1(메인) 실행 모드
-  subMode:  'memory' | 'dnc';     // Path2(서브) 실행 모드
-  dncPaths: DncPathConfig;
+  mainMode: 'memory' | 'transfer'; // Path1(메인) 실행 모드
+  subMode:  'memory' | 'transfer'; // Path2(서브) 실행 모드
+  repositoryPaths: ProgramRepositoryPathConfig;
+  mainTempProgramNo: number;
+  mainParkingProgramNo: number;
+  subTempProgramNo: number;
+  subParkingProgramNo: number;
   // 행 추가 기본값 (localStorage only — 서버 미전송)
   defaultMainPgm?: string;         // 기본 메인 프로그램 번호 (예: "O0001")
   defaultSubPgm?: string;          // 기본 서브 프로그램 번호 (미설정 시 비어있음)
@@ -234,9 +238,11 @@ export interface SchedulerRow {
   order: number;
   mainProgramNo: string;
   subProgramNo?: string;
+  mainProgramComment?: string;
+  mainProgramSha256?: string;
   preset: number;
   count: number;          // Agent authority — Server가 보고값으로 갱신
-  status: 'PENDING' | 'RUNNING' | 'COMPLETED';
+  status: 'PENDING' | 'RUNNING' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
   lastError?: string;
   lastErrorCode?: string;
   lastErrorAt?: string;
@@ -309,7 +315,7 @@ interface MachineState {
   schedulerRows: Record<string, SchedulerRow[]>;      // 스케줄러 큐 (장비별)
   schedulerState: Record<string, SchedulerState>;     // 장비별 Scheduler 상태 머신
   schedulerError: Record<string, SchedulerErrorPayload | null>;  // 최근 에러
-  dncConfigs: Record<string, MachineDncConfig>;   // 장비별 DNC 경로 설정
+  programTransferConfigs: Record<string, MachineProgramTransferConfig>;
   controlLockMap: Record<string, ControlLockEntry>;  // 장비별 제어권 상태
   controlLockDurationMin: number;  // 제어권 타이머 (분)
   isLoading: boolean;
@@ -333,7 +339,7 @@ interface MachineState {
   updateSchedulerCount: (machineId: string, rowId: string, count: number) => void;
   setSchedulerError: (machineId: string, err: SchedulerErrorPayload | null) => void;
   clearSchedulerError: (machineId: string) => void;
-  setDncConfig: (machineId: string, config: MachineDncConfig) => void;
+  setProgramTransferConfig: (machineId: string, config: MachineProgramTransferConfig) => void;
   acquireControlLock: (machineId: string, username: string) => void;
   releaseControlLock: (machineId: string) => void;
   extendControlLock: (machineId: string) => void;
@@ -357,7 +363,8 @@ interface MachineState {
 
 // localStorage 헬퍼
 const SCHEDULER_ROWS_STORAGE_KEY = 'star-webcnc-scheduler-rows';
-const DNC_CONFIG_STORAGE_KEY = 'star-webcnc-dnc-config';
+const PROGRAM_TRANSFER_CONFIG_STORAGE_KEY = 'star-webcnc-program-transfer-config';
+const LEGACY_DNC_CONFIG_STORAGE_KEY = 'star-webcnc-dnc-config';
 
 function loadSchedulerRows(): Record<string, SchedulerRow[]> {
   try {
@@ -376,27 +383,41 @@ function saveSchedulerRows(rows: Record<string, SchedulerRow[]>) {
   }
 }
 
-function loadDncConfigs(): Record<string, MachineDncConfig> {
+function loadProgramTransferConfigs(): Record<string, MachineProgramTransferConfig> {
   try {
-    const raw = localStorage.getItem(DNC_CONFIG_STORAGE_KEY);
+    const raw = localStorage.getItem(PROGRAM_TRANSFER_CONFIG_STORAGE_KEY)
+      ?? localStorage.getItem(LEGACY_DNC_CONFIG_STORAGE_KEY);
     if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, MachineDncConfig>;
+    const parsed = JSON.parse(raw) as Record<string, MachineProgramTransferConfig>;
     // 기본값 보장 + 구버전 캐시 하위호환 (executionMode → mainMode/subMode)
     for (const key of Object.keys(parsed)) {
-      const c = parsed[key] as MachineDncConfig & { executionMode?: string };
-      if (!c.mainMode) c.mainMode = (c.executionMode as 'memory' | 'dnc') ?? 'memory';
+      const c = parsed[key] as MachineProgramTransferConfig & {
+        executionMode?: string;
+        dncPaths?: ProgramRepositoryPathConfig;
+      };
+      if (!c.mainMode) c.mainMode = c.executionMode === 'dnc' ? 'transfer' : 'memory';
+      if ((c.mainMode as string) === 'dnc') c.mainMode = 'transfer';
+      if ((c.subMode as string) === 'dnc') c.subMode = 'transfer';
       if (!c.subMode)  c.subMode  = 'memory';
+      c.repositoryPaths ??= c.dncPaths ?? { path1: '', path2: '' };
+      c.mainTempProgramNo ??= 7777;
+      c.mainParkingProgramNo ??= 7776;
+      c.subTempProgramNo ??= 7775;
+      c.subParkingProgramNo ??= 7774;
       delete c.executionMode;
+      delete c.dncPaths;
     }
+    localStorage.setItem(PROGRAM_TRANSFER_CONFIG_STORAGE_KEY, JSON.stringify(parsed));
+    localStorage.removeItem(LEGACY_DNC_CONFIG_STORAGE_KEY);
     return parsed;
   } catch {
     return {};
   }
 }
 
-function saveDncConfigs(configs: Record<string, MachineDncConfig>) {
+function saveProgramTransferConfigs(configs: Record<string, MachineProgramTransferConfig>) {
   try {
-    localStorage.setItem(DNC_CONFIG_STORAGE_KEY, JSON.stringify(configs));
+    localStorage.setItem(PROGRAM_TRANSFER_CONFIG_STORAGE_KEY, JSON.stringify(configs));
   } catch {
     // localStorage full or unavailable
   }
@@ -497,7 +518,7 @@ export const useMachineStore = create<MachineState>((set, get) => ({
   schedulerRows: loadSchedulerRows(),
   schedulerState: {},
   schedulerError: {},
-  dncConfigs: loadDncConfigs(),
+  programTransferConfigs: loadProgramTransferConfigs(),
   controlLockMap: {},
   controlLockDurationMin: loadControlLockDuration(),
   isLoading: false,
@@ -671,11 +692,11 @@ export const useMachineStore = create<MachineState>((set, get) => ({
   clearSchedulerError: (machineId) =>
     set((state) => ({ schedulerError: { ...state.schedulerError, [machineId]: null } })),
 
-  setDncConfig: (machineId, config) =>
+  setProgramTransferConfig: (machineId, config) =>
     set((state) => {
-      const updated = { ...state.dncConfigs, [machineId]: config };
-      saveDncConfigs(updated);
-      return { dncConfigs: updated };
+      const updated = { ...state.programTransferConfigs, [machineId]: config };
+      saveProgramTransferConfigs(updated);
+      return { programTransferConfigs: updated };
     }),
 
   acquireControlLock: (machineId, username) =>
@@ -1114,8 +1135,8 @@ export const useSchedulerError = (machineId: string) => {
   return useMachineStore((state) => state.schedulerError[machineId] ?? null);
 };
 
-export const useDncConfig = (machineId: string) => {
-  return useMachineStore((state) => state.dncConfigs[machineId]);
+export const useProgramTransferConfig = (machineId: string) => {
+  return useMachineStore((state) => state.programTransferConfigs[machineId]);
 };
 
 export const useControlLock = (machineId: string) => {

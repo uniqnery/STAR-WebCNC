@@ -16,6 +16,11 @@ export interface FileEntry {
   modifiedAt: string;     // ISO
   programNo?: string;     // O번호 추출 (NC 파일)
   comment?: string;       // NC 프로그램 코멘트 (괄호 안 텍스트, CNC 파일만)
+  sha256?: string;
+  schedulerRegistered?: boolean;
+  schedulerMismatch?: boolean;
+  isRunning?: boolean;
+  isProtected?: boolean;
 }
 
 // ── 트랜스퍼 작업 ──
@@ -60,6 +65,7 @@ export interface ViewerState {
   dirty: boolean;
   sourceRoot: LogicalRootType;
   machineId?: string;
+  pathKey?: string;
 }
 
 interface FileState {
@@ -73,6 +79,7 @@ interface FileState {
   shareLoading: boolean;
   cncLoading: boolean;
   cncError: string | null;   // CNC 파일 로드 실패 메시지
+  program9000Protection: 'protected' | 'unprotected' | 'unknown';
   selectedShareFiles: string[];
   selectedCncFiles: string[];
   transferQueue: TransferJob[];
@@ -84,8 +91,8 @@ interface FileState {
 
   // Actions - 저장소
   loadRepoFiles: (machineId: string, pathKey: string) => Promise<void>;
-  uploadToRepo: (machineId: string, pathKey: string, fileName: string, size: number) => void;
-  deleteFromRepo: (machineId: string, pathKey: string, fileNames: string[]) => void;
+  uploadToRepo: (machineId: string, pathKey: string, file: File) => Promise<void>;
+  deleteFromRepo: (machineId: string, pathKey: string, fileNames: string[]) => Promise<void>;
 
   // Actions - 트랜스퍼
   loadShareFiles: () => Promise<void>;
@@ -101,7 +108,7 @@ interface FileState {
   clearCompletedTransfers: () => void;
 
   // Actions - 뷰어
-  openViewer: (fileName: string, content: string, readOnly: boolean, sourceRoot: LogicalRootType, machineId?: string) => void;
+  openViewer: (fileName: string, content: string, readOnly: boolean, sourceRoot: LogicalRootType, machineId?: string, pathKey?: string) => void;
   closeViewer: () => void;
   updateViewerContent: (content: string) => void;
   saveViewerContent: () => Promise<void>;
@@ -127,6 +134,7 @@ export const useFileStore = create<FileState>((set, get) => ({
   shareLoading: false,
   cncLoading: false,
   cncError: null,
+  program9000Protection: 'unknown',
   selectedShareFiles: [],
   selectedCncFiles: [],
   transferQueue: [],
@@ -187,31 +195,19 @@ export const useFileStore = create<FileState>((set, get) => ({
     }));
   },
 
-  uploadToRepo: (machineId, pathKey, fileName, size) => {
-    const key = `${machineId}:${pathKey}`;
-    const newFile: FileEntry = {
-      name: fileName,
-      isDirectory: false,
-      size,
-      modifiedAt: new Date().toISOString(),
-      programNo: fileName.match(/^O?\d+/i)?.[0]?.toUpperCase(),
-    };
-    set((state) => ({
-      repoFiles: {
-        ...state.repoFiles,
-        [key]: [...(state.repoFiles[key] || []), newFile],
-      },
-    }));
+  uploadToRepo: async (machineId, pathKey, file) => {
+    if (pathKey !== 'path1') throw new Error('Path1만 지원합니다.');
+    const response = await fileApi.uploadRepoFile(machineId, file);
+    if (!response.success) throw new Error(response.error?.message ?? '파일 업로드 실패');
+    await get().loadRepoFiles(machineId, pathKey);
+    void get().loadFileHistory(machineId);
   },
 
-  deleteFromRepo: (machineId, pathKey, fileNames) => {
-    const key = `${machineId}:${pathKey}`;
-    set((state) => ({
-      repoFiles: {
-        ...state.repoFiles,
-        [key]: (state.repoFiles[key] || []).filter((f) => !fileNames.includes(f.name)),
-      },
-    }));
+  deleteFromRepo: async (machineId, pathKey, fileNames) => {
+    const response = await fileApi.deleteFiles('SCHEDULER_REPO', machineId, fileNames, pathKey);
+    if (!response.success) throw new Error(response.error?.message ?? '파일 삭제 실패');
+    await get().loadRepoFiles(machineId, pathKey);
+    void get().loadFileHistory(machineId);
   },
 
   // ── 트랜스퍼 액션 ──
@@ -230,13 +226,13 @@ export const useFileStore = create<FileState>((set, get) => ({
   },
 
   loadCncFiles: async (machineId, pathKey) => {
-    set({ cncLoading: true, cncError: null });
+    set({ cncLoading: true, cncError: null, program9000Protection: 'unknown', selectedCncFiles: [] });
     try {
       const pathNo = pathKey === 'path2' ? 2 : pathKey === 'path3' ? 3 : 1;
       const res = await fileApi.listCncFiles(machineId, pathNo);
       if (res.success) {
         // Agent 응답: { programs: [...], count: N } 또는 직접 배열
-        const data = res.data as { programs?: FileEntry[] } | FileEntry[] | null;
+        const data = res.data as { programs?: FileEntry[]; program9000Protection?: 'protected' | 'unprotected' | 'unknown' } | FileEntry[] | null;
         const files = Array.isArray(data)
           ? data
           : Array.isArray((data as { programs?: FileEntry[] })?.programs)
@@ -245,6 +241,7 @@ export const useFileStore = create<FileState>((set, get) => ({
         set({
           cncFiles: files,
           cncLoading: false,
+          program9000Protection: Array.isArray(data) ? 'unknown' : data?.program9000Protection ?? 'unknown',
           // 빈 목록이면 Agent 로그 확인 안내
           cncError: files.length === 0 ? 'CNC 메모리가 비어 있거나 Agent를 재빌드/재시작 해주세요' : null,
         });
@@ -259,16 +256,16 @@ export const useFileStore = create<FileState>((set, get) => ({
         // DOWNLOAD_PROGRAM 실행 중 FOCAS 스레드가 점유된 경우 기존 목록 유지
         userMsg = 'Agent 처리 중 — 전송 완료 후 자동 복구됩니다';
         console.warn('[CNC] LIST_PROGRAMS timeout (probably busy with transfer)');
-        set((s) => ({ cncLoading: false, cncError: userMsg, cncFiles: s.cncFiles }));
+        set((s) => ({ cncLoading: false, cncError: userMsg, cncFiles: s.cncFiles, program9000Protection: 'unknown' }));
         return;
       } else if (code === 'CNC_NOT_CONNECTED') userMsg = 'CNC 미연결 — Agent의 FOCAS 연결 상태를 확인하세요';
       else if (code === 'UNKNOWN_COMMAND') userMsg = 'Agent 버전이 낮습니다 — Agent를 재빌드 후 재시작하세요';
       else if (msg) userMsg = `${userMsg}: ${msg}`;
       console.warn('[CNC] LIST_PROGRAMS failed:', code, msg);
-      set({ cncFiles: [], cncLoading: false, cncError: userMsg });
+      set({ cncFiles: [], cncLoading: false, cncError: userMsg, program9000Protection: 'unknown' });
     } catch (err) {
       console.error('loadCncFiles failed:', err);
-      set({ cncFiles: [], cncLoading: false, cncError: 'API 서버에 연결할 수 없습니다' });
+      set({ cncFiles: [], cncLoading: false, cncError: 'API 서버에 연결할 수 없습니다', program9000Protection: 'unknown' });
     }
   },
 
@@ -411,7 +408,7 @@ export const useFileStore = create<FileState>((set, get) => ({
   },
 
   // ── 뷰어 액션 ──
-  openViewer: (fileName, content, readOnly, sourceRoot, machineId) => {
+  openViewer: (fileName, content, readOnly, sourceRoot, machineId, pathKey) => {
     const resolvedContent = content || getGCodeContent(fileName);
     set({
       viewer: {
@@ -422,6 +419,7 @@ export const useFileStore = create<FileState>((set, get) => ({
         dirty: false,
         sourceRoot,
         machineId,
+        pathKey,
       },
     });
   },
@@ -451,7 +449,7 @@ export const useFileStore = create<FileState>((set, get) => ({
     try {
       const root = viewer.sourceRoot;
       const machineId = viewer.machineId || '';
-      await fileApi.writeFile(root, machineId, viewer.fileName, viewer.content);
+      await fileApi.writeFile(root, machineId, viewer.fileName, viewer.content, viewer.pathKey);
       if (machineId) void get().loadFileHistory(machineId);
     } catch { /* ignore — content already in state */ }
     set((state) => ({

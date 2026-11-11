@@ -411,6 +411,20 @@ function SectionSchedulerConfig({ data, update }: { data: CncTemplate; update: (
             </div>
             <NumberInput label="변수 번호 (#)" value={cd.presetMacroNo} onChange={v => update('schedulerConfig.countDisplay.presetMacroNo', v)} />
           </div>
+          {/* MACHINE COUNTER ENABLE */}
+          <div className="col-span-2 grid grid-cols-2 gap-2 bg-gray-900/40 rounded p-3">
+            <p className="col-span-2 text-xs text-yellow-400 font-medium mb-1">설비 자체 카운터 ON/OFF</p>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-300 w-20 shrink-0">변수 타입</span>
+              <select value={cd.counterEnableVarType} onChange={e => update('schedulerConfig.countDisplay.counterEnableVarType', e.target.value)} className="flex-1 px-2 py-1 text-xs bg-gray-700 border border-gray-600 rounded text-white">
+                <option value="macro">커스텀 변수 (#)</option>
+                <option value="pcode">P코드 (cnc_rdpmacro)</option>
+              </select>
+            </div>
+            <NumberInput label="변수 번호 (#)" value={cd.counterEnableMacroNo} onChange={v => update('schedulerConfig.countDisplay.counterEnableMacroNo', v)} />
+            <NumberInput label="ON 값" value={cd.counterEnableOnValue} onChange={v => update('schedulerConfig.countDisplay.counterEnableOnValue', v)} />
+            <NumberInput label="OFF 값" value={cd.counterEnableOffValue} onChange={v => update('schedulerConfig.countDisplay.counterEnableOffValue', v)} />
+          </div>
           {/* CYCLE TIME */}
           <div className="col-span-2 grid grid-cols-2 gap-2 bg-gray-900/40 rounded p-3">
             <p className="col-span-2 text-xs text-yellow-400 font-medium mb-1">CYCLE TIME (PMC D 어드레스)</p>
@@ -823,7 +837,7 @@ function SectionCapabilities({ data, update }: { data: CncTemplate; update: (pat
   const cap = data.capabilities;
   const flags: [string, string, string][] = [
     ['monitoring', '실시간 모니터링', '장비 상태 실시간 표시'],
-    ['scheduler', '스케줄러', 'DNC/Memory 순차실행'],
+    ['scheduler', '스케줄러', 'CNC 저장/파일전송 순차실행'],
     ['fileTransfer', '파일 전송', 'NC 프로그램 전송'],
     ['alarmHistory', '알람 이력', '알람 이력 관리'],
     ['remoteControl', '원격 제어', '가상 조작반 (구현 시 활성화)'],

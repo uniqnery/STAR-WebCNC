@@ -8,24 +8,45 @@ import {
   useSchedulerRows,
   useSchedulerState,
   useSchedulerError,
-  useDncConfig,
+  useProgramTransferConfig,
   useControlLock,
   useMachineAlarms,
   SchedulerRow,
   SchedulerState,
-  MachineDncConfig,
-  DncPathConfig,
+  MachineProgramTransferConfig,
   type Alarm,
 } from '../stores/machineStore';
 import { useTemplateStore, type PmcMessageEntry } from '../stores/templateStore';
 import { useAuthStore } from '../stores/authStore';
-import { schedulerApi, dncApi } from '../lib/api';
+import { schedulerApi, programTransferApi, fileApi } from '../lib/api';
 import { NCMonitor, TABS, type MonitorTab } from '../components/NCMonitor';
 import { FocasEventLog } from '../components/FocasEventLog';
 import { UserActivityFeed } from '../components/UserActivityFeed';
-import { FolderBrowser } from '../components/FolderBrowser';
 import { GCodeViewer } from '../components/filemanager/GCodeViewer';
+import { ProgramRepositoryModal } from '../components/filemanager/ProgramRepositoryModal';
 import { MachineTopBar } from '../components/MachineTopBar';
+
+type ProgramCheck = {
+  status: 'exists' | 'missing' | 'unknown' | 'changed' | 'protected';
+  comment?: string;
+};
+
+type ProgramListEntry = {
+  programNo?: string;
+  name?: string;
+  comment?: string;
+  sha256?: string;
+  isProtected?: boolean;
+};
+
+const normalizeProgramNo = (value?: string | null) => {
+  const digits = value?.replace(/\D/g, '') ?? '';
+  return digits ? `O${digits.padStart(4, '0')}` : '';
+};
+
+const buildUnknownChecks = (rows: SchedulerRow[], field: 'mainProgramNo' | 'subProgramNo') => Object.fromEntries(
+  rows.filter((row) => row[field]).map((row) => [row.id, { status: 'unknown' as const }]),
+);
 
 export function Scheduler() {
   const user = useAuthStore((state) => state.user);
@@ -33,7 +54,7 @@ export function Scheduler() {
     selectedMachineId,
     setSchedulerRows,
     setSchedulerState,
-    setDncConfig,
+    setProgramTransferConfig,
     clearSchedulerError,
   } = useMachineStore();
   const machines = useMachineStore((s) => s.machines);
@@ -42,7 +63,7 @@ export function Scheduler() {
   const rows = useSchedulerRows(selectedMachineId || '');
   const schedulerState = useSchedulerState(selectedMachineId || '');
   const schedulerError = useSchedulerError(selectedMachineId || '');
-  const dncConfig = useDncConfig(selectedMachineId || '');
+  const programTransferConfig = useProgramTransferConfig(selectedMachineId || '');
   const controlLock = useControlLock(selectedMachineId || '');
   const activeAlarms = useMachineAlarms(selectedMachineId || '');
 
@@ -58,6 +79,8 @@ export function Scheduler() {
 
   const [monitorTab, setMonitorTab] = useState<MonitorTab>('monitor');
   const [mobileTab, setMobileTab] = useState<'monitor' | 'scheduler'>('monitor');
+  const [programChecks, setProgramChecks] = useState<Record<string, ProgramCheck>>({});
+  const [subProgramChecks, setSubProgramChecks] = useState<Record<string, ProgramCheck>>({});
   const SCHED_TABS_ORDER: ('monitor' | 'scheduler')[] = ['monitor', 'scheduler'];
   const swipeStartX = useRef<number | null>(null);
   const handleTouchStart = (e: React.TouchEvent) => { swipeStartX.current = e.touches[0].clientX; };
@@ -71,9 +94,8 @@ export function Scheduler() {
     if (dx > 0 && idx > 0) setMobileTab(SCHED_TABS_ORDER[idx - 1]);
   };
   const [actionError, setActionError] = useState<string | null>(null);
-  const [folderBrowserOpen, setFolderBrowserOpen] = useState(false);
-  const [editingPathKey, setEditingPathKey] = useState<'path1' | 'path2' | 'path3'>('path1');
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   const machine = machines.find((m) => m.machineId === selectedMachineId);
   const isAdminOrEngineer = user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER';
@@ -97,23 +119,29 @@ export function Scheduler() {
 
   useEffect(() => { loadRows(); }, [loadRows]);
 
-  // DNC config 로드 — 서버(경로/모드) + localStorage(기본값) 머지
+  // 프로그램 파일전송 설정 로드 — 서버 설정 + localStorage 기본값 병합
   useEffect(() => {
     if (!selectedMachineId) return;
-    dncApi.getConfig(selectedMachineId).then((res) => {
+    programTransferApi.getConfig(selectedMachineId).then((res) => {
       if (res.success && res.data) {
-        const d = res.data as { machineId: string; dncConfig: { path1?: string; path2?: string; path3?: string; mainMode?: string; 'memory'?: string; executionMode?: string } };
-        if (d.dncConfig && (d.dncConfig.path1 !== undefined || d.dncConfig.path2 !== undefined)) {
+        const d = res.data as { machineId: string; programTransferConfig?: { path1?: string; path2?: string; path3?: string; mainMode?: string; subMode?: string; executionMode?: string; mainTempProgramNo?: number; mainParkingProgramNo?: number; subTempProgramNo?: number; subParkingProgramNo?: number }; dncConfig?: { path1?: string; path2?: string; path3?: string; mainMode?: string; subMode?: string; executionMode?: string; mainTempProgramNo?: number; mainParkingProgramNo?: number; subTempProgramNo?: number; subParkingProgramNo?: number } };
+        const remoteConfig = d.programTransferConfig ?? d.dncConfig;
+        if (remoteConfig) {
           // 하위호환: 서버에 구버전 executionMode만 있으면 mainMode로 사용
-          const mainMode = (d.dncConfig.mainMode ?? d.dncConfig.executionMode ?? 'memory') as 'memory' | 'dnc';
+          const normalizeMode = (value?: string): 'memory' | 'transfer' => value === 'dnc' || value === 'transfer' ? 'transfer' : 'memory';
+          const mainMode = normalizeMode(remoteConfig.mainMode ?? remoteConfig.executionMode);
           // 기존 localStorage의 defaultMainPgm/defaultSubPgm/defaultPreset 보존
-          const existing = useMachineStore.getState().dncConfigs[selectedMachineId];
-          setDncConfig(selectedMachineId, {
+          const existing = useMachineStore.getState().programTransferConfigs[selectedMachineId];
+          setProgramTransferConfig(selectedMachineId, {
             machineId: selectedMachineId,
             pathCount,
             mainMode,
-            subMode: 'memory',
-            dncPaths: { path1: d.dncConfig.path1 || '', path2: d.dncConfig.path2 || '', path3: d.dncConfig.path3 },
+            subMode: normalizeMode(remoteConfig.subMode),
+            repositoryPaths: { path1: '', path2: '' },
+            mainTempProgramNo: remoteConfig.mainTempProgramNo ?? 7777,
+            mainParkingProgramNo: remoteConfig.mainParkingProgramNo ?? 7776,
+            subTempProgramNo: remoteConfig.subTempProgramNo ?? 7775,
+            subParkingProgramNo: remoteConfig.subParkingProgramNo ?? 7774,
             defaultMainPgm: existing?.defaultMainPgm,
             defaultSubPgm:  existing?.defaultSubPgm,
             defaultPreset:  existing?.defaultPreset,
@@ -123,13 +151,61 @@ export function Scheduler() {
     }).catch(() => null);
   }, [selectedMachineId]);
 
+  useEffect(() => {
+    if (!selectedMachineId) {
+      setProgramChecks({});
+      setSubProgramChecks({});
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const mode = programTransferConfig?.mainMode ?? 'memory';
+      const load = mode === 'transfer' ? fileApi.listRepoFiles(selectedMachineId, 'path1') : fileApi.listCncFiles(selectedMachineId, 1);
+      void load.then((response) => {
+        if (!response.success) {
+          setProgramChecks(buildUnknownChecks(rows, 'mainProgramNo'));
+          return;
+        }
+        const rawData = response.data as unknown;
+        const entries = (mode === 'transfer'
+          ? rawData
+          : (rawData as { programs?: ProgramListEntry[] })?.programs) as ProgramListEntry[] | undefined;
+        const byProgram = new Map((entries ?? []).map((entry) => [normalizeProgramNo(entry.programNo ?? entry.name), entry]));
+        setProgramChecks(Object.fromEntries(rows.filter((row) => row.mainProgramNo).map((row) => {
+          const program = byProgram.get(normalizeProgramNo(row.mainProgramNo));
+          if (!program) return [row.id, { status: 'missing' as const }];
+          if (program.isProtected) return [row.id, { status: 'protected' as const, comment: program.comment }];
+          if (mode === 'transfer' && row.mainProgramSha256 && program.sha256 && row.mainProgramSha256 !== program.sha256) {
+            return [row.id, { status: 'changed' as const, comment: program.comment }];
+          }
+          return [row.id, { status: 'exists' as const, comment: program.comment }];
+        })));
+      }).catch(() => setProgramChecks(buildUnknownChecks(rows, 'mainProgramNo')));
+
+      void fileApi.listCncFiles(selectedMachineId, 2).then((response) => {
+        if (!response.success) {
+          setSubProgramChecks(buildUnknownChecks(rows, 'subProgramNo'));
+          return;
+        }
+        const entries = (response.data as { programs?: ProgramListEntry[] } | undefined)?.programs;
+        const byProgram = new Map((entries ?? []).map((entry) => [normalizeProgramNo(entry.programNo ?? entry.name), entry]));
+        setSubProgramChecks(Object.fromEntries(rows.filter((row) => row.subProgramNo).map((row) => {
+          const program = byProgram.get(normalizeProgramNo(row.subProgramNo));
+          if (!program) return [row.id, { status: 'missing' as const }];
+          if (program.isProtected) return [row.id, { status: 'protected' as const, comment: program.comment }];
+          return [row.id, { status: 'exists' as const, comment: program.comment }];
+        })));
+      }).catch(() => setSubProgramChecks(buildUnknownChecks(rows, 'subProgramNo')));
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [selectedMachineId, programTransferConfig?.mainMode, rows.map((row) => `${row.id}:${row.mainProgramNo}:${row.mainProgramSha256 ?? ''}:${row.subProgramNo ?? ''}`).join('|')]);
+
   // ── 행 추가 ──────────────────────────────────────────────────────────────
   const handleAddRow = async () => {
     if (!selectedMachineId) return;
     try {
-      const mainProgramNo = dncConfig?.defaultMainPgm?.trim() || '';
-      const subProgramNo  = dncConfig?.defaultSubPgm?.trim()  || undefined;
-      const preset        = dncConfig?.defaultPreset ?? 10;
+      const mainProgramNo = programTransferConfig?.defaultMainPgm?.trim() || '';
+      const subProgramNo  = programTransferConfig?.defaultSubPgm?.trim()  || undefined;
+      const preset        = programTransferConfig?.defaultPreset ?? 10;
       const res = await schedulerApi.addRow({
         machineId: selectedMachineId,
         mainProgramNo,
@@ -171,6 +247,12 @@ export function Scheduler() {
     } catch {
       setActionError('수정 실패');
     }
+  };
+
+  const handleResyncProgramRow = async (rowId: string) => {
+    const response = await schedulerApi.resyncProgramRow(rowId);
+    if (!response.success) setActionError(response.error?.message ?? '프로그램 저장소 재확인 실패');
+    await loadRows();
   };
 
   // ── 실행 제어 ─────────────────────────────────────────────────────────────
@@ -225,36 +307,31 @@ export function Scheduler() {
       ? rows.find((r) => r.id === schedulerError.rowId)
       : null;
 
-  // DNC 설정 컨텐츠
-  const dncSettingsContent = (
-    <DncSettingsContent
-      pathCount={pathCount}
-      dncConfig={dncConfig}
+  // 프로그램 파일전송 설정
+  const programTransferSettingsContent = (
+    <ProgramTransferSettingsContent
+      programTransferConfig={programTransferConfig}
       isAdmin={isAdminOrEngineer}
       isSchedulerRunning={schedulerState === 'RUNNING'}
-      onOpenFolderBrowser={(pathKey) => { setEditingPathKey(pathKey); setFolderBrowserOpen(true); }}
-      onSave={(paths, mainMode, defaults) => {
+      onSave={(settings, defaults) => {
         if (!selectedMachineId) return;
-        const config: MachineDncConfig = {
+        const config: MachineProgramTransferConfig = {
           machineId: selectedMachineId,
           pathCount,
-          mainMode,
-          subMode: 'memory',
-          dncPaths: paths,
+          ...settings,
+          repositoryPaths: { path1: '', path2: '' },
           defaultMainPgm: defaults.mainPgm || undefined,
           defaultSubPgm:  defaults.subPgm  || undefined,
           defaultPreset:  defaults.preset  ?? undefined,
           updatedAt: new Date().toISOString(),
           updatedBy: user?.username,
         };
-        setDncConfig(selectedMachineId, config);
-        // 기본값은 localStorage만 저장; DNC 경로/모드는 서버에도 저장
-        dncApi.saveConfig(selectedMachineId, {
-          path1: paths.path1,
-          path2: paths.path2,
-          path3: paths.path3,
-          mainMode,
-          subMode: 'memory',
+        setProgramTransferConfig(selectedMachineId, config);
+        // 기본값은 localStorage만 저장하고 실행 모드는 서버에도 저장한다.
+        programTransferApi.saveConfig(selectedMachineId, {
+          path1: '',
+          path2: '',
+          ...settings,
         }).catch(() => null);
       }}
     />
@@ -267,7 +344,21 @@ export function Scheduler() {
       onTouchEnd={handleTouchEnd}
     >
       <div className="lg:shrink-0">
-        <MachineTopBar pageTitle="스케줄러" pageId="scheduler" settingsContent={dncSettingsContent} />
+        <MachineTopBar
+          pageTitle="스케줄러"
+          pageId="scheduler"
+          settingsContent={programTransferSettingsContent}
+          settingsAdjacentContent={
+            <button
+              onClick={() => setUploadOpen(true)}
+              disabled={!selectedMachineId}
+              className="hidden lg:inline-flex p-2 rounded-lg text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+              title="프로그램 저장소"
+            >
+              <UploadFileIcon className="w-5 h-5" />
+            </button>
+          }
+        />
       </div>
 
       {/* 큐 초기화 확인 모달 */}
@@ -304,29 +395,7 @@ export function Scheduler() {
         </div>
       )}
 
-      {/* FolderBrowser 모달 */}
-      <FolderBrowser
-        isOpen={folderBrowserOpen}
-        currentPath={dncConfig?.dncPaths[editingPathKey] || undefined}
-        onSelect={(path) => {
-          setFolderBrowserOpen(false);
-          if (!selectedMachineId) return;
-          const currentPaths: DncPathConfig = dncConfig?.dncPaths || { path1: '', path2: '' };
-          const updatedPaths = { ...currentPaths, [editingPathKey]: path };
-          const config: MachineDncConfig = {
-            machineId: selectedMachineId,
-            pathCount,
-            mainMode: dncConfig?.mainMode ?? 'memory',
-            subMode: 'memory',
-            dncPaths: updatedPaths,
-            updatedAt: new Date().toISOString(),
-            updatedBy: user?.username,
-          };
-          setDncConfig(selectedMachineId, config);
-          dncApi.saveConfig(selectedMachineId, { path1: updatedPaths.path1, path2: updatedPaths.path2, path3: updatedPaths.path3 }).catch(() => null);
-        }}
-        onClose={() => setFolderBrowserOpen(false)}
-      />
+      {selectedMachineId && <ProgramRepositoryModal machineId={selectedMachineId} open={uploadOpen} canEdit={isAdminOrEngineer} isTransferRunning={schedulerState === 'RUNNING' && (programTransferConfig?.mainMode ?? 'memory') === 'transfer'} isTransferMode={(programTransferConfig?.mainMode ?? 'memory') === 'transfer'} defaultSubProgramNo={programTransferConfig?.defaultSubPgm} defaultPreset={programTransferConfig?.defaultPreset ?? 10} onSchedulerRegistered={() => { void loadRows(); }} onClose={() => setUploadOpen(false)} />}
 
       {selectedMachineId && (
         <>
@@ -413,16 +482,16 @@ export function Scheduler() {
                 <div className="flex items-center gap-1.5 shrink-0">
                   <span className="text-[10px] text-gray-400">메인</span>
                   <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold font-mono ${
-                    (dncConfig?.mainMode ?? 'memory') === 'dnc'
+                    (programTransferConfig?.mainMode ?? 'memory') === 'transfer'
                       ? 'bg-purple-700/60 text-purple-200'
                       : 'bg-gray-600 text-gray-300'
                   }`}>
-                    {(dncConfig?.mainMode ?? 'memory') === 'dnc' ? 'DNC' : 'MEM'}
+                    {(programTransferConfig?.mainMode ?? 'memory') === 'transfer' ? '전송' : '저장'}
                   </span>
                   {pathCount >= 2 && <>
                     <span className="text-[10px] text-gray-400 ml-1">서브</span>
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold font-mono bg-gray-600 text-gray-300">
-                      MEM
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold font-mono ${(programTransferConfig?.subMode ?? 'memory') === 'transfer' ? 'bg-purple-700/60 text-purple-200' : 'bg-gray-600 text-gray-300'}`}>
+                      {(programTransferConfig?.subMode ?? 'memory') === 'transfer' ? '전송' : '저장'}
                     </span>
                   </>}
                 </div>
@@ -472,13 +541,13 @@ export function Scheduler() {
               <div className="overflow-auto flex-1 min-h-0 max-lg:portrait:flex-none max-lg:portrait:min-h-[23rem] max-lg:portrait:overflow-visible">
                 <table className="w-full text-sm table-fixed">
                   <colgroup>
-                    <col className="w-8" />      {/* No */}
-                    <col className="w-24" />     {/* 메인PGM */}
-                    <col className="w-24" />     {/* 서브PGM */}
-                    <col className="w-16" />     {/* PRESET */}
-                    <col className="w-12" />     {/* COUNT */}
-                    <col className="w-[72px]" /> {/* 상태 */}
-                    <col className="w-8" />      {/* ✕ */}
+                    <col className="w-8" />
+                    <col className="w-24" />
+                    <col className="w-24" />
+                    <col className="w-16" />
+                    <col className="w-12" />
+                    <col className="w-[72px]" />
+                    <col className="w-8" />
                   </colgroup>
                   <thead className="bg-gray-700 sticky top-0">
                     <tr className="text-gray-300 text-xs">
@@ -500,6 +569,9 @@ export function Scheduler() {
                         isCurrentRow={currentRow?.id === row.id}
                         isMachineRunning={isMachineRunning}
                         canEdit={isAdminOrEngineer && currentRow?.id !== row.id && row.status !== 'COMPLETED'}
+                        programCheck={programChecks[row.id]}
+                        subProgramCheck={subProgramChecks[row.id]}
+                        onResync={() => { void handleResyncProgramRow(row.id); }}
                         onDelete={() => handleDeleteRow(row.id)}
                         onBlur={handleRowBlur}
                       />
@@ -560,6 +632,9 @@ function SchedulerRowItem({
   isCurrentRow,
   isMachineRunning,
   canEdit,
+  programCheck,
+  subProgramCheck,
+  onResync,
   onDelete,
   onBlur,
 }: {
@@ -568,6 +643,9 @@ function SchedulerRowItem({
   isCurrentRow: boolean;
   isMachineRunning: boolean;
   canEdit: boolean;
+  programCheck?: ProgramCheck;
+  subProgramCheck?: ProgramCheck;
+  onResync: () => void;
   onDelete: () => void;
   onBlur: (rowId: string, field: keyof SchedulerRow, value: string | number | null) => void;
 }) {
@@ -594,35 +672,48 @@ function SchedulerRowItem({
 
       {/* 메인 PGM */}
       <td className="px-1 py-1.5">
-        <div className="flex items-center">
+        <div className="flex items-center" title={programCheck?.comment ?? row.mainProgramComment ?? ''}>
           <span className="font-mono text-xs text-gray-400 mr-0.5">O</span>
           <input
             type="text"
             value={mainPgm}
             onChange={(e) => setMainPgm(e.target.value.replace(/\D/g, '').slice(0, 4))}
             onFocus={() => { isEditingRef.current = true; }}
-            onBlur={() => { isEditingRef.current = false; onBlur(row.id, 'mainProgramNo', mainPgm ? `O${mainPgm}` : ''); }}
+            onBlur={() => {
+              const normalized = mainPgm ? mainPgm.padStart(4, '0') : '';
+              setMainPgm(normalized);
+              isEditingRef.current = false;
+              onBlur(row.id, 'mainProgramNo', normalized ? `O${normalized}` : '');
+            }}
             disabled={!canEdit}
             className="w-[52px] px-1 py-0.5 border border-gray-600 rounded font-mono text-xs bg-gray-700 text-white disabled:opacity-50 focus:border-blue-500 focus:outline-none"
             placeholder="0001"
           />
+          {mainPgm && <span className={`ml-1 text-[10px] ${programCheck?.status === 'exists' ? 'text-green-400' : programCheck?.status === 'missing' ? 'text-red-400' : programCheck?.status === 'changed' ? 'text-orange-400' : programCheck?.status === 'protected' ? 'text-yellow-400' : 'text-gray-400'}`} title={programCheck?.status === 'exists' ? '프로그램 확인됨' : programCheck?.status === 'missing' ? '프로그램 없음' : programCheck?.status === 'changed' ? '등록 이후 프로그램 변경됨' : programCheck?.status === 'protected' ? '파라미터 3202#4(NE9) 보호 프로그램' : '프로그램 확인 불가'}>{programCheck?.status === 'exists' ? '●' : programCheck?.status === 'missing' ? '●' : programCheck?.status === 'changed' ? '!' : programCheck?.status === 'protected' ? '🔒' : '?'}</span>}
+          {programCheck?.status === 'changed' && <button type="button" onClick={onResync} disabled={!canEdit} title="현재 저장소 파일로 재확인" className="ml-1 text-[10px] text-blue-400 disabled:opacity-30">↻</button>}
         </div>
       </td>
 
       {/* 서브 PGM */}
       <td className="px-1 py-1.5">
-        <div className="flex items-center">
+        <div className="flex items-center" title={subProgramCheck?.comment ?? ''}>
           <span className="font-mono text-xs text-gray-400 mr-0.5">O</span>
           <input
             type="text"
             value={subPgm}
             onChange={(e) => setSubPgm(e.target.value.replace(/\D/g, '').slice(0, 4))}
             onFocus={() => { isEditingRef.current = true; }}
-            onBlur={() => { isEditingRef.current = false; onBlur(row.id, 'subProgramNo', subPgm ? `O${subPgm}` : null); }}
+            onBlur={() => {
+              const normalized = subPgm ? subPgm.padStart(4, '0') : '';
+              setSubPgm(normalized);
+              isEditingRef.current = false;
+              onBlur(row.id, 'subProgramNo', normalized ? `O${normalized}` : null);
+            }}
             disabled={!canEdit}
             className="w-[52px] px-1 py-0.5 border border-gray-600 rounded font-mono text-xs bg-gray-700 text-white disabled:opacity-50 focus:border-blue-500 focus:outline-none"
             placeholder="0001"
           />
+          {subPgm && <span className={`ml-1 text-[10px] ${subProgramCheck?.status === 'exists' ? 'text-green-400' : subProgramCheck?.status === 'missing' ? 'text-red-400' : subProgramCheck?.status === 'protected' ? 'text-yellow-400' : 'text-gray-400'}`} title={subProgramCheck?.status === 'exists' ? '프로그램 확인됨' : subProgramCheck?.status === 'missing' ? '프로그램 없음' : subProgramCheck?.status === 'protected' ? '파라미터 3202#4(NE9) 보호 프로그램' : '프로그램 확인 불가'}>{subProgramCheck?.status === 'exists' ? '●' : subProgramCheck?.status === 'missing' ? '●' : subProgramCheck?.status === 'protected' ? '🔒' : '?'}</span>}
         </div>
       </td>
 
@@ -930,7 +1021,7 @@ function CountExceedsPresetModal({
   );
 }
 
-// ── DNC 경로 설정 ─────────────────────────────────────────────────────────────
+// ── 프로그램 파일전송 설정 ───────────────────────────────────────────────────
 
 function ModeToggle({
   label,
@@ -939,15 +1030,15 @@ function ModeToggle({
   disabled,
 }: {
   label: string;
-  value: 'memory' | 'dnc';
-  onChange: (v: 'memory' | 'dnc') => void;
+  value: 'memory' | 'transfer';
+  onChange: (v: 'memory' | 'transfer') => void;
   disabled: boolean;
 }) {
   return (
     <div className="flex items-center gap-3">
       <span className="text-xs text-gray-500 dark:text-gray-400 w-20 flex-shrink-0 font-medium">{label}</span>
       <div className="flex rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600">
-        {(['memory', 'dnc'] as const).map((m) => (
+        {(['memory', 'transfer'] as const).map((m) => (
           <button
             key={m}
             disabled={disabled}
@@ -958,7 +1049,7 @@ function ModeToggle({
                 : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600'
               }`}
           >
-            {m === 'memory' ? 'Memory' : 'DNC'}
+            {m === 'memory' ? 'CNC 저장' : '파일전송'}
           </button>
         ))}
       </div>
@@ -966,33 +1057,47 @@ function ModeToggle({
   );
 }
 
-function DncSettingsContent({
-  pathCount,
-  dncConfig,
+function ProgramTransferSettingsContent({
+  programTransferConfig,
   isAdmin,
   isSchedulerRunning,
-  onOpenFolderBrowser,
   onSave,
 }: {
-  pathCount: number;
-  dncConfig?: MachineDncConfig;
+  programTransferConfig?: MachineProgramTransferConfig;
   isAdmin: boolean;
   isSchedulerRunning: boolean;
-  onOpenFolderBrowser: (pathKey: 'path1' | 'path2' | 'path3') => void;
-  onSave: (paths: DncPathConfig, mainMode: 'memory' | 'dnc', defaults: { mainPgm: string; subPgm: string; preset: number | null }) => void;
+  onSave: (settings: Pick<MachineProgramTransferConfig, 'mainMode' | 'subMode' | 'mainTempProgramNo' | 'mainParkingProgramNo' | 'subTempProgramNo' | 'subParkingProgramNo'>, defaults: { mainPgm: string; subPgm: string; preset: number | null }) => void;
 }) {
-  const paths = dncConfig?.dncPaths || { path1: '', path2: '' };
-  const [mainMode, setMainMode] = useState<'memory' | 'dnc'>(dncConfig?.mainMode ?? 'memory');
-  const [defMainPgm, setDefMainPgm] = useState(dncConfig?.defaultMainPgm?.replace(/^O/i, '') ?? '');
-  const [defSubPgm,  setDefSubPgm]  = useState(dncConfig?.defaultSubPgm?.replace(/^O/i, '')  ?? '');
-  const [defPreset,  setDefPreset]  = useState(dncConfig?.defaultPreset != null ? String(dncConfig.defaultPreset) : '');
+  const [mainMode, setMainMode] = useState<'memory' | 'transfer'>(programTransferConfig?.mainMode ?? 'memory');
+  const [subMode, setSubMode] = useState<'memory' | 'transfer'>(programTransferConfig?.subMode ?? 'memory');
+  const [mainTempProgramNo, setMainTempProgramNo] = useState(String(programTransferConfig?.mainTempProgramNo ?? 7777));
+  const [mainParkingProgramNo, setMainParkingProgramNo] = useState(String(programTransferConfig?.mainParkingProgramNo ?? 7776));
+  const [subTempProgramNo, setSubTempProgramNo] = useState(String(programTransferConfig?.subTempProgramNo ?? 7775));
+  const [subParkingProgramNo, setSubParkingProgramNo] = useState(String(programTransferConfig?.subParkingProgramNo ?? 7774));
+  const [defMainPgm, setDefMainPgm] = useState(programTransferConfig?.defaultMainPgm?.replace(/^O/i, '') ?? '');
+  const [defSubPgm,  setDefSubPgm]  = useState(programTransferConfig?.defaultSubPgm?.replace(/^O/i, '')  ?? '');
+  const [defPreset,  setDefPreset]  = useState(programTransferConfig?.defaultPreset != null ? String(programTransferConfig.defaultPreset) : '');
   const canEdit = isAdmin && !isSchedulerRunning;
+  const transferNumbers = [mainTempProgramNo, mainParkingProgramNo, subTempProgramNo, subParkingProgramNo].map(Number);
+  const transferNumbersValid = transferNumbers.every((value) => Number.isInteger(value) && value >= 1 && value <= 7999)
+    && Number(mainTempProgramNo) !== Number(mainParkingProgramNo)
+    && Number(subTempProgramNo) !== Number(subParkingProgramNo);
 
-  const needsDnc = mainMode === 'dnc';
+  useEffect(() => {
+    setMainMode(programTransferConfig?.mainMode ?? 'memory');
+    setSubMode(programTransferConfig?.subMode ?? 'memory');
+    setMainTempProgramNo(String(programTransferConfig?.mainTempProgramNo ?? 7777));
+    setMainParkingProgramNo(String(programTransferConfig?.mainParkingProgramNo ?? 7776));
+    setSubTempProgramNo(String(programTransferConfig?.subTempProgramNo ?? 7775));
+    setSubParkingProgramNo(String(programTransferConfig?.subParkingProgramNo ?? 7774));
+    setDefMainPgm(programTransferConfig?.defaultMainPgm?.replace(/^O/i, '') ?? '');
+    setDefSubPgm(programTransferConfig?.defaultSubPgm?.replace(/^O/i, '') ?? '');
+    setDefPreset(programTransferConfig?.defaultPreset != null ? String(programTransferConfig.defaultPreset) : '');
+  }, [programTransferConfig]);
 
   return (
     <div className="space-y-3">
-      <div className="text-sm font-semibold text-gray-900 dark:text-white">DNC 설정</div>
+      <div className="text-sm font-semibold text-gray-900 dark:text-white">프로그램 실행 설정</div>
 
       {isSchedulerRunning && isAdmin && (
         <div className="text-xs text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 px-3 py-2 rounded">
@@ -1003,38 +1108,30 @@ function DncSettingsContent({
         <div className="text-xs text-gray-500 px-1">관리자만 설정을 변경할 수 있습니다 (읽기 전용)</div>
       )}
 
-      {/* 실행 모드 선택 — 메인만 */}
+      {/* 실행 모드 선택 */}
       <div className="space-y-2">
         <div className="text-xs text-gray-500 dark:text-gray-400 font-medium">실행 모드</div>
         <ModeToggle label="메인 (Path1)" value={mainMode} onChange={setMainMode} disabled={!canEdit} />
+        <ModeToggle label="서브 (Path2)" value={subMode} onChange={setSubMode} disabled={!canEdit} />
       </div>
 
-      {/* DNC 경로 설정 — 메인 DNC 모드일 때만 표시 */}
-      {needsDnc && (
-        <div className="space-y-2">
-          <div className="text-xs text-gray-500 dark:text-gray-400 font-medium">DNC 경로 설정</div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-500 dark:text-gray-400 w-20 flex-shrink-0">메인 (Path1)</span>
-            <div className="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded text-xs font-mono text-gray-700 dark:text-gray-300 truncate min-h-[32px] flex items-center">
-              {paths.path1 || <span className="text-gray-400 italic">미설정</span>}
+      {(mainMode === 'transfer' || subMode === 'transfer') && (
+        <div className="space-y-2 pt-1 border-t border-gray-200 dark:border-gray-600">
+          <div className="text-xs text-gray-500 dark:text-gray-400 font-medium pt-1">파일전송 임시 프로그램</div>
+          {[
+            ['메인 임시', mainTempProgramNo, setMainTempProgramNo],
+            ['메인 대피', mainParkingProgramNo, setMainParkingProgramNo],
+            ['서브 임시', subTempProgramNo, setSubTempProgramNo],
+            ['서브 대피', subParkingProgramNo, setSubParkingProgramNo],
+          ].map(([label, value, setter]) => (
+            <div key={label as string} className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 dark:text-gray-400 w-20 flex-shrink-0">{label as string}</span>
+              <span className="font-mono text-xs text-gray-400">O</span>
+              <input type="text" value={value as string} onChange={(e) => (setter as React.Dispatch<React.SetStateAction<string>>)(e.target.value.replace(/\D/g, '').slice(0, 4))} disabled={!canEdit} className="w-16 px-2 py-1 text-xs font-mono border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 disabled:opacity-50" />
             </div>
-            <button onClick={() => onOpenFolderBrowser('path1')} disabled={!canEdit}
-              className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0">
-              선택
-            </button>
-          </div>
-          {pathCount >= 3 && (
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-gray-500 dark:text-gray-400 w-20 flex-shrink-0">Path3</span>
-              <div className="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded text-xs font-mono text-gray-700 dark:text-gray-300 truncate min-h-[32px] flex items-center">
-                {paths.path3 || <span className="text-gray-400 italic">미설정</span>}
-              </div>
-              <button onClick={() => onOpenFolderBrowser('path3')} disabled={!canEdit}
-                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0">
-                선택
-              </button>
-            </div>
-          )}
+          ))}
+          <p className="text-[10px] text-gray-400">대피 프로그램은 임시 프로그램 삭제 전에 CNC에서 선택할 기존 프로그램입니다.</p>
+          {!transferNumbersValid && <p className="text-[10px] text-red-500">임시·대피 번호는 Path별로 서로 다른 O0001~O7999여야 합니다.</p>}
         </div>
       )}
 
@@ -1085,29 +1182,24 @@ function DncSettingsContent({
       </div>
 
       <div className="flex justify-end gap-2 pt-1">
-        {needsDnc && (
-          <button
-            onClick={() => onSave({ path1: '', path2: '', ...(pathCount >= 3 ? { path3: '' } : {}) }, mainMode, { mainPgm: defMainPgm ? `O${defMainPgm}` : '', subPgm: defSubPgm ? `O${defSubPgm}` : '', preset: defPreset ? parseInt(defPreset) : null })}
-            disabled={!canEdit}
-            className="px-3 py-1.5 text-xs text-gray-500 hover:text-red-500 border border-gray-300 dark:border-gray-600 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            경로 초기화
-          </button>
-        )}
         <button
-          onClick={() => onSave(paths, mainMode, { mainPgm: defMainPgm ? `O${defMainPgm}` : '', subPgm: defSubPgm ? `O${defSubPgm}` : '', preset: defPreset ? parseInt(defPreset) : null })}
-          disabled={!canEdit}
+          onClick={() => onSave({ mainMode, subMode, mainTempProgramNo: Number(mainTempProgramNo), mainParkingProgramNo: Number(mainParkingProgramNo), subTempProgramNo: Number(subTempProgramNo), subParkingProgramNo: Number(subParkingProgramNo) }, { mainPgm: defMainPgm ? `O${defMainPgm}` : '', subPgm: defSubPgm ? `O${defSubPgm}` : '', preset: defPreset ? parseInt(defPreset) : null })}
+          disabled={!canEdit || !transferNumbersValid}
           className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           저장
         </button>
       </div>
 
-      {dncConfig?.updatedAt && (
+      {programTransferConfig?.updatedAt && (
         <div className="text-xs text-gray-400 text-right">
-          마지막 수정: {dncConfig.updatedBy || '-'} ({new Date(dncConfig.updatedAt).toLocaleString()})
+          마지막 수정: {programTransferConfig.updatedBy || '-'} ({new Date(programTransferConfig.updatedAt).toLocaleString()})
         </div>
       )}
     </div>
   );
+}
+
+function UploadFileIcon({ className }: { className?: string }) {
+  return <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 002 2h10a2 2 0 002-2v-4" /></svg>;
 }
