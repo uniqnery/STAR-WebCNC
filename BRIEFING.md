@@ -24,6 +24,7 @@
 - 템플릿에서 PRESET, COUNT, 설비 자체 카운트 ON/OFF 변수 종류·번호와 ON/OFF 값을 관리한다. SR-20J2B 기본값은 P10000, #900, P10002이며 스케줄러 시작 시 P10002를 0으로 만들고 종료·정지·PAUSE 후에도 복원하지 않는다. 모든 모니터링 화면은 스케줄러 상태와 무관하게 CNC 변수값만 읽어 표시한다.
 - 장비 파라미터 `3202#4(NE9)`가 보호 상태이면 CNC 메모리의 O9000~O9999를 목록에서 숨기지 않고 잠금·비활성 표시한다. CNC 선택·열기와 PC↔CNC 입출력·백업·실행은 차단하되 PC 공용 저장소와 DNC 저장소의 파일 관리·스케줄러 등록은 허용한다. 보호 상태 확인 실패도 NC 입출력 시에는 안전상 차단하며 상세 상태는 `docs/DNC.md`의 DNC-76을 기준으로 관리한다.
 - 2026-09-29 DNC Test 화면·API·Agent 명령과 전용 스트리밍 서비스는 제거했다. 테스트 조건과 `EW_REJECT(13)`, `SR1807` 결과는 `docs/DNC.md`에 역사 기록으로만 보존한다.
+- MC-002는 프로그램 번호, 블록 번호, 실행 코드 줄, 축 좌표를 매 텔레메트리에서 읽는 버전을 운영 기준으로 확정한다. 수집 주기는 텔레메트리 220ms, 상세 정보 750ms, 화면용 PMC 1000ms, M20·스케줄러 확인 100ms로 설정한다. 실기기에서 좌표 메시지 수신 간격 중앙값 249ms와 Path 1 실행 코드 내용 변경 간격 중앙값 415ms를 확인했다. 스케줄러 운전 중 M20 검출은 별도 검증이 필요하다.
 - 새 문서를 계속 늘리기보다 기존 문서에 통합하는 것을 우선한다.
 - 작업 진행상황(예정/진행 중/완료)은 섹션 4(기능 표)·섹션 6(백로그)에 작업 시작 시 등록, 완료 시 갱신하는 방식으로 지속 관리한다.
 
@@ -378,6 +379,10 @@ HQ_REGISTRATION_CODE=hq1234
 | Agent | `dotnet StarWebCNC.Agent.dll` | — |
 
 ### Agent 빌드 및 배포
+
+`start-agent.vbs`는 `_runner-agent.bat`를 통해 MC-002 Agent를 시작한다. `start-all.bat`와 동일한 `_runner-agents-dynamic.ps1`을 사용하며, 서버 API에서 활성 설비 설정을 조회한 뒤 `agent-runtime/MC-002/publish`의 `active` 파일과 Agent DLL이 있으면 전용 배포본을 실행한다. Agent 단독 시작 시에는 서버가 먼저 실행되어 있어야 한다. 시작 로그는 `agent-runtime/agent_start.log`, 설비 로그는 `agent-runtime/agent_MC002.log`에 남는다.
+
+MC-002를 재배포할 때는 전용 배포본의 `appsettings.Production.json`에 위 수집 주기를 유지하고, 같은 폴더에 `active` 파일을 둔다. 단독 시작 시 이미 MC-002 Agent가 실행 중이면 추가 기동을 건너뛴다.
 
 ```bash
 # 1. Agent 프로세스 종료 (DLL 잠금 해제)

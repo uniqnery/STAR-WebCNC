@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
@@ -50,6 +51,11 @@ public class DataCollectorService : BackgroundService
     private List<OperatorMsgData> _cachedOpMessages = new();
 
     private int _coordinateDecimalPlaces = 3; // CNC 파라미터 1013 bit1(ISC)로 자동 감지
+    private long _lastMainPathDetails;
+    private long _lastSubPathDetails;
+    private long _lastTelemetryCounts;
+    private (int Parts, int Preset, double CycleTime) _telemetryCounts;
+    private MachineTemplate? _telemetryCountsTemplate;
 
     public DataCollectorService(
         ILogger<DataCollectorService> logger,
@@ -160,20 +166,33 @@ public class DataCollectorService : BackgroundService
         // 초기 상태 발행
         PublishAgentStatus("online").GetAwaiter().GetResult();
 
-        // 수집 루프
-        // 루프 슬립은 가장 짧은 주기(pmcInterval=100ms) 기준으로 실행
-        // 각 작업은 elapsed 체크로 독립적인 주기로 실행됨
-        var telemetryIntervalMs = _settings.Collector.TelemetryIntervalMs;
-        var alarmIntervalMs     = _settings.Collector.AlarmIntervalMs;
-        var pmcIntervalMs       = _settings.Collector.PmcIntervalMs;
+        var collector = _settings.Collector;
+        var telemetryInterval = TimeSpan.FromMilliseconds(collector.TelemetryIntervalMs);
+        var alarmInterval = TimeSpan.FromMilliseconds(collector.AlarmIntervalMs);
+        var pmcInterval = TimeSpan.FromMilliseconds(collector.PmcIntervalMs);
+        var pmcMonitorInterval = TimeSpan.FromMilliseconds(collector.PmcMonitorIntervalMs ?? collector.PmcIntervalMs);
 
-        var telemetryInterval = TimeSpan.FromMilliseconds(telemetryIntervalMs);
-        var alarmInterval     = TimeSpan.FromMilliseconds(alarmIntervalMs);
-        var pmcInterval       = TimeSpan.FromMilliseconds(pmcIntervalMs);
+        long lastTelemetry = 0;
+        long lastAlarm = 0;
+        long lastPmcMonitor = 0;
+        long lastPmcControl = 0;
 
-        var lastTelemetry = DateTime.MinValue;
-        var lastAlarm     = DateTime.MinValue;
-        var lastPmc       = DateTime.MinValue;
+        static TimeSpan Remaining(long last, TimeSpan interval, long now) =>
+            last == 0 ? TimeSpan.Zero : interval - Stopwatch.GetElapsedTime(last, now);
+
+        void PollPmcControlIfDue()
+        {
+            var started = Stopwatch.GetTimestamp();
+            if (Remaining(lastPmcControl, pmcInterval, started) > TimeSpan.Zero) return;
+
+            if (lastPmcControl != 0)
+                _logger.LogDebug("PMC control gap={Gap:F1}ms", Stopwatch.GetElapsedTime(lastPmcControl, started).TotalMilliseconds);
+            lastPmcControl = started;
+            try { DetectM20EdgeSync(); }
+            catch (Exception ex) { _logger.LogError(ex, "Error in M20 edge detection"); }
+            try { _schedulerManager.Tick(stoppingToken); }
+            catch (Exception ex) { _logger.LogError(ex, "Error in scheduler tick"); }
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -195,11 +214,12 @@ public class DataCollectorService : BackgroundService
                 // 재연결 시 rdopmsg2 안전성 재프로브 (핸들이 바뀌므로)
                 _opMsgSafe = false;
                 _cachedOpMessages.Clear();
+                _dataReader.ResetPathTelemetry();
+                _lastMainPathDetails = _lastSubPathDetails = _lastTelemetryCounts = 0;
+                _telemetryCounts = default;
                 ProbeOpMsg2();
                 PublishAgentStatus("online").GetAwaiter().GetResult();
             }
-
-            var now = DateTime.UtcNow;
 
             // ── FOCAS 스레드에서 큐 명령 처리 (스레드 친화성 보장) ──
             while (_commandChannel.Reader.TryRead(out var cmd))
@@ -210,36 +230,46 @@ public class DataCollectorService : BackgroundService
                 _logger.LogInformation("Command completed on FOCAS thread: {Cmd}", cmd.Command);
             }
 
-            // ── PMC 비트 빠른 발행 (100ms 주기 — 램프 응답속도) ──
-            if (now - lastPmc >= pmcInterval)
-            {
-                lastPmc = now;
-                try { CollectAndPublishPmcBitsSync(); }
-                catch (Exception ex) { _logger.LogError(ex, "Error in PMC bits collection"); }
-                try { DetectM20EdgeSync(); }
-                catch (Exception ex) { _logger.LogError(ex, "Error in M20 edge detection"); }
-                try { _schedulerManager.Tick(stoppingToken); }
-                catch (Exception ex) { _logger.LogError(ex, "Error in scheduler tick"); }
-            }
+            PollPmcControlIfDue();
 
-            // ── 전체 텔레메트리 발행 (1000ms 주기) ──
-            if (now - lastTelemetry >= telemetryInterval)
+            // ── 전체 텔레메트리 발행 (설정 주기) ──
+            var now = Stopwatch.GetTimestamp();
+            if (Remaining(lastTelemetry, telemetryInterval, now) <= TimeSpan.Zero)
             {
                 lastTelemetry = now;
-                try { CollectAndPublishTelemetrySync(); }
+                try { CollectAndPublishTelemetrySync(PollPmcControlIfDue); }
                 catch (Exception ex) { _logger.LogError(ex, "Error in telemetry collection"); }
+                PollPmcControlIfDue();
             }
 
             // ── 알람 체크 (1000ms 주기) ──
-            if (now - lastAlarm >= alarmInterval)
+            now = Stopwatch.GetTimestamp();
+            if (Remaining(lastAlarm, alarmInterval, now) <= TimeSpan.Zero)
             {
                 lastAlarm = now;
                 try { CollectAndPublishAlarmsSync(); }
                 catch (Exception ex) { _logger.LogError(ex, "Error in alarm collection"); }
+                _logger.LogDebug("Alarm collection={Alarm:F1}ms", Stopwatch.GetElapsedTime(now).TotalMilliseconds);
+                PollPmcControlIfDue();
             }
 
-            // pmcInterval(100ms) 단위 대기 — WaitOne으로 취소 가능 (스레드 전환 없음)
-            stoppingToken.WaitHandle.WaitOne(pmcIntervalMs);
+            now = Stopwatch.GetTimestamp();
+            if (Remaining(lastPmcMonitor, pmcMonitorInterval, now) <= TimeSpan.Zero)
+            {
+                lastPmcMonitor = now;
+                try { CollectAndPublishPmcBitsSync(); }
+                catch (Exception ex) { _logger.LogError(ex, "Error in PMC bits collection"); }
+                _logger.LogDebug("PMC monitor reads={Pmc:F1}ms", Stopwatch.GetElapsedTime(now).TotalMilliseconds);
+            }
+
+            now = Stopwatch.GetTimestamp();
+            double remainingMs = Math.Min(
+                Math.Min(Remaining(lastPmcControl, pmcInterval, now).TotalMilliseconds,
+                    Remaining(lastPmcMonitor, pmcMonitorInterval, now).TotalMilliseconds),
+                Math.Min(Remaining(lastTelemetry, telemetryInterval, now).TotalMilliseconds,
+                    Remaining(lastAlarm, alarmInterval, now).TotalMilliseconds));
+            if (remainingMs > 0)
+                stoppingToken.WaitHandle.WaitOne((int)Math.Ceiling(remainingMs));
         }
 
         _logger.LogInformation("FOCAS worker thread exiting.");
@@ -248,9 +278,8 @@ public class DataCollectorService : BackgroundService
     // ── 동기 수집 메서드들 ─────────────────────────────────────────────
 
     /// <summary>
-    /// PMC 비트 수집 + 빠른 발행 (100ms 주기)
+    /// 화면용 PMC 비트 수집 및 발행
     /// 인터락 어드레스 + 패널 램프 어드레스를 읽어 pmc_bits 토픽으로 발행.
-    /// 텔레메트리 1000ms 주기와 독립적으로 동작하여 램프 응답 지연을 ~100ms로 단축.
     /// </summary>
     private void CollectAndPublishPmcBitsSync()
     {
@@ -289,15 +318,7 @@ public class DataCollectorService : BackgroundService
 
         if (uniqueAddrs.Count == 0) return;
 
-        var pmcBits = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var pmcAddrStr in uniqueAddrs)
-        {
-            var addr = PmcAddress.ParseString(pmcAddrStr);
-            if (addr == null) continue;
-            var bit = _dataReader.ReadPmcBit(addr);
-            if (bit.HasValue)
-                pmcBits[pmcAddrStr] = bit.Value;
-        }
+        var pmcBits = _dataReader.ReadPmcBits(uniqueAddrs);
 
         if (pmcBits.Count == 0) return;
 
@@ -309,41 +330,70 @@ public class DataCollectorService : BackgroundService
         _mqttService.PublishPmcBitsAsync(msg).GetAwaiter().GetResult();
     }
 
-    private void CollectAndPublishTelemetrySync()
+    private void CollectAndPublishTelemetrySync(Action pollPmcControl)
     {
         if (!_connection.IsConnected) return;
 
+        var started = Stopwatch.GetTimestamp();
         var status = _dataReader.ReadStatus();
-        var program = _dataReader.ReadProgramInfo();
-        var feedrate = _dataReader.ReadFeedrate();
-        var spindleSpeed = _dataReader.ReadSpindleSpeed();
-        var absolutePos = _dataReader.ReadAbsolutePosition();
-        var machinePos = _dataReader.ReadMachinePosition();
 
-        int partsCount = 0;
-        int presetCount = 0;
-        double cycleTime = 0.0;
-        if (_templateLoader.CurrentTemplate != null)
+        var template = _templateLoader.CurrentTemplate;
+        if (!ReferenceEquals(_telemetryCountsTemplate, template))
         {
-            var cd = _templateLoader.CurrentTemplate.SchedulerConfig.CountDisplay;
-            partsCount  = _dataReader.ReadPartsCount(cd.CountMacroNo, cd.CountVarType) ?? 0;
+            _telemetryCountsTemplate = template;
+            _lastTelemetryCounts = 0;
+            _telemetryCounts = default;
+        }
+        bool hasSubPath = (template?.SystemInfo?.MaxPaths ?? 1) >= 2;
+        var maxAxes = template?.SystemInfo?.MaxAxes ?? 0;
+        int detailIntervalMs = _settings.Collector.TelemetryDetailIntervalMs.GetValueOrDefault();
+        bool cacheDetails = detailIntervalMs > 0;
+        // When throttled, refresh only the oldest detail group in each frame.
+        long oldest = Math.Min(_lastMainPathDetails,
+            Math.Min(hasSubPath ? _lastSubPathDetails : long.MaxValue,
+                template != null ? _lastTelemetryCounts : long.MaxValue));
+        bool detailsDue = oldest == 0 || Stopwatch.GetElapsedTime(oldest, started).TotalMilliseconds >= detailIntervalMs;
+        bool refreshMain = !cacheDetails || (detailsDue && oldest == _lastMainPathDetails);
+        bool refreshSub = !cacheDetails || (detailsDue && !refreshMain && oldest == _lastSubPathDetails);
+        bool refreshCounts = !cacheDetails || (detailsDue && !refreshMain && !refreshSub);
 
-            // Preset: CNC에서 직접 읽기 (스케줄러가 쓴 값을 확인)
-            double? presetVal = string.Equals(cd.PresetVarType, "pcode", StringComparison.OrdinalIgnoreCase)
+        var pathsStarted = Stopwatch.GetTimestamp();
+        var path1 = _dataReader.ReadPathData(1, _coordinateDecimalPlaces, maxAxes, out var mainPositions,
+            cacheDetails, refreshMain, status);
+        if (refreshMain) _lastMainPathDetails = pathsStarted;
+        PathData? path2 = null;
+        if (hasSubPath)
+        {
+            if (cacheDetails) pollPmcControl();
+            var subStarted = Stopwatch.GetTimestamp();
+            path2 = _dataReader.ReadPathData(2, _coordinateDecimalPlaces, maxAxes, out _, cacheDetails, refreshSub);
+            if (refreshSub) _lastSubPathDetails = subStarted;
+        }
+        var pathsFinished = Stopwatch.GetTimestamp();
+
+        if (refreshCounts && template != null)
+        {
+            _lastTelemetryCounts = pathsFinished;
+            var cd = template.SchedulerConfig.CountDisplay;
+            int parts = _dataReader.ReadPartsCount(cd.CountMacroNo, cd.CountVarType) ?? 0;
+            double? preset = string.Equals(cd.PresetVarType, "pcode", StringComparison.OrdinalIgnoreCase)
                 ? _dataReader.ReadPcodeMacroVariable(cd.PresetMacroNo)
                 : _dataReader.ReadMacroVariable(cd.PresetMacroNo);
-            presetCount = presetVal.HasValue ? (int)presetVal.Value : 0;
-
-            // 사이클타임: PMC D 어드레스 (래더 실행 주기 횟수 × multiplier = ms)
-            double? ctMs = _dataReader.ReadCycleTimeMs(cd.CycleTimeAddr, cd.CycleTimeMultiplier);
-            cycleTime = ctMs.HasValue ? ctMs.Value / 1000.0 : 0.0;
+            double cycleMs = _dataReader.ReadCycleTimeMs(cd.CycleTimeAddr, cd.CycleTimeMultiplier) ?? 0.0;
+            _telemetryCounts = (parts, (int)(preset ?? 0), cycleMs / 1000.0);
         }
 
-        // 경로별 상세 데이터 (2-Path 자동선반용)
-        var pathCount = _templateLoader.CurrentTemplate?.SystemInfo?.MaxPaths ?? 1;
-        var maxAxes   = _templateLoader.CurrentTemplate?.SystemInfo?.MaxAxes ?? 0;
-        var path1 = _dataReader.ReadPathData(1, _coordinateDecimalPlaces, maxAxes);
-        var path2 = pathCount >= 2 ? _dataReader.ReadPathData(2, _coordinateDecimalPlaces, maxAxes) : null;
+        string? programNo = path1?.ProgramNo;
+        if (programNo == null && _dataReader.ReadProgramInfo() is { } program)
+            programNo = $"O{program.CurrentProgram:D4}";
+        var feedrate = path1?.Modal.FeedActual ?? _dataReader.ReadFeedrate();
+        var spindleSpeed = path1?.Modal.SpindleActual ?? _dataReader.ReadSpindleSpeed();
+        var absolutePos = mainPositions == null
+            ? _dataReader.ReadAbsolutePosition()?.Values
+            : mainPositions.Absolute.Take(4).Concat(new int[4]).Take(4).ToArray();
+        var machinePos = mainPositions == null
+            ? _dataReader.ReadMachinePosition()?.Values
+            : mainPositions.Machine.Take(4).Concat(new int[4]).Take(4).ToArray();
 
         var telemetry = new TelemetryMessage
         {
@@ -352,15 +402,15 @@ public class DataCollectorService : BackgroundService
             {
                 RunState = status?.Run ?? 0,
                 Mode = status?.ModeString ?? "UNKNOWN",
-                ProgramNo = program != null ? $"O{program.CurrentProgram:D4}" : null,
+                ProgramNo = programNo,
                 Feedrate = feedrate ?? 0,
                 SpindleSpeed = spindleSpeed ?? 0,
-                PartsCount = partsCount,
-                PresetCount = presetCount,
-                CycleTime = cycleTime,
+                PartsCount = _telemetryCounts.Parts,
+                PresetCount = _telemetryCounts.Preset,
+                CycleTime = _telemetryCounts.CycleTime,
                 AlarmActive = status?.HasAlarm ?? false,
-                AbsolutePosition = absolutePos?.Values,
-                MachinePosition = machinePos?.Values,
+                AbsolutePosition = absolutePos,
+                MachinePosition = machinePos,
                 Path1 = path1,
                 Path2 = path2,
                 // pmcBits는 pmc_bits 토픽(100ms)으로 별도 발행 — 텔레메트리에서 제외
@@ -373,7 +423,13 @@ public class DataCollectorService : BackgroundService
         };
 
         // MQTT 발행: 전용 스레드에서 블로킹으로 호출 (스레드 전환 방지)
+        var publishStarted = Stopwatch.GetTimestamp();
         _mqttService.PublishTelemetryAsync(telemetry).GetAwaiter().GetResult();
+        _logger.LogDebug("Telemetry cycle: base={Base:F1}ms paths={Paths:F1}ms mqtt={Mqtt:F1}ms total={Total:F1}ms",
+            (Stopwatch.GetElapsedTime(started, pathsStarted) + Stopwatch.GetElapsedTime(pathsFinished, publishStarted)).TotalMilliseconds,
+            Stopwatch.GetElapsedTime(pathsStarted, pathsFinished).TotalMilliseconds,
+            Stopwatch.GetElapsedTime(publishStarted).TotalMilliseconds,
+            Stopwatch.GetElapsedTime(started).TotalMilliseconds);
     }
 
     private void CollectAndPublishAlarmsSync()

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -155,10 +156,6 @@ public class FocasDataReader
         }
     }
 
-    // cnc_absolute/cnc_machine에 axis=-1을 사용할 때 length는
-    // "4 + (실제 제어축수) * 4" 여야 함. MAX_AXIS*4 를 전달하면 EW_LENGTH 반환.
-    // → cnc_rddynamic(ODBDY_1) 으로 교체: 구조체 크기는 항상 올바르고
-    //   absolute/machine/relative/distance + actf/acts 를 한 번에 가져옴.
     private const int DEFAULT_AXIS_COUNT = 4;
 
     /// <summary>
@@ -338,82 +335,219 @@ public class FocasDataReader
         return Program9000ProtectionState.Unknown;
     }
 
+    private sealed class PathGCodeScan
+    {
+        public int Program { get; init; }
+        public short NextGroup { get; set; } = 1;
+        public List<string> Pending { get; } = new();
+        public string[][] Grid { get; set; } = CreateGCodeGrid();
+    }
+
+    private readonly Dictionary<short, PathGCodeScan> _pathGCodeScans = new();
+    private readonly HashSet<short> _unsupportedToolPositionPaths = new();
+    private readonly Dictionary<short, PathTelemetryDetails> _pathTelemetryDetails = new();
+
+    private sealed record PathAxes(short ReportedCount, string[] Names)
+    {
+        public int Count => Names.Length > 0 ? Names.Length : ReportedCount > 0 ? ReportedCount : DEFAULT_AXIS_COUNT;
+    }
+
+    private sealed class PathTelemetryDetails
+    {
+        public int? Program { get; set; }
+        public PathAxes? Axes { get; set; }
+        public string[][] GCodeGrid { get; set; } = CreateGCodeGrid();
+        public int Feed { get; set; }
+        public int Spindle { get; set; }
+    }
+
+    public void ResetPathTelemetry()
+    {
+        _pathGCodeScans.Clear();
+        _unsupportedToolPositionPaths.Clear();
+        _pathTelemetryDetails.Clear();
+    }
+
+    private static string[][] CreateGCodeGrid() =>
+        Enumerable.Range(0, 5).Select(_ => new[] { "", "", "", "" }).ToArray();
+
+    private string[][] ReadPathGCodes(short pathNo, int program)
+    {
+        if (!_pathGCodeScans.TryGetValue(pathNo, out var scan) || scan.Program != program)
+        {
+            scan = new PathGCodeScan { Program = program };
+            _pathGCodeScans[pathNo] = scan;
+        }
+
+        // Spread the legacy 20-group scan across telemetry passes so PMC and
+        // the next position read can run between groups. Publish complete scans.
+        for (int reads = 0; reads < 2 && scan.NextGroup <= 20; reads++)
+        {
+            short group = scan.NextGroup++;
+            short count = 1;
+            var result = new Focas1.ODBGCD();
+            if (Focas1.cnc_rdgcode(_connection.Handle, group, group, ref count, result) != Focas1.EW_OK
+                || count == 0 || result.gcd0.flag != 0)
+                continue;
+
+            string code = result.gcd0.code?.Trim().Trim('\0').Trim() ?? "";
+            if (code.Length > 0)
+                scan.Pending.Add(code);
+        }
+
+        if (scan.NextGroup > 20)
+        {
+            var grid = CreateGCodeGrid();
+            for (int i = 0; i < scan.Pending.Count; i++)
+                grid[i / 4][i % 4] = scan.Pending[i];
+            scan.Grid = grid;
+            scan.Pending.Clear();
+            scan.NextGroup = 1;
+        }
+
+        return scan.Grid;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    private struct ToolPositionValue
+    {
+        public int Data;
+        public short Decimals;
+        public short Unit;
+        public short Display;
+        public byte Name;
+        public byte Suffix;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    private struct ToolPosition
+    {
+        public ToolPositionValue Absolute;
+        public ToolPositionValue Machine;
+        public ToolPositionValue Relative;
+        public ToolPositionValue Distance;
+    }
+
+    [DllImport("FWLIB64.dll", EntryPoint = "cnc_rdposition")]
+    private static extern short CncReadToolPositions(ushort handle, short type, ref short count,
+        [Out] ToolPosition[] positions);
+
+    internal sealed record PathPositions(int[] Absolute, int[] Machine, int[] Distance);
+
+    private PathPositions? ReadToolPositions(short pathNo, short expectedAxes, int decimals)
+    {
+        if (expectedAxes <= 0 || expectedAxes > Focas1.MAX_AXIS || _unsupportedToolPositionPaths.Contains(pathNo))
+            return null;
+
+        short count = Focas1.MAX_AXIS;
+        var positions = new ToolPosition[count];
+        short status;
+        try { status = CncReadToolPositions(_connection.Handle, -1, ref count, positions); }
+        catch (EntryPointNotFoundException)
+        {
+            _unsupportedToolPositionPaths.Add(pathNo);
+            return null;
+        }
+
+        if (status != Focas1.EW_OK || count < expectedAxes || count > positions.Length)
+        {
+            if ((Focas1.focas_ret)status is Focas1.focas_ret.EW_FUNC or Focas1.focas_ret.EW_LENGTH
+                or Focas1.focas_ret.EW_ATTRIB or Focas1.focas_ret.EW_NOOPT)
+                _unsupportedToolPositionPaths.Add(pathNo);
+            return null;
+        }
+
+        var absolute = new int[count];
+        var machine = new int[count];
+        var distance = new int[count];
+        for (int i = 0; i < count; i++)
+        {
+            if (!TryScalePosition(positions[i].Absolute, decimals, out absolute[i])
+                || !TryScalePosition(positions[i].Machine, decimals, out machine[i])
+                || !TryScalePosition(positions[i].Distance, decimals, out distance[i]))
+                return null;
+        }
+        return new PathPositions(absolute, machine, distance);
+    }
+
+    private static bool TryScalePosition(ToolPositionValue position, int decimals, out int result)
+    {
+        result = 0;
+        if (position.Decimals is < 0 or > 9 || decimals is < 0 or > 9) return false;
+        long value = position.Data;
+        for (int i = position.Decimals; i < decimals; i++) value *= 10;
+        for (int i = decimals; i < position.Decimals; i++)
+        {
+            if (value % 10 != 0) return false;
+            value /= 10;
+        }
+        if (value is < int.MinValue or > int.MaxValue) return false;
+        result = (int)value;
+        return true;
+    }
+
+    public PathData? ReadPathData(short pathNo, int coordinateDecimalPlaces = 3, int maxAxes = 0) =>
+        ReadPathData(pathNo, coordinateDecimalPlaces, maxAxes, out _);
+
     /// <summary>
     /// 경로별 상세 데이터 읽기 (프로그램 번호, 시퀀스, 절대좌표, F/S, 실행 블록 내용)
     /// 멀티-패스 CNC용: pathNo=1 → Path1(주축), pathNo=2 → Path2(부축)
     /// </summary>
-    public PathData? ReadPathData(short pathNo, int coordinateDecimalPlaces = 3, int maxAxes = 0)
+    internal PathData? ReadPathData(short pathNo, int coordinateDecimalPlaces, int maxAxes, out PathPositions? pathPositions,
+        bool cacheDetails = false, bool refreshDetails = true, CncStatus? knownStatus = null)
     {
+        pathPositions = null;
         if (!_connection.IsConnected) return null;
 
+        var totalStarted = Stopwatch.GetTimestamp();
         try
         {
             // 경로 전환 (Path2 이상일 때만)
-            if (pathNo > 1)
-                Focas1.cnc_setpath(_connection.Handle, pathNo);
+            if (pathNo > 1 && Focas1.cnc_setpath(_connection.Handle, pathNo) != Focas1.EW_OK)
+                return null;
 
             // 프로그램 번호
             var prgNum = new Focas1.ODBPRO();
             if (Focas1.cnc_rdprgnum(_connection.Handle, prgNum) != Focas1.EW_OK)
-            {
-                if (pathNo > 1) Focas1.cnc_setpath(_connection.Handle, 1);
                 return null;
-            }
 
             // 시퀀스 번호
             var seqNum = new Focas1.ODBSEQ();
             Focas1.cnc_rdseqnum(_connection.Handle, seqNum);
 
-            // ── 축 이름 읽기 (실제 축수 자동 감지) ──────────────────────────
-            // cnc_rdaxisname에 max=8 전달 → 반환된 axisCountShort = 실제 제어축수
-            string[] axisNames = Array.Empty<string>();
-            int actualAxisCount = 4; // fallback
-            try
+            if (!_pathTelemetryDetails.TryGetValue(pathNo, out var details))
             {
-                short axisNameCount = 8;
-                var axisNameData = new Focas1.ODBAXISNAME();
-                if (Focas1.cnc_rdaxisname(_connection.Handle, ref axisNameCount, axisNameData) == Focas1.EW_OK
-                    && axisNameCount > 0)
-                {
-                    actualAxisCount = axisNameCount;
-                    var allData = new[]
-                    {
-                        axisNameData.data1, axisNameData.data2,
-                        axisNameData.data3, axisNameData.data4,
-                        axisNameData.data5, axisNameData.data6,
-                        axisNameData.data7,
-                    };
-                    axisNames = allData
-                        .Take(actualAxisCount)
-                        .Select(d =>
-                        {
-                            char n = (char)d.name;
-                            char s = (char)d.suff;
-                            return s != '\0' && s != ' ' ? $"{n}{s}" : $"{n}";
-                        })
-                        .Where(name => name.Trim().Length > 0 && name[0] != '\0')
-                        .ToArray();
-                    if (axisNames.Length > 0)
-                        actualAxisCount = axisNames.Length;
-                }
+                details = new PathTelemetryDetails();
+                _pathTelemetryDetails[pathNo] = details;
             }
-            catch { /* 미지원 시 무시 */ }
+            if (details.Program != prgNum.data)
+            {
+                details.Program = prgNum.data;
+                details.GCodeGrid = CreateGCodeGrid();
+                _pathGCodeScans.Remove(pathNo);
+            }
 
-            // MaxAxes 캡: 템플릿에서 지정된 경우 자동감지 값을 제한
-            if (maxAxes > 0 && actualAxisCount > maxAxes)
-            {
-                actualAxisCount = maxAxes;
-                if (axisNames.Length > maxAxes)
-                    axisNames = axisNames.Take(maxAxes).ToArray();
-            }
+            if (!cacheDetails || refreshDetails || details.Axes == null)
+                details.Axes = ReadPathAxes() ?? (cacheDetails ? details.Axes : null);
+            var axes = details.Axes ?? new PathAxes(0, Array.Empty<string>());
+            int actualAxisCount = maxAxes > 0 ? Math.Min(maxAxes, axes.Count) : axes.Count;
+            var axisNames = axes.Names.Length > actualAxisCount ? axes.Names[..actualAxisCount] : axes.Names;
 
             // ── 좌표 읽기 (실제 축수만큼) ────────────────────────────────────
+            var coordinatesStarted = Stopwatch.GetTimestamp();
             const short SINGLE_AXIS_LEN = 8;
             var absolute = new int[actualAxisCount];
             var dtg      = new int[actualAxisCount];
             var decimalPlaces = Enumerable.Repeat(coordinateDecimalPlaces, actualAxisCount).ToArray();
 
-            for (int i = 0; i < actualAxisCount; i++)
+            var positions = ReadToolPositions(pathNo, axes.ReportedCount, coordinateDecimalPlaces);
+            if (positions != null)
+            {
+                Array.Copy(positions.Absolute, absolute, actualAxisCount);
+                Array.Copy(positions.Distance, dtg, actualAxisCount);
+            }
+
+            for (int i = 0; positions == null && i < actualAxisCount; i++)
             {
                 var axPos = new Focas1.ODBAXIS();
                 if (Focas1.cnc_absolute(_connection.Handle, (short)(i + 1), SINGLE_AXIS_LEN, axPos) == Focas1.EW_OK
@@ -425,93 +559,42 @@ public class FocasDataReader
                     && axDtg.data != null && axDtg.data.Length > 0)
                     dtg[i] = axDtg.data[0];
             }
+            var coordinatesElapsed = Stopwatch.GetElapsedTime(coordinatesStarted);
 
-            // ── 실제 F/S 읽기 ────────────────────────────────────────────────
-            int feedActual    = 0;
-            int spindleActual = 0;
-            var actf = new Focas1.ODBACT();
-            if (Focas1.cnc_actf(_connection.Handle, actf) == Focas1.EW_OK)
-                feedActual = actf.data;
-            var acts = new Focas1.ODBACT();
-            if (Focas1.cnc_acts(_connection.Handle, acts) == Focas1.EW_OK)
-                spindleActual = acts.data;
+            var programTextStarted = Stopwatch.GetTimestamp();
+            var programContent = ReadExecutingProgramText();
+            var programTextElapsed = Stopwatch.GetElapsedTime(programTextStarted);
 
-            // ── G코드 모달 읽기 (그룹별 개별 읽기 → 5×4 그리드) ────────────
-            // 배치 읽기(1~20)는 0i-TF T타입(14그룹)에서 EW_NUMBER 에러 발생.
-            // 그룹 1~20을 개별로 읽어 지원 범위를 자동 감지.
-            var gCodeGrid = new string[5][];
-            for (int gi = 0; gi < 5; gi++) gCodeGrid[gi] = new[] {"","","",""};
-
-            try
+            var detailsStarted = Stopwatch.GetTimestamp();
+            if (refreshDetails)
             {
-                int filled = 0;
-                for (short grp = 1; grp <= 20 && filled < 20; grp++)
+                details.Feed = ReadFeedrate() ?? 0;
+                details.Spindle = ReadSpindleSpeed() ?? 0;
+                try { details.GCodeGrid = ReadPathGCodes(pathNo, prgNum.data); }
+                catch (Exception ex)
                 {
-                    var gcd1 = new Focas1.ODBGCD();
-                    short cnt = 1;
-                    short ret = Focas1.cnc_rdgcode(_connection.Handle, grp, grp, ref cnt, gcd1);
-                    if (ret != Focas1.EW_OK) continue;  // 해당 그룹 미지원 → 건너뜀
-                    if (cnt == 0) continue;
-
-                    // flag != 0: one-shot G코드(이미 실행됨) → 표시 제외
-                    if (gcd1.gcd0.flag != 0) continue;
-
-                    string code = gcd1.gcd0.code?.Trim().Trim('\0').Trim() ?? "";
-                    if (string.IsNullOrEmpty(code)) continue;
-
-                    int row = filled / 4, col = filled % 4;
-                    if (row < 5) gCodeGrid[row][col] = code;
-                    filled++;
-                }
-
-                if (filled > 0)
-                    _logger.LogDebug("G코드 모달 path={Path}: {Filled}개", pathNo, filled);
-                else
-                    _logger.LogDebug("G코드 모달 path={Path}: 없음 (cnc_rdgcode 미지원 또는 미실행)", pathNo);
-            }
-            catch (Exception ex) { _logger.LogWarning(ex, "cnc_rdgcode read failed path={Path}", pathNo); }
-
-            // ── 실행 중인 NC 블록 읽기 ──────────────────────────────────────
-            // cnc_rdexecprog: 경로 전환(cnc_setpath) 후 해당 경로 블록 반환
-            string[] programContent = Array.Empty<string>();
-            try
-            {
-                ushort bufLen = 256;
-                var buf = new byte[bufLen];
-                if (CncRdExecProg(_connection.Handle, ref bufLen, out _, buf) == Focas1.EW_OK && bufLen > 0)
-                {
-                    var raw = Encoding.ASCII.GetString(buf, 0, bufLen).Trim('\0').Trim();
-                    if (!string.IsNullOrEmpty(raw))
-                    {
-                        var lines = raw
-                            .Split(new[] { '\n', '\r', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                            .Select(l => l.Trim())
-                            .Where(l => !string.IsNullOrEmpty(l)
-                                && l != "%"
-                                && !System.Text.RegularExpressions.Regex.IsMatch(l, @"^O\d+%?$"))
-                            .Take(11)
-                            .ToArray();
-
-                        if (lines.Length > 0)
-                        {
-                            lines[0] = ">" + lines[0];
-                            programContent = lines;
-                        }
-                    }
+                    _logger.LogWarning(ex, "cnc_rdgcode read failed path={Path}", pathNo);
+                    details.GCodeGrid = CreateGCodeGrid();
                 }
             }
-            catch { /* cnc_rdexecprog 미지원 모델이면 무시 */ }
+            var detailsElapsed = Stopwatch.GetElapsedTime(detailsStarted);
 
-            // 상태 문자열
-            var statInfo = new Focas1.ODBST();
-            string pathStatus = "---- ---- ---- ---";
-            if (Focas1.cnc_statinfo(_connection.Handle, statInfo) == Focas1.EW_OK)
-                pathStatus = BuildPathStatus(statInfo);
+            string pathStatus;
+            if (knownStatus != null)
+                pathStatus = BuildPathStatus(knownStatus.Aut, knownStatus.Run);
+            else
+            {
+                var stat = new Focas1.ODBST();
+                pathStatus = Focas1.cnc_statinfo(_connection.Handle, stat) == Focas1.EW_OK
+                    ? BuildPathStatus(stat.aut, stat.run) : "---- ---- ---- ---";
+            }
 
-            // 경로 복원
-            if (pathNo > 1)
-                Focas1.cnc_setpath(_connection.Handle, 1);
+            _logger.LogDebug(
+                "Path telemetry {Path}: total={Total:F1}ms coordinates={Coordinates:F1}ms positionBatch={PositionBatch} programText={Text:F1}ms details={Details:F1}ms",
+                pathNo, Stopwatch.GetElapsedTime(totalStarted).TotalMilliseconds,
+                coordinatesElapsed.TotalMilliseconds, positions != null, programTextElapsed.TotalMilliseconds, detailsElapsed.TotalMilliseconds);
 
+            pathPositions = positions;
             return new PathData
             {
                 ProgramNo = $"O{prgNum.data:D4}",
@@ -527,9 +610,9 @@ public class FocasDataReader
                 },
                 Modal = new PathModal
                 {
-                    GCodeGrid     = gCodeGrid,
-                    FeedActual    = feedActual,
-                    SpindleActual = spindleActual,
+                    GCodeGrid     = details.GCodeGrid,
+                    FeedActual    = details.Feed,
+                    SpindleActual = details.Spindle,
                 },
                 PathStatus = pathStatus,
             };
@@ -537,18 +620,65 @@ public class FocasDataReader
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error reading path {PathNo} data", pathNo);
-            try { if (pathNo > 1) Focas1.cnc_setpath(_connection.Handle, 1); } catch { }
             return null;
+        }
+        finally
+        {
+            if (pathNo > 1 && Focas1.cnc_setpath(_connection.Handle, 1) != Focas1.EW_OK)
+                _logger.LogWarning("Unable to restore Path 1 after reading telemetry for Path {Path}", pathNo);
         }
     }
 
-    private static string BuildPathStatus(Focas1.ODBST stat)
+    private PathAxes? ReadPathAxes()
     {
-        var mode = stat.aut switch
+        try
+        {
+            short count = Focas1.MAX_AXIS;
+            var data = new Focas1.ODBAXISNAME();
+            if (Focas1.cnc_rdaxisname(_connection.Handle, ref count, data) != Focas1.EW_OK
+                || count <= 0 || count > Focas1.MAX_AXIS)
+                return null;
+
+            var names = new[] { data.data1, data.data2, data.data3, data.data4,
+                data.data5, data.data6, data.data7, data.data8 }
+                .Take(count)
+                .Where(axis => axis.name != 0 && !char.IsWhiteSpace((char)axis.name))
+                .Select(axis => axis.suff is 0 or (byte)' ' ? $"{(char)axis.name}" : $"{(char)axis.name}{(char)axis.suff}")
+                .ToArray();
+            return new PathAxes(count, names);
+        }
+        catch { return null; }
+    }
+
+    private string[] ReadExecutingProgramText()
+    {
+        try
+        {
+            ushort length = 256;
+            var buffer = new byte[length];
+            if (CncRdExecProg(_connection.Handle, ref length, out _, buffer) != Focas1.EW_OK
+                || length == 0 || length > buffer.Length)
+                return Array.Empty<string>();
+
+            var lines = Encoding.ASCII.GetString(buffer, 0, length).Trim('\0')
+                .Split(new[] { '\n', '\r', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Trim())
+                .Where(line => line.Length != 0 && line != "%" && !Regex.IsMatch(line, @"^O\d+%?$"))
+                .Take(11)
+                .ToArray();
+            if (lines.Length > 0) lines[0] = ">" + lines[0];
+            return lines;
+        }
+        catch { return Array.Empty<string>(); }
+    }
+
+    private static string BuildPathStatus(short autoMode, short runState)
+    {
+        var mode = autoMode switch
         {
             0 => "MDI ", 1 => "MEM ", 3 => "EDIT", 4 => "HND ", 5 => "JOG ", _ => "----"
         };
-        var run = stat.run switch
+        var run = runState switch
         {
             3 => "STRT", 4 => "HOLD", _ => "****"
         };
@@ -813,6 +943,54 @@ public class FocasDataReader
         { "A", 4 }, { "R", 5 }, { "T", 6 }, { "K", 7 },
         { "C", 8 }, { "D", 9 },
     };
+
+    public Dictionary<string, int> ReadPmcBits(IEnumerable<string> addresses)
+    {
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (!_connection.IsConnected) return result;
+
+        var areas = addresses.Select(key => (Key: key, Address: PmcAddress.ParseString(key)))
+            .Where(x => x.Address is { Address: >= 0 and <= ushort.MaxValue, Bit: >= 0 and <= 7 })
+            .Select(x => (x.Key, Address: x.Address!))
+            .GroupBy(x => x.Address.Type, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var area in areas)
+        {
+            if (!PmcTypeCode.TryGetValue(area.Key, out short typeNo)) continue;
+            var signals = area.OrderBy(x => x.Address.Address).ToArray();
+            for (int first = 0; first < signals.Length;)
+            {
+                int start = signals[first].Address.Address;
+                int end = first + 1;
+                // IODBPMC0.cdata holds up to five bytes, including any gaps.
+                while (end < signals.Length && signals[end].Address.Address - start < 5)
+                    end++;
+                if (end - first == 1)
+                {
+                    var (key, address) = signals[first];
+                    if (ReadPmcBit(address) is int bit) result[key] = bit;
+                    first = end;
+                    continue;
+                }
+                int last = signals[end - 1].Address.Address;
+                var data = new Focas1.IODBPMC0();
+                bool success = Focas1.pmc_rdpmcrng(_connection.Handle, typeNo, 0,
+                    (ushort)start, (ushort)last, (ushort)(8 + last - start + 1), data) == Focas1.EW_OK
+                    && data.cdata?.Length > last - start;
+
+                for (int i = first; i < end; i++)
+                {
+                    var (key, address) = signals[i];
+                    int? bit = success
+                        ? (data.cdata![address.Address - start] >> address.Bit) & 1
+                        : ReadPmcBit(address);
+                    if (bit.HasValue) result[key] = bit.Value;
+                }
+                first = end;
+            }
+        }
+        return result;
+    }
 
     /// <summary>
     /// PMC 단일 비트 읽기 (TopBar 인터락 pills용)

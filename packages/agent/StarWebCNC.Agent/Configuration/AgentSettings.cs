@@ -138,6 +138,11 @@ public class CollectorSettings
     public int TelemetryIntervalMs { get; set; } = 1000;
 
     /// <summary>
+    /// 화면용 모달과 카운터 등 상세 정보의 수집 주기. 미설정 시 매 텔레메트리에서 읽는다.
+    /// </summary>
+    public int? TelemetryDetailIntervalMs { get; set; }
+
+    /// <summary>
     /// 알람 체크 주기 (밀리초)
     /// </summary>
     public int AlarmIntervalMs { get; set; } = 1000;
@@ -146,4 +151,9 @@ public class CollectorSettings
     /// PMC 신호 체크 주기 (밀리초)
     /// </summary>
     public int PmcIntervalMs { get; set; } = 100;
+
+    /// <summary>
+    /// 화면용 PMC 비트 수집 주기. 설정하지 않으면 PmcIntervalMs를 사용한다.
+    /// </summary>
+    public int? PmcMonitorIntervalMs { get; set; }
 }

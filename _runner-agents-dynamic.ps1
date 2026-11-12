@@ -3,7 +3,8 @@ param(
     [string]$Username   = "admin",
     [string]$Password   = "admin123!",
     [string]$PublishDir = "C:\Star-WebCNC\packages\agent\StarWebCNC.Agent\publish",
-    [string]$LogDir     = "C:\Star-WebCNC\agent-runtime"
+    [string]$LogDir     = "C:\Star-WebCNC\agent-runtime",
+    [string]$TargetMachineId = ""
 )
 
 if (-not (Test-Path $LogDir)) {
@@ -41,15 +42,32 @@ if (-not $token) {
 
 try {
     $resp = Invoke-RestMethod -Uri "$ServerUrl/api/machines?limit=100" -Headers @{ Authorization = "Bearer $token" }
-    $machines = $resp.data.items | Where-Object { $_.isActive -eq $true }
+    $machines = @($resp.data.items | Where-Object {
+        $_.isActive -eq $true -and (-not $TargetMachineId -or $_.machineId -eq $TargetMachineId)
+    })
 } catch {
     Write-Host "[agents] ERROR: Failed to fetch machines - $_"
     exit 1
 }
 
 if ($machines.Count -eq 0) {
+    if ($TargetMachineId) {
+        Write-Host "[agents] ERROR: No active machine matches $TargetMachineId."
+        exit 1
+    }
     Write-Host "[agents] No active machines found. Nothing to start."
     exit 0
+}
+
+if ($TargetMachineId) {
+    $machineArgument = [regex]::Escape("--Agent:MachineId=$TargetMachineId") + '(?=["\s]|$)'
+    $running = Get-CimInstance Win32_Process -Filter "Name = 'dotnet.exe'" | Where-Object {
+        $_.CommandLine -match 'StarWebCNC\.Agent\.dll' -and $_.CommandLine -match $machineArgument
+    }
+    if ($running) {
+        Write-Host "[agents] $TargetMachineId Agent is already running."
+        exit 0
+    }
 }
 
 Write-Host "[agents] Starting $($machines.Count) agent(s)..."
@@ -65,6 +83,12 @@ foreach ($m in $machines) {
     $safeMachineId = $machineId -replace '-', ''
     $logFile   = Join-Path $LogDir "agent_$safeMachineId.log"
     $psScript  = Join-Path $LogDir "start_agent_$machineId.ps1"
+    $machinePublishDir = $PublishDir
+    $localPublishDir = Join-Path $LogDir "$machineId\publish"
+    if ((Test-Path -LiteralPath (Join-Path $localPublishDir 'active') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $localPublishDir 'StarWebCNC.Agent.dll') -PathType Leaf)) {
+        $machinePublishDir = $localPublishDir
+    }
 
     @"
 `$env:ASPNETCORE_ENVIRONMENT = 'Production'
@@ -79,7 +103,7 @@ foreach ($m in $machines) {
 `$env:Agent__Mqtt__Host = 'localhost'
 `$env:Agent__Mqtt__Port = '1883'
 `$env:Agent__Server__BaseUrl = '$ServerUrl'
-Set-Location '$PublishDir'
+Set-Location '$machinePublishDir'
 & '$dotnet' StarWebCNC.Agent.dll "--Agent:AgentId=$agentId" "--Agent:MachineId=$machineId" "--Agent:TemplateId=$templateId" "--Agent:Cnc:IpAddress=$ip" "--Agent:Cnc:Port=$port" "--Agent:Mqtt:Host=localhost" "--Agent:Mqtt:Port=1883" "--Agent:Server:BaseUrl=$ServerUrl" *>> '$logFile'
 "@ | Out-File -FilePath $psScript -Encoding utf8
 

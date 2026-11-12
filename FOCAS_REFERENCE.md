@@ -163,6 +163,14 @@ PMC bit를 telemetry에 넣으면 UI 램프와 interlock 표시가 telemetry 주
 - 실행 중인 block/program text 일부
 - CNC status
 
+경로별 절대좌표·기계좌표·잔여 이동량은 `cnc_rdposition`으로 일괄 읽는다. 실제 축수와 소수점 자릿수를 확인하고 기존 좌표 정밀도로 정확히 표현할 수 없는 값은 기존 축별 읽기로 대체한다. Path 1에서 일괄 읽기에 성공하면 공통 텔레메트리 좌표에도 같은 값을 사용한다. 템플릿의 최대 축수는 경로별 화면 표시에 적용한다.
+
+프로그램 번호, 시퀀스, 실행 블록 텍스트, 좌표와 CNC 상태는 매 텔레메트리에서 읽는다. `TelemetryDetailIntervalMs`를 설정하면 Path 1 상세 정보, Path 2 상세 정보, 표시용 카운터를 여러 텔레메트리에 나눠 읽는다. 상세 정보에는 모달 G코드, 축 이름, 이송·회전 속도가 포함된다. 설정하지 않으면 상세 정보도 매번 읽는다.
+
+모달 G코드는 경로별 상세 수집 1회에 최대 두 그룹을 읽고, 20개 그룹을 확인했을 때 그리드를 갱신한다. 프로그램 번호가 바뀌거나 CNC가 재연결되면 이전 모달 데이터를 비운다. 실행 블록 읽기에 실패하면 해당 메시지의 실행 블록 텍스트를 비운다.
+
+Agent의 `DataCollectorService`와 `FocasDataReader` 로그 수준을 `Debug`로 설정하면 경로별 좌표·상세 정보 읽기 시간, MQTT 발행 시간, PMC·알람 처리 시간과 M20·스케줄러 확인 간격을 확인할 수 있다.
+
 주의:
 
 - 새 수집 항목을 추가할 때 수집 루프 전체를 block할 수 있는 FOCAS API인지 먼저 확인한다.
@@ -190,6 +198,8 @@ PMC bit를 telemetry에 넣으면 UI 램프와 interlock 표시가 telemetry 주
 - 과거 CNC가 `#3006` operator message 대기 상태일 때 `cnc_rdopmsg3`가 block되어 화면 갱신 전체가 멈춘 문제가 있었다.
 
 ### PMC 읽기
+
+모니터링용 PMC 비트는 동일 영역에서 최대 5바이트씩 읽은 후 요청한 비트만 발행한다. 범위 읽기 실패 시 개별 읽기를 사용한다. `PmcMonitorIntervalMs`로 화면용 수집 간격을 지정할 수 있으며, 미설정 시 `PmcIntervalMs`를 따른다. M20 및 스케줄러 처리는 `PmcIntervalMs` 기준으로 독립적으로 실행한다. 모든 읽기는 같은 FOCAS 스레드에서 순차 처리되므로 설정값과 실측 간격은 다를 수 있다.
 
 구현 위치: `FocasDataReader.cs`, `DataCollectorService.CollectAndPublishPmcBitsSync()`
 
