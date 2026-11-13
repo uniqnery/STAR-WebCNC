@@ -6,7 +6,8 @@
 // - 카메라 재부팅/LAN 탈착/공유기 재시작 모두 자동 복구
 // - 다중 접속 가능 (서버 브로드캐스트) — BUSY 개념 없음
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, type SyntheticEvent } from 'react';
+import type Hls from 'hls.js';
 import { CameraConfig } from '../stores/cameraStore';
 import { cameraServerApi } from '../lib/api';
 
@@ -30,6 +31,8 @@ type ConnectionState =
 
 const BACKOFF_DELAYS = [3000, 5000, 10000, 20000, 30000];
 const CONNECT_TIMEOUT_MS = 25000;
+const PILOT_CAMERA_ID = 'cam-1775703291746';
+const HLS_TIMEOUT_MS = 6500;
 
 function getBackoffDelay(retryCount: number): number {
   return BACKOFF_DELAYS[Math.min(retryCount, BACKOFF_DELAYS.length - 1)];
@@ -48,6 +51,11 @@ export function CameraStream({ camera, className = '', showControls = true, thum
   }, [camera?.id, camera?.defaultZoom]);
 
   const containerRef      = useRef<HTMLDivElement>(null);
+  const imageRef          = useRef<HTMLImageElement>(null);
+  const videoRef          = useRef<HTMLVideoElement>(null);
+  const hlsRef            = useRef<Hls | null>(null);
+  const activeUrlRef      = useRef<string | null>(null);
+  const attemptRef        = useRef(0);
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCountRef     = useRef(0);
@@ -58,44 +66,102 @@ export function CameraStream({ camera, className = '', showControls = true, thum
     if (retryTimerRef.current)     { clearTimeout(retryTimerRef.current);     retryTimerRef.current = null; }
   }, []);
 
-  const buildStreamUrl = useCallback((cameraId: string) => {
-    const base = cameraServerApi.getStreamUrl(cameraId);
-    return `${base}&t=${Date.now()}${thumb ? '&thumb=1' : ''}`;
-  }, [thumb]);
-
-  const startStream = useCallback((cameraId: string) => {
+  const stopStream = useCallback(() => {
     clearTimers();
+    activeUrlRef.current = null;
+    imageRef.current?.removeAttribute('src');
+    hlsRef.current?.destroy();
+    hlsRef.current = null;
+    const video = videoRef.current;
+    if (video?.hasAttribute('src')) {
+      video.removeAttribute('src');
+      video.load();
+    }
+  }, [clearTimers]);
+
+  const startStream = useCallback((cameraId: string, usePilot = cameraId === PILOT_CAMERA_ID) => {
+    if (cameraIdRef.current !== cameraId || document.hidden) return;
+    stopStream();
+    const attempt = `t=${Date.now()}-${++attemptRef.current}`;
+    const url = usePilot
+      ? `/api/camera/${cameraId}/hls/index.m3u8?${attempt}`
+      : `${cameraServerApi.getStreamUrl(cameraId)}&${attempt}${thumb ? '&thumb=1' : ''}`;
+    activeUrlRef.current = url;
     setConnState('connecting');
     setErrorMsg('');
-    setStreamUrl(null);
+    setStreamUrl(url);
 
     connectTimeoutRef.current = setTimeout(() => {
+      if (activeUrlRef.current !== url) return;
+      if (usePilot) {
+        startStream(cameraId, false);
+        return;
+      }
+      stopStream();
       setConnState('timeout');
-      setErrorMsg('카메라 응답 없음 (타임아웃)');
       setStreamUrl(null);
-    }, CONNECT_TIMEOUT_MS);
+    }, usePilot ? HLS_TIMEOUT_MS : CONNECT_TIMEOUT_MS);
+  }, [stopStream, thumb]);
 
-    setStreamUrl(buildStreamUrl(cameraId));
-  }, [clearTimers, buildStreamUrl]);
-
+  const cameraId = camera?.id;
+  const enabled = camera?.enabled;
+  const isHls = streamUrl?.includes('/hls/index.m3u8?') ?? false;
   useEffect(() => {
-    clearTimers();
+    const video = videoRef.current;
+    if (!isHls || !streamUrl || !video || !cameraId) return;
+    const request = new AbortController();
+    const fallback = () => {
+      const id = cameraIdRef.current;
+      if (id && activeUrlRef.current === streamUrl) startStream(id, false);
+    };
+    void cameraServerApi.openHlsSession(cameraId, request.signal).then(async (session) => {
+      if (!session.success) throw new Error('Camera session unavailable');
+      if (activeUrlRef.current !== streamUrl) return;
+      if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = streamUrl;
+      } else {
+        const { default: Player } = await import('hls.js');
+        if (activeUrlRef.current !== streamUrl) return;
+        if (!Player.isSupported()) {
+          fallback();
+          return;
+        }
+        const player = new Player({ liveSyncDurationCount: 2, maxBufferLength: 6 });
+        hlsRef.current = player;
+        player.on(Player.Events.ERROR, (_, data) => {
+          if (data.fatal) fallback();
+        });
+        player.attachMedia(video);
+        player.loadSource(streamUrl);
+      }
+    }).catch(() => {
+      if (!request.signal.aborted) fallback();
+    });
+    return () => request.abort();
+  }, [cameraId, isHls, streamUrl, startStream]);
+
+  useLayoutEffect(() => {
     retryCountRef.current = 0;
     setRetryCount(0);
-    cameraIdRef.current = camera?.id;
+    cameraIdRef.current = enabled ? cameraId : undefined;
 
-    if (!camera || !camera.enabled) {
-      setConnState(camera ? 'disabled' : 'idle');
+    if (!cameraId || !enabled || document.hidden) {
+      setConnState(cameraId && !enabled ? 'disabled' : 'idle');
       setStreamUrl(null);
-      return;
+    } else {
+      startStream(cameraId);
     }
 
-    startStream(camera.id);
-    return clearTimers;
-  }, [camera?.id, camera?.enabled, startStream, clearTimers]);
+    return () => {
+      cameraIdRef.current = undefined;
+      stopStream();
+    };
+  }, [cameraId, enabled, startStream, stopStream]);
 
   const scheduleRetry = useCallback((state: ConnectionState, msg: string) => {
-    if (!cameraIdRef.current) return;
+    const id = cameraIdRef.current;
+    if (!id || document.hidden) return;
+    stopStream();
     const delay = getBackoffDelay(retryCountRef.current);
     retryCountRef.current += 1;
     setRetryCount(retryCountRef.current);
@@ -103,11 +169,11 @@ export function CameraStream({ camera, className = '', showControls = true, thum
     setErrorMsg(msg);
     setStreamUrl(null);
     retryTimerRef.current = setTimeout(() => {
-      if (cameraIdRef.current) startStream(cameraIdRef.current);
+      startStream(id);
     }, delay);
-  }, [startStream]);
+  }, [startStream, stopStream]);
 
-  const handleLoad = useCallback(() => {
+  const markLive = useCallback(() => {
     clearTimers();
     retryCountRef.current = 0;
     setRetryCount(0);
@@ -115,16 +181,21 @@ export function CameraStream({ camera, className = '', showControls = true, thum
     setErrorMsg('');
   }, [clearTimers]);
 
-  const handleError = useCallback(() => {
+  const handleLoad = useCallback((event: SyntheticEvent<HTMLImageElement>) => {
+    if (!activeUrlRef.current || event.currentTarget.getAttribute('src') !== activeUrlRef.current) return;
+    markLive();
+  }, [markLive]);
+
+  const handleError = useCallback((event: SyntheticEvent<HTMLImageElement>) => {
+    if (!activeUrlRef.current || event.currentTarget.getAttribute('src') !== activeUrlRef.current) return;
     scheduleRetry('error', '연결 오류 — 자동 재시도 중');
   }, [scheduleRetry]);
 
   useEffect(() => {
-    if (connState === 'timeout' && cameraIdRef.current) {
+    if (connState === 'timeout' && !activeUrlRef.current) {
       scheduleRetry('timeout', '카메라 응답 없음 — 자동 재시도 중');
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connState]);
+  }, [connState, scheduleRetry]);
 
   const handleRetry = useCallback(() => {
     if (!cameraIdRef.current) return;
@@ -152,7 +223,7 @@ export function CameraStream({ camera, className = '', showControls = true, thum
     const handleVisibility = () => {
       if (!cameraIdRef.current) return;
       if (document.hidden) {
-        clearTimers();
+        stopStream();
         setStreamUrl(null);
         setConnState('idle');
       } else {
@@ -163,7 +234,7 @@ export function CameraStream({ camera, className = '', showControls = true, thum
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [clearTimers, startStream]);
+  }, [stopStream, startStream]);
 
   if (!camera) {
     return (
@@ -185,8 +256,27 @@ export function CameraStream({ camera, className = '', showControls = true, thum
       ref={containerRef}
       className={`relative bg-black overflow-hidden ${className} ${isFullscreen ? 'w-screen h-screen' : ''}`}
     >
-      {streamUrl && (
+      {streamUrl && (isHls ? (
+        <video
+          key={streamUrl}
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          onPlaying={() => {
+            if (activeUrlRef.current === streamUrl) markLive();
+          }}
+          onError={() => {
+            if (activeUrlRef.current === streamUrl && cameraIdRef.current) startStream(cameraIdRef.current, false);
+          }}
+          className="absolute inset-0 w-full h-full object-contain transition-transform duration-150"
+          style={{ transform: `scale(${zoom})`, transformOrigin: 'center center' }}
+          aria-label={camera.name}
+        />
+      ) : (
         <img
+          key={streamUrl}
+          ref={imageRef}
           src={streamUrl}
           onLoad={handleLoad}
           onError={handleError}
@@ -194,7 +284,7 @@ export function CameraStream({ camera, className = '', showControls = true, thum
           style={{ transform: `scale(${zoom})`, transformOrigin: 'center center' }}
           alt={camera.name}
         />
-      )}
+      ))}
 
       {/* 연결 중 오버레이 */}
       {connState === 'connecting' && (

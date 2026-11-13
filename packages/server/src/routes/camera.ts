@@ -1,7 +1,7 @@
 // Camera Routes — RTSP → MJPEG 브로드캐스트
 //
 // [설계 정책]
-// - 카메라 ID당 FFmpeg 프로세스 1개
+// - 카메라 ID와 화질 조합당 FFmpeg 프로세스 1개
 // - 구독자(시청자) 무제한 — Set<Response> 브로드캐스트
 // - 마지막 구독자 퇴장 시 FFmpeg 자동 종료
 // - 해상도/FPS: CameraConfig.width / fps 설정값 사용 (기본 1280px / 20fps)
@@ -46,23 +46,63 @@ interface ActiveStream {
   subscribers: Set<Response>;
   startedAt: number;
   graceTimer?: ReturnType<typeof setTimeout>; // 마지막 구독자 퇴장 후 유예 타이머
+  watchdogTimer?: ReturnType<typeof setTimeout>;
 }
 const activeStreams = new Map<string, ActiveStream>();
 
 // 마지막 구독자 퇴장 후 FFmpeg 유지 시간 (재진입 시 재사용)
 const GRACE_PERIOD_MS = 3_000;
+const WATCHDOG_MS = 10_000;
+const MAX_PENDING_BYTES = 2 * 1024 * 1024;
+
+function closeStream(key: string, stream: ActiveStream, error?: {
+  status: number;
+  code: CameraErrorCode;
+  message: string;
+}) {
+  if (activeStreams.get(key) !== stream) return;
+  activeStreams.delete(key);
+  clearTimeout(stream.graceTimer);
+  clearTimeout(stream.watchdogTimer);
+  const child = stream.process;
+  if (child.pid && child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+  for (const sub of stream.subscribers) {
+    if (sub.writableEnded || sub.destroyed) continue;
+    if (error && !sub.headersSent) {
+      sub.type('application/json').status(error.status).json({
+        success: false,
+        error: { code: error.code, message: error.message },
+      });
+    } else if (error) {
+      sub.end();
+    } else {
+      sub.destroy();
+    }
+  }
+  stream.subscribers.clear();
+}
+
+function removeSubscriber(key: string, stream: ActiveStream, res: Response) {
+  if (!stream.subscribers.delete(res) || activeStreams.get(key) !== stream) return;
+  console.log(`[Camera] Subscriber left: ${key} — remaining: ${stream.subscribers.size}`);
+  if (stream.subscribers.size === 0) {
+    stream.graceTimer = setTimeout(() => closeStream(key, stream), GRACE_PERIOD_MS);
+  }
+}
+
+function addSubscriber(key: string, stream: ActiveStream, res: Response, clientIp: string) {
+  clearTimeout(stream.graceTimer);
+  stream.graceTimer = undefined;
+  stream.subscribers.add(res);
+  res.once('close', () => removeSubscriber(key, stream, res));
+  console.log(`[Camera] Subscriber joined: ${key} (${clientIp}) — total: ${stream.subscribers.size}`);
+}
 
 process.on('SIGTERM', cleanupAllStreams);
 process.on('SIGINT', cleanupAllStreams);
 function cleanupAllStreams() {
   console.log(`[Camera] Server shutdown: cleaning up ${activeStreams.size} active stream(s)`);
-  for (const [id, stream] of activeStreams) {
-    stream.process.kill('SIGTERM');
-    for (const sub of stream.subscribers) {
-      if (!sub.writableEnded) sub.destroy();
-    }
-    activeStreams.delete(id);
-  }
+  for (const [key, stream] of activeStreams) closeStream(key, stream);
 }
 
 async function getCameraConfigs(): Promise<CameraConfig[]> {
@@ -72,8 +112,7 @@ async function getCameraConfigs(): Promise<CameraConfig[]> {
 }
 
 function authenticateStream(req: Request, res: Response, next: NextFunction): void {
-  const token =
-    (req.query.token as string | undefined) ||
+  const token = (typeof req.query.token === 'string' && req.query.token) ||
     extractBearerToken(req.headers.authorization);
   if (!token) { res.status(401).end(); return; }
   const payload = verifyAccessToken(token);
@@ -81,6 +120,48 @@ function authenticateStream(req: Request, res: Response, next: NextFunction): vo
   req.user = { id: payload.sub, username: payload.username, role: payload.role };
   next();
 }
+
+const pilotCameraId = 'cam-1775703291746';
+const pilotAsset = /^[\da-z_-]+\.(?:m3u8|mp4|m4s)$/i;
+const pilotCookie = 'camera_pilot_access';
+
+router.post('/:id/hls/session', (req, res) => {
+  if (req.params.id !== pilotCameraId || process.env.CAMERA_HLS_PILOT === '0') return res.sendStatus(404);
+  const token = extractBearerToken(req.headers.authorization);
+  if (!token || !verifyAccessToken(token)) return res.sendStatus(401);
+  return res.cookie(pilotCookie, token, {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: req.secure || req.get('x-forwarded-proto') === 'https',
+    path: `/api/camera/${pilotCameraId}/hls`,
+  }).set('Cache-Control', 'no-store').json({ success: true });
+});
+
+router.get('/:id/hls/:asset', async (req, res) => {
+  const { id, asset } = req.params;
+  if (id !== pilotCameraId || !pilotAsset.test(asset) || process.env.CAMERA_HLS_PILOT === '0') {
+    return res.sendStatus(404);
+  }
+  const token = req.cookies?.[pilotCookie];
+  if (typeof token !== 'string' || !verifyAccessToken(token)) return res.sendStatus(401);
+  try {
+    const url = new URL(`http://127.0.0.1:8888/camera60/${asset}`);
+    if (typeof req.query.session === 'string') url.searchParams.set('session', req.query.session);
+    const upstream = await fetch(url, {
+      signal: AbortSignal.timeout(3500),
+    });
+    if (!upstream.ok) {
+      await upstream.body?.cancel();
+      return res.sendStatus(502);
+    }
+    res.set('Cache-Control', 'private, no-store');
+    const contentType = upstream.headers.get('content-type');
+    if (contentType) res.type(contentType);
+    return res.send(Buffer.from(await upstream.arrayBuffer()));
+  } catch {
+    if (!res.destroyed) return res.sendStatus(502);
+  }
+});
 
 // ──────────────────────────────────────────────
 // GET /api/camera/configs
@@ -151,6 +232,7 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
 
   try {
     const cameras = await getCameraConfigs();
+    if (req.aborted || res.destroyed || res.writableEnded) return;
     const camera = cameras.find((c) => c.id === id && c.enabled);
     if (!camera) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND' as CameraErrorCode, message: '카메라를 찾을 수 없거나 비활성 상태입니다' } });
@@ -163,33 +245,9 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Accel-Buffering', 'no');
 
-    // [Fix1] await 이후 재확인 — getCameraConfigs() 대기 중 다른 요청이 스트림을 시작했을 수 있음
     const existing = activeStreams.get(streamKey);
     if (existing) {
-      // [Fix2] 유예 타이머 취소 — 재진입 시 기존 FFmpeg 재사용
-      if (existing.graceTimer) {
-        clearTimeout(existing.graceTimer);
-        existing.graceTimer = undefined;
-      }
-      existing.subscribers.add(res);
-      console.log(`[Camera] Subscriber joined: ${id} (${clientIp}) — total: ${existing.subscribers.size}`);
-
-      req.on('close', () => {
-        existing.subscribers.delete(res);
-        console.log(`[Camera] Subscriber left: ${id} (${clientIp}) — remaining: ${existing.subscribers.size}`);
-        if (existing.subscribers.size === 0 && activeStreams.get(streamKey) === existing) {
-          // [Fix2] 즉시 종료 대신 유예 기간 — 빠른 재진입 시 FFmpeg 재사용
-          if (existing.graceTimer) clearTimeout(existing.graceTimer);
-          existing.graceTimer = setTimeout(() => {
-            if (activeStreams.get(streamKey) === existing && existing.subscribers.size === 0) {
-              console.log(`[Camera] Grace expired — killing FFmpeg: ${id}`);
-              existing.process.kill('SIGTERM');
-              activeStreams.delete(streamKey);
-            }
-          }, GRACE_PERIOD_MS);
-          console.log(`[Camera] Last subscriber left — grace ${GRACE_PERIOD_MS / 1000}s: ${id}`);
-        }
-      });
+      addSubscriber(streamKey, existing, res, clientIp);
       return;
     }
 
@@ -219,102 +277,77 @@ router.get('/:id/stream', authenticateStream, async (req: Request, res: Response
     const ff = spawn(ffmpegPath, ffmpegArgs);
     const stream: ActiveStream = {
       process: ff,
-      subscribers: new Set([res]),
+      subscribers: new Set(),
       startedAt: Date.now(),
     };
     activeStreams.set(streamKey, stream);
+    addSubscriber(streamKey, stream, res, clientIp);
 
     // ── Watchdog: 10초간 데이터 없으면 FFmpeg 강제 종료
-    const WATCHDOG_MS = 10_000;
-    let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
     const resetWatchdog = () => {
-      if (watchdogTimer) clearTimeout(watchdogTimer);
-      watchdogTimer = setTimeout(() => {
-        if (activeStreams.get(streamKey) === stream) {
-          console.log(`[Camera] Watchdog: no data for ${WATCHDOG_MS / 1000}s — killing FFmpeg (${id})`);
-          ff.kill('SIGTERM');
-          activeStreams.delete(streamKey);
-          for (const sub of stream.subscribers) {
-            if (!sub.writableEnded) sub.end();
-          }
-          stream.subscribers.clear();
-        }
+      clearTimeout(stream.watchdogTimer);
+      stream.watchdogTimer = setTimeout(() => {
+        console.log(`[Camera] Watchdog: no data for ${WATCHDOG_MS / 1000}s — killing FFmpeg (${streamKey})`);
+        closeStream(streamKey, stream, {
+          status: 504,
+          code: 'TIMEOUT',
+          message: '카메라 응답 없음',
+        });
       }, WATCHDOG_MS);
     };
     resetWatchdog();
-    ff.on('exit', () => { if (watchdogTimer) clearTimeout(watchdogTimer); });
 
     // ── stdout → 전체 구독자 브로드캐스트
+    let receivedData = false;
     ff.stdout.on('data', (chunk: Buffer) => {
+      if (activeStreams.get(streamKey) !== stream) return;
+      receivedData = true;
       resetWatchdog();
       for (const sub of stream.subscribers) {
+        if (sub.writableEnded || sub.destroyed || sub.writableLength >= MAX_PENDING_BYTES) {
+          removeSubscriber(streamKey, stream, sub);
+          if (!sub.writableEnded && !sub.destroyed) sub.destroy();
+          continue;
+        }
         try {
-          if (!sub.writableEnded && !sub.destroyed) {
-            sub.write(chunk);
-          }
+          sub.write(chunk);
         } catch {
-          stream.subscribers.delete(sub);
+          removeSubscriber(streamKey, stream, sub);
+          sub.destroy();
         }
       }
     });
 
-    // ── stderr 오류 감지 (첫 프레임 수신 전 — headersSent=false 상태)
+    // ── stderr 오류 감지 (첫 영상 데이터 수신 전)
     let stderrBuf = '';
     ff.stderr.on('data', (data: Buffer) => {
       const msg = data.toString();
-      stderrBuf += msg;
       const trimmed = msg.trim();
-      if (trimmed) console.log(`[Camera:${id}] ${trimmed.replace(/:([^@]+)@/, ':●●●@')}`);
+      if (trimmed) console.log(`[Camera:${streamKey}] ${trimmed.replace(/rtsp:\/\/[^\s/]*@/gi, 'rtsp://●●●@')}`);
 
-      if (res.headersSent) return;
+      if (receivedData || activeStreams.get(streamKey) !== stream) return;
+      stderrBuf = (stderrBuf + msg).slice(-4096);
 
       if (stderrBuf.includes('401') || stderrBuf.includes('Unauthorized')) {
-        ff.kill('SIGTERM');
-        activeStreams.delete(streamKey); // [Fix3] id → streamKey (thumb 스트림 좀비 방지)
-        stream.subscribers.clear();
-        res.status(401).json({ success: false, error: { code: 'AUTH_ERROR' as CameraErrorCode, message: '카메라 인증 실패 (ID/PW 확인)' } });
+        closeStream(streamKey, stream, { status: 401, code: 'AUTH_ERROR', message: '카메라 인증 실패 (ID/PW 확인)' });
       } else if (stderrBuf.includes('Connection refused') || stderrBuf.includes('No route to host') || stderrBuf.includes('Connection timed out')) {
-        ff.kill('SIGTERM');
-        activeStreams.delete(streamKey); // [Fix3] id → streamKey (thumb 스트림 좀비 방지)
-        stream.subscribers.clear();
-        res.status(502).json({ success: false, error: { code: 'NETWORK_ERROR' as CameraErrorCode, message: '카메라에 접속할 수 없습니다 (IP/포트 확인)' } });
+        closeStream(streamKey, stream, { status: 502, code: 'NETWORK_ERROR', message: '카메라에 접속할 수 없습니다 (IP/포트 확인)' });
       }
     });
 
-    // ── FFmpeg 종료 시 전체 구독자 스트림 종료 + 유예 타이머 정리
-    ff.on('exit', (code, signal) => {
-      console.log(`[Camera] Stream ended: ${id} (code=${code}, signal=${signal})`);
-      if (stream.graceTimer) { clearTimeout(stream.graceTimer); stream.graceTimer = undefined; }
-      if (watchdogTimer) clearTimeout(watchdogTimer);
-      if (activeStreams.get(streamKey) === stream) activeStreams.delete(streamKey);
-      for (const sub of stream.subscribers) {
-        if (!sub.writableEnded) sub.end();
-      }
-      stream.subscribers.clear();
+    ff.once('error', (err) => {
+      console.error(`[Camera] FFmpeg error: ${streamKey} (${err.name})`);
+      closeStream(streamKey, stream, { status: 500, code: 'FFMPEG_ERROR', message: 'FFmpeg 실행 실패' });
     });
-
-    // ── 첫 구독자 연결 종료 처리
-    req.on('close', () => {
-      stream.subscribers.delete(res);
-      console.log(`[Camera] Subscriber left: ${id} (${clientIp}) — remaining: ${stream.subscribers.size}`);
-      if (stream.subscribers.size === 0 && activeStreams.get(streamKey) === stream) {
-        // [Fix2] 즉시 종료 대신 유예 기간 — 빠른 재진입 시 FFmpeg 재사용
-        if (stream.graceTimer) clearTimeout(stream.graceTimer);
-        stream.graceTimer = setTimeout(() => {
-          if (activeStreams.get(streamKey) === stream && stream.subscribers.size === 0) {
-            console.log(`[Camera] Grace expired — killing FFmpeg: ${id}`);
-            ff.kill('SIGTERM');
-            activeStreams.delete(streamKey);
-          }
-        }, GRACE_PERIOD_MS);
-        console.log(`[Camera] Last subscriber left — grace ${GRACE_PERIOD_MS / 1000}s: ${id}`);
-      }
+    ff.once('close', (code, signal) => {
+      console.log(`[Camera] Stream ended: ${streamKey} (code=${code}, signal=${signal})`);
+      closeStream(streamKey, stream, { status: 502, code: 'STREAM_ENDED', message: '카메라 영상 연결 종료' });
     });
 
   } catch (err) {
     console.error('[Camera] Stream error:', err);
-    if (!res.headersSent) {
-      return res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR' as CameraErrorCode, message: '스트림 시작 실패' } });
+    if (!res.headersSent && !res.destroyed) {
+      return res.type('application/json').status(500).json({ success: false, error: { code: 'INTERNAL_ERROR' as CameraErrorCode, message: '스트림 시작 실패' } });
     }
   }
 });

@@ -1,7 +1,7 @@
 // Monitoring Page — NC모니터(좌) + 카메라(우) + 이벤트로그(하단) 3분할
 // 리모트패널과 동일한 레이아웃 비율 적용
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   useMachineStore, useMachineTelemetry, useMachineAlarms,
   useFocasEvents, type Alarm,
@@ -12,6 +12,8 @@ import { NCMonitor, TABS, type MonitorTab } from '../components/NCMonitor';
 import { CameraMultiView } from '../components/CameraMultiView';
 import { FocasEventLog } from '../components/FocasEventLog';
 import { MachineTopBar } from '../components/MachineTopBar';
+
+const MOBILE_PORTRAIT_QUERY = '(width < 1024px) and (orientation: portrait)';
 
 function AlarmStrip({ alarms, pmcMessages = [] }: { alarms: Alarm[]; pmcMessages?: PmcMessageEntry[] }) {
   const hasAlarms = alarms.length > 0;
@@ -67,6 +69,15 @@ export function Monitoring() {
 
   const [monitorTab, setMonitorTab] = useState<MonitorTab>('monitor');
   const [mobileTab, setMobileTab]   = useState<'monitor' | 'camera'>('monitor');
+  const [isMobilePortrait, setIsMobilePortrait] = useState(() => window.matchMedia(MOBILE_PORTRAIT_QUERY).matches);
+  useEffect(() => {
+    const query = window.matchMedia(MOBILE_PORTRAIT_QUERY);
+    const update = () => setIsMobilePortrait(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  const showCamera = !isMobilePortrait || mobileTab === 'camera';
   const MOBILE_TABS: ('monitor' | 'camera')[] = ['monitor', 'camera'];
 
   const swipeStartX = useRef<number | null>(null);
@@ -139,7 +150,7 @@ export function Monitoring() {
         {/* 우측: 카메라 */}
         <div className={`flex flex-col max-lg:portrait:w-full max-lg:portrait:max-w-full max-lg:portrait:min-w-0 lg:h-full max-lg:portrait:h-full max-lg:portrait:min-h-0 max-lg:landscape:h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom)-2rem)] lg:flex max-lg:landscape:flex ${mobileTab === 'camera' ? 'max-lg:portrait:flex' : 'max-lg:portrait:hidden'}`}>
           {cameraEnabled && camerasForMachine.length > 0 ? (
-            <CameraMultiView cameras={camerasForMachine} className="flex-1 min-h-0 rounded-lg overflow-hidden" />
+            showCamera && <CameraMultiView cameras={camerasForMachine} className="flex-1 min-h-0 rounded-lg overflow-hidden" />
           ) : (
             <div className="flex-1 min-h-0 rounded-lg bg-gray-900 border border-gray-700 flex flex-col items-center justify-center gap-3 text-gray-500">
               <svg className="w-12 h-12 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">

@@ -17,7 +17,8 @@
     "recharts": "^2.10.4",
     "axios": "^1.6.5",
     "clsx": "^2.1.0",
-    "date-fns": "^3.3.0"
+    "date-fns": "^3.3.0",
+    "hls.js": "^1.6.15"
   },
   "devDependencies": {
     "@types/react": "^18.2.48",

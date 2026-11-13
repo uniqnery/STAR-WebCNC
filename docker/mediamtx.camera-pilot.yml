@@ -1,0 +1,44 @@
+logLevel: info
+api: true
+rtsp: true
+rtspAddress: 127.0.0.1:8554
+rtspTransports: [tcp]
+rtmp: false
+hls: true
+hlsAlwaysRemux: true
+hlsVariant: fmp4
+srt: false
+moq: false
+webrtc: true
+webrtcIPsFromInterfaces: false
+webrtcAdditionalHosts: [127.0.0.1]
+
+authInternalUsers:
+  - user: any
+    permissions:
+      - action: read
+        path: camera60
+      - action: api
+  - user: any
+    ips: [127.0.0.1]
+    permissions:
+      - action: read
+        path: camera60raw
+      - action: publish
+        path: camera60
+
+paths:
+  camera60raw:
+    sourceOnDemand: false
+    rtspTransport: tcp
+    runOnOnline: >-
+      ffmpeg -hide_banner -loglevel warning -nostdin -rtsp_transport tcp
+      -i rtsp://127.0.0.1:8554/camera60raw -map 0:v:0 -an
+      -vf scale=960:-2,fps=15 -pix_fmt yuv420p -c:v libx264
+      -preset ultrafast -tune zerolatency -profile:v baseline
+      -g 15 -keyint_min 15 -sc_threshold 0 -threads 2
+      -maxrate 1600k -bufsize 1600k -f rtsp -rtsp_transport tcp
+      rtsp://127.0.0.1:8554/camera60
+    runOnOnlineRestart: true
+  camera60:
+    source: publisher

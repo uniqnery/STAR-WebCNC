@@ -98,12 +98,13 @@ class ApiClient {
     });
   }
 
-  async post<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
+  async post<T>(path: string, body?: unknown, options?: { signal: AbortSignal }): Promise<ApiResponse<T>> {
     return this.request<T>(`${this.baseUrl}${path}`, {
       method: 'POST',
       headers: this.getHeaders(),
       credentials: 'include',
       body: body ? JSON.stringify(body) : undefined,
+      signal: options?.signal,
     });
   }
 
@@ -662,6 +663,9 @@ export const cameraServerApi = {
   /** 특정 카메라 스트림 활성 여부 */
   getStatus: (cameraId: string) =>
     api.get<{ id: string; streaming: boolean }>(`/api/camera/${cameraId}/status`),
+
+  openHlsSession: (cameraId: string, signal: AbortSignal) =>
+    api.post(`/api/camera/${cameraId}/hls/session`, undefined, { signal }),
 
   /** MJPEG 스트림 URL 생성 (token 포함) — <img src> 에 직접 사용 */
   getStreamUrl: (cameraId: string): string => {
