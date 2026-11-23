@@ -1,6 +1,7 @@
 // API Client
 
 import { useAuthStore } from '../stores/authStore';
+import type { CounterField } from '../stores/templateStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
@@ -507,16 +508,16 @@ export const ncDataApi = {
 
   // 오프셋 쓰기 (단일 항목, 제어권 필요)
   // no: 공구 번호 (1-based), axis: 'X'|'Z'|'Y'|'R', value: mm 단위
-  writeOffset: (machineId: string, path: number, no: number, axis: string, value: number) =>
-    api.put(`/api/machines/${machineId}/offsets`, { path, no, axis, value }),
+  writeOffset: (machineId: string, path: number, no: number, axis: string, value: number, additiveDelta?: number) =>
+    api.put(`/api/machines/${machineId}/offsets`, { path, no, axis, value, additiveDelta }),
 
   // 카운터 데이터 읽기 (템플릿 CounterConfig 기반)
   readCount: (machineId: string) =>
-    api.get(`/api/machines/${machineId}/count`),
+    api.get<{ fields: (CounterField & { value: number | null })[] }>(`/api/machines/${machineId}/count`),
 
   // 카운터 변수 쓰기 (제어권 필요)
-  writeCountVar: (machineId: string, varNo: number, value: number) =>
-    api.put(`/api/machines/${machineId}/count`, { varNo, value }),
+  writeCountVar: (machineId: string, field: Pick<CounterField, 'key' | 'varType' | 'varNo'>, value: number) =>
+    api.put(`/api/machines/${machineId}/count`, { key: field.key, varType: field.varType, varNo: field.varNo, value }),
 
   // 공구 수명 데이터 읽기 (path=1|2)
   readToolLife: (machineId: string, path = 1) =>
@@ -635,7 +636,19 @@ export interface DiagnosticsData {
   agents: AgentDiagStatus[];
 }
 
+export interface WindowsStartupStatus {
+  supported: boolean;
+  enabled: boolean;
+  serverName: string;
+  windowsUser?: string;
+  taskState?: string;
+  lastRunAt?: string | null;
+  report?: { stage: string; message: string; checkedAt: string } | null;
+}
+
 export const settingsApi = {
+  getWindowsStartup: () => api.get<WindowsStartupStatus>('/api/settings/windows-startup'),
+  setWindowsStartup: (enabled: boolean) => api.put<WindowsStartupStatus>('/api/settings/windows-startup', { enabled }),
   getRegistrationCodes: () =>
     api.get<{ adminCode: string; operatorCode: string; hqCodeSet: boolean }>(
       '/api/settings/registration-codes'

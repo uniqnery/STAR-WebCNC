@@ -3,8 +3,31 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authenticate, requireRole } from '../middleware/auth';
+import { getWindowsStartup, setWindowsStartup, WindowsStartupError } from '../lib/windowsStartup';
 
 const router = Router();
+
+router.get('/windows-startup', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (_req, res) => {
+  try {
+    return res.json({ success: true, data: await getWindowsStartup() });
+  } catch (error) {
+    const failure = error as WindowsStartupError;
+    return res.status(503).json({ success: false, error: { code: failure.code, message: failure.message } });
+  }
+});
+
+router.put('/windows-startup', authenticate, requireRole(['HQ_ENGINEER']), async (req, res) => {
+  if (typeof req.body?.enabled !== 'boolean') {
+    return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: '자동 시작 활성화 여부를 지정해 주세요.' } });
+  }
+  try {
+    return res.json({ success: true, data: await setWindowsStartup(req.body.enabled) });
+  } catch (error) {
+    const failure = error as WindowsStartupError;
+    const status = failure.code === 'STARTUP_ADMIN_REQUIRED' ? 403 : failure.code === 'STARTUP_BUSY' ? 409 : 503;
+    return res.status(status).json({ success: false, error: { code: failure.code, message: failure.message } });
+  }
+});
 
 /**
  * GET /api/settings/registration-codes

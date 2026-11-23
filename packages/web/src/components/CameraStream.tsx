@@ -33,6 +33,8 @@ const BACKOFF_DELAYS = [3000, 5000, 10000, 20000, 30000];
 const CONNECT_TIMEOUT_MS = 25000;
 const PILOT_CAMERA_ID = 'cam-1775703291746';
 const HLS_TIMEOUT_MS = 6500;
+const HLS_LIVE_TARGET_SECONDS = 1.25;
+const HLS_LIVE_MAX_SECONDS = 3;
 
 function getBackoffDelay(retryCount: number): number {
   return BACKOFF_DELAYS[Math.min(retryCount, BACKOFF_DELAYS.length - 1)];
@@ -126,7 +128,13 @@ export function CameraStream({ camera, className = '', showControls = true, thum
           fallback();
           return;
         }
-        const player = new Player({ liveSyncDurationCount: 2, maxBufferLength: 6 });
+        const player = new Player({
+          lowLatencyMode: true,
+          liveSyncDuration: HLS_LIVE_TARGET_SECONDS,
+          liveMaxLatencyDuration: HLS_LIVE_MAX_SECONDS,
+          maxLiveSyncPlaybackRate: 1.1,
+          maxBufferLength: 6,
+        });
         hlsRef.current = player;
         player.on(Player.Events.ERROR, (_, data) => {
           if (data.fatal) fallback();
@@ -265,6 +273,17 @@ export function CameraStream({ camera, className = '', showControls = true, thum
           playsInline
           onPlaying={() => {
             if (activeUrlRef.current === streamUrl) markLive();
+          }}
+          onTimeUpdate={(event) => {
+            const video = event.currentTarget;
+            if (activeUrlRef.current !== streamUrl || hlsRef.current || video.paused || video.seeking) return;
+            const { seekable } = video;
+            if (!seekable.length) return;
+            const lastRange = seekable.length - 1;
+            const liveEdge = seekable.end(lastRange);
+            if (liveEdge - video.currentTime > HLS_LIVE_MAX_SECONDS) {
+              video.currentTime = Math.max(seekable.start(lastRange), liveEdge - HLS_LIVE_TARGET_SECONDS);
+            }
           }}
           onError={() => {
             if (activeUrlRef.current === streamUrl && cameraIdRef.current) startStream(cameraIdRef.current, false);

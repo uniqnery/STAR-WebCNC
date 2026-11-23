@@ -6,7 +6,8 @@ rtspTransports: [tcp]
 rtmp: false
 hls: true
 hlsAlwaysRemux: true
-hlsVariant: fmp4
+hlsVariant: lowLatency
+hlsPartDuration: 200ms
 srt: false
 moq: false
 webrtc: true
@@ -34,10 +35,10 @@ paths:
     runOnOnline: >-
       ffmpeg -hide_banner -loglevel warning -nostdin -rtsp_transport tcp
       -i rtsp://127.0.0.1:8554/camera60raw -map 0:v:0 -an
-      -vf scale=960:-2,fps=15 -pix_fmt yuv420p -c:v libx264
-      -preset ultrafast -tune zerolatency -profile:v baseline
-      -g 15 -keyint_min 15 -sc_threshold 0 -threads 2
-      -maxrate 1600k -bufsize 1600k -f rtsp -rtsp_transport tcp
+      -vf scale=1280:-2,fps=20 -pix_fmt yuv420p -c:v libx264
+      -preset veryfast -tune zerolatency -profile:v baseline
+      -g 20 -keyint_min 20 -sc_threshold 0 -threads 2
+      -crf 21 -maxrate 3000k -bufsize 3000k -f rtsp -rtsp_transport tcp
       rtsp://127.0.0.1:8554/camera60
     runOnOnlineRestart: true
   camera60:

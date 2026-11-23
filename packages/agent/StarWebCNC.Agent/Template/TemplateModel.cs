@@ -312,6 +312,7 @@ public class CountDisplay
     public string CycleTimeAddr { get; set; } = "D96";
     /// <summary>래더 실행 주기 → ms 환산 배수 (파라미터 No.11930 설정값: 4 또는 8)</summary>
     public int CycleTimeMultiplier { get; set; } = 4;
+    public string? CycleTimeHmsStartAddr { get; set; }
 }
 
 // ─── Capabilities ────────────────────────────────────────

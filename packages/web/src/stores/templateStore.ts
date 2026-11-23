@@ -130,6 +130,7 @@ export interface SchedulerConfig {
     // cycle time: PMC D 어드레스 기반
     cycleTimeAddr: string;           // PMC 주소 (예: "D96"), 빈값이면 수집 안함
     cycleTimeMultiplier: number;     // 래더 주기 → ms 배수 (파라미터 No.11930: 4 또는 8)
+    cycleTimeHmsStartAddr?: string;   // 시작 주소부터 초, 분, 시를 각각 1바이트로 읽음
   };
 
   // ── 프로그램 선두 복귀 ───────────────────────────────────

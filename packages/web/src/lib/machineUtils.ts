@@ -155,11 +155,14 @@ export function getMachineName(machines: Machine[], machineId: string): string {
 }
 
 /**
- * Format cycle time from seconds to MM:SS
+ * Format cycle time as M:SS or H:MM:SS.
  */
 export function formatCycleTime(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
+  if (mins >= 60) {
+    return `${Math.floor(mins / 60)}:${(mins % 60).toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 

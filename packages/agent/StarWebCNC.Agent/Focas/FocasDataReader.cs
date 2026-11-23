@@ -1279,7 +1279,7 @@ public class FocasDataReader
     /// addrStr: "D96" 형식, multiplier: 파라미터 No.11930 설정값 (4 또는 8ms)
     /// 반환값: 밀리초 (ms). 오류 시 null.
     /// </summary>
-    public double? ReadCycleTimeMs(string addrStr, int multiplier)
+    public double? ReadCycleTimeMs(string addrStr, int multiplier, bool hmsBytes = false)
     {
         if (string.IsNullOrWhiteSpace(addrStr)) return null;
         // "D96" → type="D", address=96
@@ -1287,6 +1287,20 @@ public class FocasDataReader
         if (upper.Length < 2) return null;
         string areaType = upper[0].ToString();
         if (!int.TryParse(upper[1..], out int address)) return null;
+
+        if (hmsBytes)
+        {
+            if (!_connection.IsConnected || address < 0 || address > ushort.MaxValue - 2 ||
+                !PmcTypeCode.TryGetValue(areaType, out short typeNo))
+                return null;
+            var data = new Focas1.IODBPMC0();
+            short ret = Focas1.pmc_rdpmcrng(_connection.Handle, typeNo, 0,
+                (ushort)address, (ushort)(address + 2), 11, data);
+            if (ret != Focas1.EW_OK || data.cdata is not { Length: >= 3 } bytes ||
+                bytes[0] >= 60 || bytes[1] >= 60)
+                return null;
+            return (bytes[2] * 3600 + bytes[1] * 60 + bytes[0]) * 1000.0;
+        }
 
         var raw = ReadPmcAreaValue(areaType, address, "word");
         if (raw == null) return null;
@@ -1423,10 +1437,12 @@ public class FocasDataReader
         var result = new List<CounterVarResult>();
         foreach (var f in fields)
         {
-            double val = 0.0;
-            if (f.VarType == "macro")
-                val = ReadMacroVariableSafe(f.VarNo);
-            // pcode: 미구현 (추후 확장)
+            double? val = f.VarType.ToLowerInvariant() switch
+            {
+                "macro" => ReadMacroVariable(f.VarNo),
+                "pcode" => ReadPcodeMacroVariable(f.VarNo),
+                _ => null,
+            };
             result.Add(new CounterVarResult { Key = f.Key, VarNo = f.VarNo, Value = val });
         }
         return result;
@@ -2598,7 +2614,7 @@ public class CounterVarResult
 {
     public string Key   { get; set; } = "";
     public int    VarNo { get; set; }
-    public double Value { get; set; }
+    public double? Value { get; set; }
 }
 
 #endregion

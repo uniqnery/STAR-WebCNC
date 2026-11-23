@@ -5,6 +5,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useMachineStore, useControlLockDuration } from '../stores/machineStore';
 import { useCameraStore, CameraConfig } from '../stores/cameraStore';
 import { diagnosticsApi, DiagnosticsData, AgentDiagStatus, settingsApi, notificationApi } from '../lib/api';
+import type { WindowsStartupStatus } from '../lib/api';
 
 export function Settings() {
   const user = useAuthStore((state) => state.user);
@@ -17,6 +18,45 @@ export function Settings() {
   const setControlLockDuration = useMachineStore((s) => s.setControlLockDuration);
 
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER';
+  const [startup, setStartup] = useState<WindowsStartupStatus | null>(null);
+  const [startupBusy, setStartupBusy] = useState(false);
+  const [startupError, setStartupError] = useState<string | null>(null);
+
+  const loadStartup = useCallback(async () => {
+    setStartupBusy(true);
+    setStartupError(null);
+    try {
+      const response = await settingsApi.getWindowsStartup();
+      if (response.success && response.data) setStartup(response.data);
+      else {
+        setStartup(null);
+        setStartupError(response.error?.message ?? '자동 시작 상태를 확인하지 못했습니다.');
+      }
+    } catch {
+      setStartup(null);
+      setStartupError('서버 PC의 자동 시작 상태를 확인하지 못했습니다.');
+    } finally {
+      setStartupBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isAdmin) void loadStartup();
+  }, [isAdmin, loadStartup]);
+
+  const changeStartup = async (enabled: boolean) => {
+    setStartupBusy(true);
+    setStartupError(null);
+    try {
+      const response = await settingsApi.setWindowsStartup(enabled);
+      if (response.success && response.data) setStartup(response.data);
+      else setStartupError(response.error?.message ?? '자동 시작 설정을 저장하지 못했습니다.');
+    } catch {
+      setStartupError('자동 시작 설정을 저장하지 못했습니다.');
+    } finally {
+      setStartupBusy(false);
+    }
+  };
 
   const [editingCamera, setEditingCamera] = useState<CameraConfig | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -103,6 +143,45 @@ export function Settings() {
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">시스템 설정</h1>
         <p className="text-gray-500">제어권 타이머, 카메라 연동 및 시스템 옵션 관리</p>
       </div>
+
+      {isAdmin && (
+        <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              className="mt-1 h-5 w-5 shrink-0 accent-blue-600"
+              checked={startup?.enabled ?? false}
+              disabled={startupBusy || !startup?.supported || user?.role !== 'HQ_ENGINEER'}
+              onChange={(event) => void changeStartup(event.target.checked)}
+            />
+            <span>
+              <span className="block text-lg font-semibold text-gray-900 dark:text-white">Windows 로그인 시 자동 시작</span>
+              <span className="block text-sm text-gray-500 mt-1">
+                서버 PC에서 로그인하면 Docker, 웹앱, API, Agent와 카메라 서비스를 자동으로 기동합니다.
+              </span>
+            </span>
+          </label>
+          <div aria-live="polite" className="mt-3 text-sm text-gray-600 dark:text-gray-300">
+            {startupBusy ? 'Windows 설정 확인 중…' : startup && (
+              <>
+                <p>서버 PC {startup.serverName} · {startup.enabled ? '자동 시작 활성화됨' : '자동 시작 비활성화됨'}</p>
+                {startup.windowsUser && <p className="text-xs text-gray-500 mt-1">로그인 계정 {startup.windowsUser}</p>}
+                {!startup.supported && <p className="mt-1">Windows 서버 PC에서 지원합니다.</p>}
+                {startup.enabled && startup.report && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    마지막 기동 확인 {new Date(startup.report.checkedAt).toLocaleString()} · {startup.report.message}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+          {user?.role !== 'HQ_ENGINEER' && <p className="text-xs text-gray-500 mt-2">본사 엔지니어가 변경할 수 있습니다.</p>}
+          {startupError && <p role="alert" className="text-sm text-red-500 mt-2">{startupError}</p>}
+          <button type="button" onClick={() => void loadStartup()} disabled={startupBusy} className="mt-3 text-sm text-blue-600 hover:underline disabled:opacity-50">
+            등록 상태 확인
+          </button>
+        </section>
+      )}
 
       {/* 제어권 타이머 설정 */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">

@@ -506,12 +506,12 @@ public class CommandHandler
     }
 
     /// <summary>
-    /// READ_COUNT: 카운터 변수 읽기 (템플릿 CounterConfig 기반)
+    /// READ_COUNT: PRESET/COUNT는 모니터와 같은 설정을 사용한다.
     /// </summary>
     private Task<CommandResultMessage> ExecuteReadCountAsync(CommandMessage command)
     {
-        var cfg = _templateLoader.CurrentTemplate?.CounterConfig;
-        if (cfg == null || cfg.Fields.Count == 0)
+        var fields = GetCounterFields();
+        if (fields.Count == 0)
         {
             return Task.FromResult(new CommandResultMessage
             {
@@ -522,13 +522,13 @@ public class CommandHandler
             });
         }
 
-        var fieldParams = cfg.Fields.Select(f => new CounterFieldParam { Key = f.Key, VarType = f.VarType, VarNo = f.VarNo });
+        var fieldParams = fields.Select(f => new CounterFieldParam { Key = f.Key, VarType = f.VarType, VarNo = f.VarNo });
         var results     = _dataReader.ReadCounterVars(fieldParams);
 
         var output = results.Select(r =>
         {
-            var f = cfg.Fields.First(x => x.Key == r.Key);
-            return new { key = r.Key, label = f.Label, value = r.Value, unit = f.Unit, varNo = r.VarNo, @readonly = f.Readonly };
+            var f = fields.First(x => x.Key == r.Key);
+            return new { key = r.Key, label = f.Label, value = r.Value, unit = f.Unit, varNo = r.VarNo, varType = f.VarType.ToLowerInvariant(), @readonly = f.Readonly };
         }).ToList();
 
         return Task.FromResult(new CommandResultMessage
@@ -540,9 +540,34 @@ public class CommandHandler
         });
     }
 
+    private List<CounterField> GetCounterFields()
+    {
+        var template = _templateLoader.CurrentTemplate;
+        if (template == null) return new();
+
+        var display = template.SchedulerConfig.CountDisplay;
+        var fields = template.CounterConfig?.Fields.ToList() ?? new List<CounterField>();
+        SetDisplayField("preset", "PRESET", display.PresetMacroNo, display.PresetVarType);
+        SetDisplayField("count", "COUNT", display.CountMacroNo, display.CountVarType);
+        return fields;
+
+        void SetDisplayField(string key, string label, int varNo, string varType)
+        {
+            int index = fields.FindIndex(f => string.Equals(f.Key, key, StringComparison.OrdinalIgnoreCase));
+            var previous = index >= 0 ? fields[index] : null;
+            var field = new CounterField
+            {
+                Key = key, Label = previous?.Label ?? label, VarNo = varNo, VarType = varType,
+                Readonly = previous?.Readonly ?? false, Unit = previous?.Unit,
+            };
+            if (index >= 0) fields[index] = field;
+            else fields.Add(field);
+        }
+    }
+
     /// <summary>
-    /// WRITE_COUNT: 카운터 변수 쓰기 (단일 varNo)
-    /// params: { varNo, value }
+    /// WRITE_COUNT: 템플릿에 설정된 카운터 변수 쓰기
+    /// params: { varNo, value, key?, varType? }
     /// </summary>
     private Task<CommandResultMessage> ExecuteWriteCountAsync(CommandMessage command)
     {
@@ -554,7 +579,22 @@ public class CommandHandler
         if (!command.Params.TryGetValue("value", out var vObj)  || !double.TryParse(vObj?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double value))
             return Task.FromResult(CreateFailureResult(command, "INVALID_PARAMS", "value(double) 필요"));
 
-        bool ok = _dataReader.WriteMacroVariable(varNo, value);
+        if (!double.IsFinite(value))
+            return Task.FromResult(CreateFailureResult(command, "INVALID_PARAMS", "유효한 카운터 값이 필요합니다."));
+        var key = command.Params.GetValueOrDefault("key")?.ToString();
+        var varType = command.Params.GetValueOrDefault("varType")?.ToString();
+        var candidates = GetCounterFields().Where(f => f.VarNo == varNo &&
+            (key == null ? string.Equals(f.VarType, "macro", StringComparison.OrdinalIgnoreCase)
+                : f.Key == key && string.Equals(f.VarType, varType, StringComparison.OrdinalIgnoreCase))).ToList();
+        if (candidates.Count != 1 || candidates[0].Readonly)
+            return Task.FromResult(CreateFailureResult(command, "COUNTER_FIELD_CHANGED", "수정 가능한 카운터 변수를 다시 조회하세요."));
+
+        bool ok = candidates[0].VarType.ToLowerInvariant() switch
+        {
+            "pcode" => _dataReader.WritePcodeMacroVariable(varNo, value),
+            "macro" => _dataReader.WriteMacroVariable(varNo, value),
+            _ => false,
+        };
         if (!ok)
             return Task.FromResult(CreateFailureResult(command, "WRITE_FAILED", "카운터 쓰기 실패"));
 

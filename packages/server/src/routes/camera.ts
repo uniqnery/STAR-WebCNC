@@ -146,9 +146,14 @@ router.get('/:id/hls/:asset', async (req, res) => {
   if (typeof token !== 'string' || !verifyAccessToken(token)) return res.sendStatus(401);
   try {
     const url = new URL(`http://127.0.0.1:8888/camera60/${asset}`);
-    if (typeof req.query.session === 'string') url.searchParams.set('session', req.query.session);
+    for (const key of ['session', '_HLS_msn', '_HLS_part', '_HLS_skip']) {
+      const value = req.query[key];
+      if (typeof value === 'string') url.searchParams.set(key, value);
+    }
+    const abort = new AbortController();
+    res.once('close', () => abort.abort());
     const upstream = await fetch(url, {
-      signal: AbortSignal.timeout(3500),
+      signal: AbortSignal.any([abort.signal, AbortSignal.timeout(5000)]),
     });
     if (!upstream.ok) {
       await upstream.body?.cancel();

@@ -379,7 +379,9 @@ public class DataCollectorService : BackgroundService
             double? preset = string.Equals(cd.PresetVarType, "pcode", StringComparison.OrdinalIgnoreCase)
                 ? _dataReader.ReadPcodeMacroVariable(cd.PresetMacroNo)
                 : _dataReader.ReadMacroVariable(cd.PresetMacroNo);
-            double cycleMs = _dataReader.ReadCycleTimeMs(cd.CycleTimeAddr, cd.CycleTimeMultiplier) ?? 0.0;
+            bool useHms = !string.IsNullOrWhiteSpace(cd.CycleTimeHmsStartAddr);
+            double cycleMs = _dataReader.ReadCycleTimeMs(
+                useHms ? cd.CycleTimeHmsStartAddr! : cd.CycleTimeAddr, cd.CycleTimeMultiplier, useHms) ?? 0.0;
             _telemetryCounts = (parts, (int)(preset ?? 0), cycleMs / 1000.0);
         }
 

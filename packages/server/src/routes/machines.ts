@@ -21,20 +21,41 @@ async function sendNcCommand(
   machineId: string,
   command: string,
   params: Record<string, unknown> | undefined,
-  timeoutMs = 30_000,
+  actor?: NonNullable<Request['user']>,
+  ipAddress?: string,
+  historyParams = params,
 ): Promise<{ status: string; result?: unknown; errorCode?: string; errorMessage?: string }> {
   const correlationId = uuidv4();
-  await prisma.commandLog.create({
+  const commandLog = prisma.commandLog.create({
     data: {
       correlationId,
       machineId: machineDbId,
       command,
-      params: (params as object | undefined) ?? undefined,
+      params: (historyParams as object | undefined) ?? undefined,
       status: CommandStatus.PENDING,
     },
   });
+  if (actor) {
+    await prisma.$transaction([
+      commandLog,
+      prisma.auditLog.create({
+        data: {
+          userId: actor.id,
+          userRole: actor.role,
+          action: `command.${command.toLowerCase()}`,
+          targetType: 'machine',
+          targetId: machineDbId,
+          params: { correlationId, params: (historyParams as object | undefined) ?? null },
+          result: 'pending',
+          ipAddress: ipAddress || 'unknown',
+        },
+      }),
+    ]);
+  } else {
+    await commandLog;
+  }
   await mqttService.sendCommand(machineId, command, correlationId, params);
-  return commandWaiter.wait(correlationId, timeoutMs);
+  return commandWaiter.wait(correlationId);
 }
 
 // All routes require authentication
@@ -724,14 +745,16 @@ router.get('/:id/offsets', asyncHandler(async (
 /**
  * PUT /machines/:id/offsets
  * 마모 오프셋 쓰기 (제어권 필요)
- * body: { path, no, axis, value }  axis: 'X'|'Z'|'Y'|'R'
+ * body: { path, no, axis, value, additiveDelta? }  axis: 'X'|'Z'|'Y'|'R'
  */
 router.put('/:id/offsets', asyncHandler(async (
   req: Request,
   res: Response<ApiResponse>
 ) => {
   const { id } = req.params;
-  const { path, no, axis, value } = req.body as { path: number; no: number; axis: string; value: number };
+  const { path, no, axis, value, additiveDelta } = req.body as {
+    path: number; no: number; axis: string; value: number; additiveDelta?: unknown;
+  };
 
   const machine = await prisma.machine.findFirst({
     where: { OR: [{ id }, { machineId: id }] },
@@ -749,9 +772,15 @@ router.put('/:id/offsets', asyncHandler(async (
   if (axisIdx === undefined)
     return res.status(400).json({ success: false, error: { code: 'INVALID_AXIS', message: 'axis는 X/Z/Y/R 중 하나입니다.' } });
 
+  if (additiveDelta !== undefined && (typeof additiveDelta !== 'number' || !Number.isFinite(additiveDelta))) {
+    return res.status(400).json({ success: false, error: { code: 'INVALID_DELTA', message: '+INPUT 값은 유효한 숫자여야 합니다.' } });
+  }
+
+  const params = { path: path ?? 1, toolNo: no, axisIdx, value };
+  const historyParams = additiveDelta === undefined ? params : { ...params, additiveDelta };
   try {
     const cmdResult = await sendNcCommand(machine.id, machine.machineId, 'WRITE_OFFSET',
-      { path: path ?? 1, toolNo: no, axisIdx, value });
+      params, req.user, req.ip, historyParams);
     if (cmdResult.status !== 'success')
       return res.status(502).json({ success: false, error: { code: cmdResult.errorCode ?? 'AGENT_ERROR', message: cmdResult.errorMessage ?? '오프셋 쓰기 실패' } });
     return res.json({ success: true, data: cmdResult.result });
@@ -788,14 +817,14 @@ router.get('/:id/count', asyncHandler(async (
 /**
  * PUT /machines/:id/count
  * 카운터 변수 쓰기 (제어권 필요)
- * body: { varNo, value }
+ * body: { varNo, value, key?, varType? }
  */
 router.put('/:id/count', asyncHandler(async (
   req: Request,
   res: Response<ApiResponse>
 ) => {
   const { id } = req.params;
-  const { varNo, value } = req.body as { varNo: number; value: number };
+  const { varNo, value, key, varType } = req.body as { varNo: number; value: number; key?: string; varType?: string };
 
   const machine = await prisma.machine.findFirst({
     where: { OR: [{ id }, { machineId: id }] },
@@ -807,7 +836,7 @@ router.put('/:id/count', asyncHandler(async (
     return res.status(403).json({ success: false, error: { code: 'NO_CONTROL_LOCK', message: '제어권이 없습니다.' } });
 
   try {
-    const cmdResult = await sendNcCommand(machine.id, machine.machineId, 'WRITE_COUNT', { varNo, value });
+    const cmdResult = await sendNcCommand(machine.id, machine.machineId, 'WRITE_COUNT', { varNo, value, key, varType });
     if (cmdResult.status !== 'success')
       return res.status(502).json({ success: false, error: { code: cmdResult.errorCode ?? 'AGENT_ERROR', message: cmdResult.errorMessage ?? '카운터 쓰기 실패' } });
     return res.json({ success: true, data: cmdResult.result });

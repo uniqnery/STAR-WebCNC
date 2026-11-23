@@ -73,6 +73,22 @@ const MODE_PANEL_KEY_IDS = new Set(['EDIT', 'MEMORY', 'MEM', 'MDI', 'JOG', 'HAND
 function buildControlActivity(command: string, params: unknown, result: unknown): { action: string; detail?: string } | null {
   const normalized = command.toUpperCase();
 
+  if (normalized === 'WRITE_OFFSET') {
+    const pathNo = readNumberField(result, 'path') ?? readNumberField(params, 'path');
+    const toolNo = readNumberField(result, 'toolNo') ?? readNumberField(params, 'toolNo');
+    const axisIdx = readNumberField(result, 'axisIdx') ?? readNumberField(params, 'axisIdx');
+    const value = readNumberField(result, 'value') ?? readNumberField(params, 'value');
+    const delta = readNumberField(params, 'additiveDelta');
+    const displayValue = delta === undefined ? value : `${delta >= 0 ? '+' : ''}${delta}`;
+    const axis = axisIdx === undefined ? undefined : ['X', 'Y', 'Z', 'R'][axisIdx];
+    const detail = [
+      pathNo === undefined ? undefined : `PATH${pathNo}`,
+      toolNo === undefined ? undefined : `공구 ${toolNo}`,
+      [axis, displayValue].filter((part) => part !== undefined).join(' '),
+    ].filter(Boolean).join(' / ');
+    return { action: '오프셋 수정', detail: detail || undefined };
+  }
+
   if (normalized === 'PMC_WRITE') {
     const label = readStringField(params, 'panelLabel')
       ?? readStringField(params, 'keyLabel')
@@ -154,7 +170,8 @@ async function emitSuccessfulCommandActivity(
   machineId: string,
   correlationId: string,
   status: string,
-  result: unknown
+  result: unknown,
+  commandUpdated: boolean,
 ): Promise<void> {
   if (status !== 'success') return;
 
@@ -164,20 +181,25 @@ async function emitSuccessfulCommandActivity(
       include: { machine: { select: { machineId: true } } },
     });
     if (!commandLog) return;
+    if (commandLog.command === 'WRITE_OFFSET' && !commandUpdated) return;
 
     const activity = buildControlActivity(commandLog.command, commandLog.params, result);
     if (!activity) return;
 
     const auditLog = await prisma.auditLog.findFirst({
       where: { params: { path: ['correlationId'], equals: correlationId } },
-      include: { user: { select: { username: true, role: true } } },
+      include: { user: { select: { id: true, username: true, role: true } } },
       orderBy: { createdAt: 'desc' },
     });
 
     wsService.sendUserActivity(
       commandLog.machine?.machineId ?? machineId,
       'control',
-      auditLog?.user ? { username: auditLog.user.username, role: auditLog.user.role } : null,
+      auditLog?.user ? {
+        id: auditLog.user.id,
+        username: auditLog.user.username,
+        role: auditLog.userRole ?? auditLog.user.role,
+      } : null,
       activity.action,
       activity.detail,
     );
@@ -385,8 +407,9 @@ function setupMqttHandlers(): void {
     if (!machineId || !correlationId) return;
 
     // ── 1. DB CommandLog 상태 업데이트 ───────────────────────────
+    let commandUpdated = false;
     try {
-      await prisma.commandLog.updateMany({
+      const updated = await prisma.commandLog.updateMany({
         where: { correlationId, status: { in: ['PENDING', 'RECEIVED'] } },
         data: {
           status: status === 'success' ? 'SUCCESS' : 'FAILURE',
@@ -395,6 +418,7 @@ function setupMqttHandlers(): void {
           completedAt: new Date(),
         },
       });
+      commandUpdated = updated.count > 0;
     } catch {
       // DB 미연결 환경에서도 계속 진행
     }
@@ -413,7 +437,7 @@ function setupMqttHandlers(): void {
     }
     commandWaiter.notify(correlationId, { status, result, errorCode, errorMessage });
     await updateCommandAuditResult(correlationId, status, errorMessage ?? errorCode ?? null);
-    await emitSuccessfulCommandActivity(machineId, correlationId, status, result);
+    await emitSuccessfulCommandActivity(machineId, correlationId, status, result, commandUpdated);
 
     // ── 3. DOWNLOAD_PROGRAM 결과: share/ 폴더에 파일 저장 ────────
     // preview-로 시작하는 correlationId는 더블클릭 미리보기용 — share/ 저장 제외

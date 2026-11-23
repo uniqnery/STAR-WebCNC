@@ -438,6 +438,7 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
     shareLoading,
     cncLoading,
     cncError,
+    cncTimeoutTarget,
     program9000Protection,
     selectedShareFiles,
     selectedCncFiles,
@@ -456,6 +457,10 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
   const pathCount = programTransferConfig?.pathCount || 2;
 
   const [cncPath, setCncPath] = useState<'path1' | 'path2' | 'path3'>('path1');
+  const cncNotice = !cncTimeoutTarget ||
+    (cncTimeoutTarget.machineId === machineId && cncTimeoutTarget.pathKey === cncPath)
+    ? cncError
+    : null;
 
   // CNC→PC 확인 다이얼로그
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -494,6 +499,19 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
   useEffect(() => {
     if (machineId) loadCncFiles(machineId, cncPath);
   }, [machineId, cncPath, loadCncFiles]);
+
+  useEffect(() => {
+    if (!machineId) return;
+    return wsClient.onMessage((message) => {
+      if (message.type !== 'telemetry') return;
+      const payload = message.payload as { machineId?: string; data?: unknown } | undefined;
+      if (payload?.machineId !== machineId || !payload.data) return;
+      const { cncTimeoutTarget } = useFileStore.getState();
+      if (cncTimeoutTarget?.machineId === machineId && cncTimeoutTarget.pathKey === cncPath) {
+        useFileStore.setState({ cncError: null, cncTimeoutTarget: null });
+      }
+    });
+  }, [machineId, cncPath]);
 
   // Path 전환 시 선택 초기화
   useEffect(() => {
@@ -729,7 +747,7 @@ function TransferSection({ machineId, canTransfer }: { machineId: string; canTra
           onDoubleClick={handleCncDoubleClick}
           pathComment={cncPathComment}
           headerSlot={cncPathSlot}
-          lockMessage={cncError ?? undefined}
+          lockMessage={cncNotice ?? undefined}
           emptyMessage="새로고침(↺) 버튼을 눌러 재시도하거나 Agent 상태를 확인하세요"
           readOnly
           showComment

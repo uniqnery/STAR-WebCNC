@@ -79,6 +79,7 @@ interface FileState {
   shareLoading: boolean;
   cncLoading: boolean;
   cncError: string | null;   // CNC 파일 로드 실패 메시지
+  cncTimeoutTarget: { machineId: string; pathKey: string } | null;
   program9000Protection: 'protected' | 'unprotected' | 'unknown';
   selectedShareFiles: string[];
   selectedCncFiles: string[];
@@ -125,6 +126,8 @@ function enforceHistoryMax(queue: TransferJob[]): TransferJob[] {
   return queue.slice(queue.length - TRANSFER_HISTORY_MAX);
 }
 
+let cncListRequestId = 0;
+
 export const useFileStore = create<FileState>((set, get) => ({
   // 초기 상태
   repoFiles: {},
@@ -134,6 +137,7 @@ export const useFileStore = create<FileState>((set, get) => ({
   shareLoading: false,
   cncLoading: false,
   cncError: null,
+  cncTimeoutTarget: null,
   program9000Protection: 'unknown',
   selectedShareFiles: [],
   selectedCncFiles: [],
@@ -226,10 +230,12 @@ export const useFileStore = create<FileState>((set, get) => ({
   },
 
   loadCncFiles: async (machineId, pathKey) => {
-    set({ cncLoading: true, cncError: null, program9000Protection: 'unknown', selectedCncFiles: [] });
+    const requestId = ++cncListRequestId;
+    set({ cncLoading: true, cncError: null, cncTimeoutTarget: null, program9000Protection: 'unknown', selectedCncFiles: [] });
     try {
       const pathNo = pathKey === 'path2' ? 2 : pathKey === 'path3' ? 3 : 1;
       const res = await fileApi.listCncFiles(machineId, pathNo);
+      if (requestId !== cncListRequestId) return;
       if (res.success) {
         // Agent 응답: { programs: [...], count: N } 또는 직접 배열
         const data = res.data as { programs?: FileEntry[]; program9000Protection?: 'protected' | 'unprotected' | 'unknown' } | FileEntry[] | null;
@@ -241,6 +247,7 @@ export const useFileStore = create<FileState>((set, get) => ({
         set({
           cncFiles: files,
           cncLoading: false,
+          cncTimeoutTarget: null,
           program9000Protection: Array.isArray(data) ? 'unknown' : data?.program9000Protection ?? 'unknown',
           // 빈 목록이면 Agent 로그 확인 안내
           cncError: files.length === 0 ? 'CNC 메모리가 비어 있거나 Agent를 재빌드/재시작 해주세요' : null,
@@ -253,19 +260,20 @@ export const useFileStore = create<FileState>((set, get) => ({
       const msg  = errData?.error?.message ?? '';
       let userMsg = `CNC 프로그램 목록 조회 실패 (${code})`;
       if (code === 'COMMAND_TIMEOUT') {
-        // DOWNLOAD_PROGRAM 실행 중 FOCAS 스레드가 점유된 경우 기존 목록 유지
-        userMsg = 'Agent 처리 중 — 전송 완료 후 자동 복구됩니다';
-        console.warn('[CNC] LIST_PROGRAMS timeout (probably busy with transfer)');
-        set((s) => ({ cncLoading: false, cncError: userMsg, cncFiles: s.cncFiles, program9000Protection: 'unknown' }));
+        // Keep the previously loaded list when a refresh times out.
+        userMsg = 'CNC 프로그램 목록 응답이 지연되고 있습니다';
+        console.warn('[CNC] LIST_PROGRAMS timeout:', machineId, pathKey);
+        set({ cncLoading: false, cncError: userMsg, cncTimeoutTarget: { machineId, pathKey }, program9000Protection: 'unknown' });
         return;
       } else if (code === 'CNC_NOT_CONNECTED') userMsg = 'CNC 미연결 — Agent의 FOCAS 연결 상태를 확인하세요';
       else if (code === 'UNKNOWN_COMMAND') userMsg = 'Agent 버전이 낮습니다 — Agent를 재빌드 후 재시작하세요';
       else if (msg) userMsg = `${userMsg}: ${msg}`;
       console.warn('[CNC] LIST_PROGRAMS failed:', code, msg);
-      set({ cncFiles: [], cncLoading: false, cncError: userMsg, program9000Protection: 'unknown' });
+      set({ cncFiles: [], cncLoading: false, cncError: userMsg, cncTimeoutTarget: null, program9000Protection: 'unknown' });
     } catch (err) {
+      if (requestId !== cncListRequestId) return;
       console.error('loadCncFiles failed:', err);
-      set({ cncFiles: [], cncLoading: false, cncError: 'API 서버에 연결할 수 없습니다', program9000Protection: 'unknown' });
+      set({ cncFiles: [], cncLoading: false, cncError: 'API 서버에 연결할 수 없습니다', cncTimeoutTarget: null, program9000Protection: 'unknown' });
     }
   },
 

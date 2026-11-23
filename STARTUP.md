@@ -1,5 +1,24 @@
 # Star-WebCNC 실행 가이드
 
+## Windows 로그인 시 자동 시작
+
+- 웹앱 **설정 → Windows 로그인 시 자동 시작**에서 등록한다. PC·모바일·태블릿 모두 같은 서버 PC 설정을 변경하며, 변경은 `HQ_ENGINEER`만 가능하다. `ADMIN`은 상태만 조회한다.
+- 서버를 실행한 Windows 계정의 **로그인 시점**에 예약 작업이 실행된다. 전원을 켜기만 하고 해당 계정으로 로그인하지 않으면 시작되지 않는다. Windows 자동 로그인이나 업데이트 정책을 바꾸지는 않는다.
+- 체크하면 실제 Windows 예약 작업을 등록하고 등록 결과를 다시 확인한다. 권한 부족 시 오류를 표시하며 체크된 것으로 저장하지 않는다. 최초 설치에서 권한이 필요하면 서버 PC에서 같은 Windows 계정으로 관리자 PowerShell을 열어 다음을 실행한다.
+
+```powershell
+cd C:\Star-WebCNC
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/windows-startup.ps1 -Action Enable
+```
+
+- Node.js(`process.loadEnvFile` 지원 버전), .NET 8 Runtime, Docker Desktop, 프로젝트 의존성 및 Agent 배포본이 설치되어 있어야 한다. 현재 개발 배포 구조의 API(3000)와 Vite(5173)를 사용한다. 설치형 제품용 Windows 서비스 전환은 별도 작업이다.
+- Docker → DB·Redis·MQTT → API → 웹앱·설비별 Agent 순으로 준비 상태를 확인한다. 늦게 준비되는 항목은 15초마다 다시 확인하며, 이미 실행 중인 항목을 종료하거나 중복 기동하지 않는다. 기존 MC-002 전용 배포본의 `active` 표시와 수집 주기 설정을 유지한다.
+- 현재 활성 `.60` 카메라 파일럿 컨테이너도 시작한다. 컨테이너가 없다면 DB에 저장된 카메라 접속 정보를 환경 변수로 전달해 생성한다. 이 기능은 다른 카메라 구성으로 확대하는 작업을 포함하지 않는다.
+- 체크 해제는 다음 로그인부터 자동 시작하지 않도록 설정하고 기동 관리자를 종료한다. 이미 실행한 웹앱·API·Agent·컨테이너는 계속 실행한다. 체크만으로 즉시 기동하지는 않는다.
+- 예약 작업 이름은 `Star-WebCNC-Startup-<설치 경로 해시>`이며 비밀번호를 저장하지 않는 현재 사용자·일반 권한 작업이다. 경로나 Windows 계정을 바꾸면 재등록이 필요하다.
+- 로그: `agent-runtime/startup/startup.log`, `api.log`, `web.log`, `MC-xxx.log`. 마지막 확인 결과는 `status.json`에 기록된다. 로그와 실행 설정 파일은 배포 소스로 커밋하지 않는다.
+- 2026-11-23 검증: 서버·웹 빌드, 실제 예약 작업 수동 실행, API·MQTT·Redis 준비, Agent 4개 기동, 관리자 조회/변경 권한 제한, 설정 활성화·해제, 중복 관리자 실행 방지를 확인했다. 실제 Windows 재부팅 및 모바일 화면 조작 검증은 미실시다.
+
 ## 빠른 시작 (Quick Start)
 
 ### 1. 인프라 실행 (Docker)

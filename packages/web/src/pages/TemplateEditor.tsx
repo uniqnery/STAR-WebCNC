@@ -428,8 +428,9 @@ function SectionSchedulerConfig({ data, update }: { data: CncTemplate; update: (
           {/* CYCLE TIME */}
           <div className="col-span-2 grid grid-cols-2 gap-2 bg-gray-900/40 rounded p-3">
             <p className="col-span-2 text-xs text-yellow-400 font-medium mb-1">CYCLE TIME (PMC D 어드레스)</p>
-            <TextInput label="PMC 주소" value={cd.cycleTimeAddr} onChange={v => update('schedulerConfig.countDisplay.cycleTimeAddr', v)} placeholder="D96" mono />
-            <div className="flex items-center gap-2">
+            <TextInput label="8비트 초 주소" value={cd.cycleTimeHmsStartAddr ?? ''} onChange={v => update('schedulerConfig.countDisplay.cycleTimeHmsStartAddr', v)} placeholder="D97" mono />
+            {!cd.cycleTimeHmsStartAddr?.trim() && <TextInput label="PMC 주소" value={cd.cycleTimeAddr} onChange={v => update('schedulerConfig.countDisplay.cycleTimeAddr', v)} placeholder="D96" mono />}
+            {!cd.cycleTimeHmsStartAddr?.trim() && <div className="flex items-center gap-2">
               <span className="text-xs text-gray-300 w-20 shrink-0">배수 (ms)</span>
               <select
                 value={cd.cycleTimeMultiplier}
@@ -439,7 +440,7 @@ function SectionSchedulerConfig({ data, update }: { data: CncTemplate; update: (
                 <option value={4}>×4 ms (파라미터 11930=4ms)</option>
                 <option value={8}>×8 ms (파라미터 11930=8ms)</option>
               </select>
-            </div>
+            </div>}
           </div>
         </div>
       </div>

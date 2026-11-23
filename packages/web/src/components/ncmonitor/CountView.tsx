@@ -1,9 +1,9 @@
-// CountView - 카운터 변수 표시 및 편집 (템플릿 기반 CounterConfig.fields)
+// CountView - Agent가 설비 템플릿에서 확정한 카운터 변수 표시 및 편집
 
 import { useState, useEffect, useCallback } from 'react';
 import { useControlLock } from '../../stores/machineStore';
 import { useAuthStore } from '../../stores/authStore';
-import { useSelectedTemplate, type CounterField } from '../../stores/templateStore';
+import type { CounterField } from '../../stores/templateStore';
 import { ncDataApi } from '../../lib/api';
 
 interface CountViewProps {
@@ -11,7 +11,10 @@ interface CountViewProps {
 }
 
 export function CountView({ machineId }: CountViewProps) {
-  const template = useSelectedTemplate();
+  return <MachineCountView key={machineId} machineId={machineId} />;
+}
+
+function MachineCountView({ machineId }: CountViewProps) {
   const controlLock = useControlLock(machineId || '');
   const user = useAuthStore((s) => s.user);
 
@@ -19,50 +22,59 @@ export function CountView({ machineId }: CountViewProps) {
   const hasControl = !!controlLock?.isOwner;
   const canWrite = canEdit && hasControl;
 
-  const fields = template?.counterConfig?.fields ?? [];
-
-  const [vars, setVars] = useState<Record<string, number>>({});
-  const [loading, setLoading] = useState(false);
+  const [fields, setFields] = useState<(CounterField & { value: number | null })[]>([]);
+  const [loading, setLoading] = useState(Boolean(machineId));
+  const [error, setError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
 
   // 데이터 로드
   useEffect(() => {
-    if (!machineId || fields.length === 0) return;
+    if (!machineId) return;
     let cancelled = false;
     setLoading(true);
     ncDataApi
       .readCount(machineId)
       .then((res) => {
         if (cancelled) return;
-        const rawVars: Record<string, number> = (res as any)?.data?.vars ?? {};
-        setVars(rawVars);
+        if (!res.success) {
+          setError(res.error?.message ?? '카운터 조회 실패');
+          return;
+        }
+        const returnedFields = res.data?.fields ?? [];
+        if (returnedFields.some((field) => field.varType !== 'macro' && field.varType !== 'pcode')) {
+          setError('카운터 설정을 읽으려면 Agent 업데이트가 필요합니다.');
+          return;
+        }
+        setFields(returnedFields);
       })
       .catch(() => {
         if (cancelled) return;
-        // 로드 실패 시 0으로 초기화
-        const init: Record<string, number> = {};
-        fields.forEach((f) => { init[f.key] = 0; });
-        setVars(init);
+        setError('카운터 조회 실패');
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [machineId, fields.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [machineId]);
 
   const handleCommit = useCallback(
     async (field: CounterField, newValue: number) => {
       if (!machineId || field.readonly || !canWrite) return;
-      if (newValue === vars[field.key]) return;
       setSavingKey(field.key);
+      setError(null);
       try {
-        await ncDataApi.writeCountVar(machineId, field.varNo, newValue);
-        setVars((prev) => ({ ...prev, [field.key]: newValue }));
+        const response = await ncDataApi.writeCountVar(machineId, field, newValue);
+        if (!response.success) {
+          setError(response.error?.message ?? '카운터 쓰기 실패');
+          return;
+        }
+        setFields((prev) => prev.map((item) => item.key === field.key ? { ...item, value: newValue } : item));
       } catch (err) {
         console.error('writeCountVar failed:', err);
+        setError('카운터 쓰기 실패');
       } finally {
         setSavingKey(null);
       }
     },
-    [machineId, canWrite, vars],
+    [machineId, canWrite],
   );
 
   if (!machineId) {
@@ -76,8 +88,7 @@ export function CountView({ machineId }: CountViewProps) {
   if (fields.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-2 text-gray-500">
-        <div className="text-sm">템플릿 설정 필요</div>
-        <div className="text-xs text-gray-600">템플릿 편집기에서 CounterConfig.fields를 추가하세요</div>
+        <div className="text-sm">{loading ? '카운터 조회 중…' : error ?? '카운터 설정 없음'}</div>
       </div>
     );
   }
@@ -95,10 +106,12 @@ export function CountView({ machineId }: CountViewProps) {
         </div>
       </div>
 
+      {error && <div role="alert" className="px-2 py-1 text-red-400">{error}</div>}
+
       {/* 변수 목록 */}
       <div className="flex-1 p-2 space-y-px">
         {fields.map((field) => {
-          const value = vars[field.key] ?? 0;
+          const value = field.value;
           const isSaving = savingKey === field.key;
           const editable = !field.readonly && canWrite;
 
@@ -111,7 +124,7 @@ export function CountView({ machineId }: CountViewProps) {
               <div className="flex items-center gap-2 min-w-0">
                 <span className="text-gray-300 text-xs truncate">{field.label}</span>
                 <span className="text-gray-600 text-[9px] font-mono shrink-0">
-                  #{field.varNo}
+                  {field.varType.toLowerCase() === 'pcode' ? 'P' : '#'}{field.varNo}
                 </span>
                 {field.readonly && (
                   <span className="text-gray-600 text-[9px] bg-gray-700 px-1 rounded">RO</span>
@@ -122,6 +135,8 @@ export function CountView({ machineId }: CountViewProps) {
               <div className="flex items-center gap-1.5 shrink-0">
                 {isSaving ? (
                   <span className="text-blue-400 text-[10px]">저장 중...</span>
+                ) : value == null ? (
+                  <span className="text-gray-500">—</span>
                 ) : (
                   <EditableValue
                     value={value}

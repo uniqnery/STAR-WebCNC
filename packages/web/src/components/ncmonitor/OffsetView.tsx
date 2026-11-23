@@ -34,7 +34,7 @@ interface ConfirmState {
   axisIdx: number;
   oldValue: number;
   newValue: number;
-  isAdditive: boolean;
+  additiveDelta?: number;
 }
 
 interface OffsetViewProps {
@@ -159,7 +159,7 @@ export function OffsetView({ machineId }: OffsetViewProps) {
     if (!focusCell || !canWrite || focusValue === null) return;
     const parsed = parseFloat(inputValue);
     if (isNaN(parsed)) return;
-    setConfirm({ toolIdx: focusCell.toolIdx, axisIdx: focusCell.axisIdx, oldValue: focusValue, newValue: parsed, isAdditive: false });
+    setConfirm({ toolIdx: focusCell.toolIdx, axisIdx: focusCell.axisIdx, oldValue: focusValue, newValue: parsed });
   }, [focusCell, canWrite, focusValue, inputValue]);
 
   // +INPUT 처리 (가산)
@@ -167,7 +167,7 @@ export function OffsetView({ machineId }: OffsetViewProps) {
     if (!focusCell || !canWrite || focusValue === null) return;
     const parsed = parseFloat(inputValue);
     if (isNaN(parsed)) return;
-    setConfirm({ toolIdx: focusCell.toolIdx, axisIdx: focusCell.axisIdx, oldValue: focusValue, newValue: focusValue + parsed, isAdditive: true });
+    setConfirm({ toolIdx: focusCell.toolIdx, axisIdx: focusCell.axisIdx, oldValue: focusValue, newValue: focusValue + parsed, additiveDelta: parsed });
   }, [focusCell, canWrite, focusValue, inputValue]);
 
   // 확인 후 저장
@@ -175,11 +175,11 @@ export function OffsetView({ machineId }: OffsetViewProps) {
     if (!confirm || !machineId) return;
     setSaving(true);
     setWriteError(null);
-    const { toolIdx, axisIdx, newValue } = confirm;
+    const { toolIdx, axisIdx, newValue, additiveDelta } = confirm;
     const entry = entries[toolIdx];
     const axis = AXES[axisIdx];
     try {
-      const res = await ncDataApi.writeOffset(machineId, activePath, entry.no, axis.apiAxis, newValue) as any;
+      const res = await ncDataApi.writeOffset(machineId, activePath, entry.no, axis.apiAxis, newValue, additiveDelta) as any;
       if (res?.success === false) {
         setWriteError(res?.error?.message ?? '오프셋 쓰기 실패');
         return;
@@ -367,12 +367,12 @@ export function OffsetView({ machineId }: OffsetViewProps) {
                 <span className="text-gray-400">현재값</span>
                 <span className="text-yellow-300 font-mono">{confirm.oldValue.toFixed(4)}</span>
               </div>
-              {confirm.isAdditive && (
+              {confirm.additiveDelta !== undefined && (
                 <div className="flex justify-between gap-4">
                   <span className="text-gray-400">입력값</span>
                   <span className="text-blue-300 font-mono">
-                    {(confirm.newValue - confirm.oldValue) >= 0 ? '+' : ''}
-                    {(confirm.newValue - confirm.oldValue).toFixed(4)}
+                    {confirm.additiveDelta >= 0 ? '+' : ''}
+                    {confirm.additiveDelta.toFixed(4)}
                   </span>
                 </div>
               )}
