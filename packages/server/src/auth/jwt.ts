@@ -13,11 +13,13 @@ import { UserRole } from '@prisma/client';
 export function generateAccessToken(payload: {
   userId: string;
   username: string;
+  displayName?: string;
   role: UserRole;
 }): string {
   const tokenPayload: AccessTokenPayload = {
     sub: payload.userId,
     username: payload.username,
+    displayName: payload.displayName || payload.username,
     role: payload.role,
   };
 

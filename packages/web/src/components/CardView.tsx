@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Machine, useMachineStore } from '../stores/machineStore';
+import { dashboardPrograms } from '../lib/dashboardDisplay';
 import {
   getStatusFromTelemetry,
   getStatusColor,
@@ -128,15 +129,17 @@ export interface MachineStatusCardProps {
 export function MachineStatusCard({ machine, onClick, compact = false }: MachineStatusCardProps) {
   // telemetryMap이 있으면 우선 사용 (WebSocket 실시간), 없으면 초기 API 값
   const liveData = useMachineStore((s) => s.telemetryMap[machine.machineId]);
+  const daily = useMachineStore((s) => s.dailyRunRates[machine.machineId]);
   const telemetry = liveData ?? machine.realtime?.telemetry;
   const isOnline = liveData != null || machine.realtime?.status === 'online';
   const status = getStatusFromTelemetry(telemetry, isOnline);
   const statusColorClass = getStatusColor(status);
   const statusTextStr = getStatusText(status);
+  const programs = dashboardPrograms(telemetry);
 
   // 일일 가동률 색상
-  const getRunRateColor = (rate?: number) => {
-    if (rate === undefined) return 'text-gray-400';
+  const getRunRateColor = (rate?: number | null) => {
+    if (rate == null) return 'text-gray-400';
     if (rate >= 80) return 'text-emerald-500';
     if (rate >= 50) return 'text-yellow-500';
     return 'text-rose-500';
@@ -199,9 +202,14 @@ export function MachineStatusCard({ machine, onClick, compact = false }: Machine
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">일일 가동률</div>
-            <div className={`text-lg font-mono font-bold ${getRunRateColor(telemetry?.dailyRunRate)}`}>
-              {telemetry?.dailyRunRate !== undefined ? `${telemetry.dailyRunRate.toFixed(1)}%` : '-'}
+            <div className={`text-lg font-mono font-bold ${getRunRateColor(daily?.rate)}`}>
+              {daily?.rate != null ? `${daily.rate.toFixed(1)}%` : '—'}
             </div>
+            {daily?.incomplete && daily.rate != null && (
+              <div className="text-[10px] text-amber-600 dark:text-amber-400" title={`오늘 00시부터 현재까지 확인된 가동시간 기준 최소치입니다. 미확인 ${Math.ceil(daily.unknownSeconds / 60)}분`}>
+                집계 불완전
+              </div>
+            )}
           </div>
           <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">사이클타임</div>
@@ -215,28 +223,15 @@ export function MachineStatusCard({ machine, onClick, compact = false }: Machine
         <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
           <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">프로그램</div>
           <div className="space-y-1">
-            {/* 메인 프로그램 */}
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-400">MAIN</span>
-              <span className="font-mono font-semibold text-gray-900 dark:text-white">
-                {telemetry?.programNo || '-'}
-              </span>
-            </div>
-            {/* 서브 프로그램 */}
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-gray-400">SUB</span>
-              <span className="font-mono text-sm text-gray-600 dark:text-gray-300">
-                {telemetry?.path2?.programNo || '-'}
-              </span>
-            </div>
-            {/* 제품명 */}
-            {telemetry?.productName && (
-              <div className="pt-1 mt-1 border-t border-gray-200 dark:border-gray-600">
-                <span className="text-sm font-medium text-blue-600 dark:text-blue-400">
-                  ({telemetry.productName})
+            {programs.map(program => (
+              <div key={program.label} className="grid grid-cols-[3rem_5rem_minmax(0,1fr)] items-center gap-2 min-h-5">
+                <span className="text-xs text-gray-400">{program.label}</span>
+                <span className="font-mono text-sm font-medium text-gray-900 dark:text-white">{program.number || '—'}</span>
+                <span className="min-w-0 truncate text-sm text-gray-600 dark:text-gray-300" title={program.comment || undefined} aria-label={`${program.label} 프로그램 코멘트`}>
+                  {program.comment}
                 </span>
               </div>
-            )}
+            ))}
           </div>
         </div>
       </div>

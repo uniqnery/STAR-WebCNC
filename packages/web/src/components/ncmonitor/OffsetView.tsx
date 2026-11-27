@@ -1,7 +1,6 @@
 // OffsetView - Wear Offset 표시 및 편집 (Path1/Path2, 페이지네이션, 포커스 셀, 입력 바)
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useControlLock } from '../../stores/machineStore';
 import { useAuthStore } from '../../stores/authStore';
 import { useSelectedTemplate } from '../../stores/templateStore';
 import { ncDataApi } from '../../lib/api';
@@ -43,7 +42,6 @@ interface OffsetViewProps {
 
 export function OffsetView({ machineId }: OffsetViewProps) {
   const template = useSelectedTemplate();
-  const controlLock = useControlLock(machineId || '');
   const user = useAuthStore((s) => s.user);
 
   const toolCount = template?.offsetConfig?.toolCount ?? 64;
@@ -51,8 +49,7 @@ export function OffsetView({ machineId }: OffsetViewProps) {
   const totalPages = Math.ceil(toolCount / pageSize);
 
   const canEdit = user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER';
-  const hasControl = !!controlLock?.isOwner;
-  const canWrite = canEdit && hasControl;
+  const canWrite = canEdit;
 
   const [activePath, setActivePath] = useState<1 | 2>(1);
   const [currentPage, setCurrentPage] = useState(0);
@@ -172,7 +169,7 @@ export function OffsetView({ machineId }: OffsetViewProps) {
 
   // 확인 후 저장
   const handleConfirm = async () => {
-    if (!confirm || !machineId) return;
+    if (!confirm || !machineId || !canWrite) return;
     setSaving(true);
     setWriteError(null);
     const { toolIdx, axisIdx, newValue, additiveDelta } = confirm;
@@ -184,8 +181,13 @@ export function OffsetView({ machineId }: OffsetViewProps) {
         setWriteError(res?.error?.message ?? '오프셋 쓰기 실패');
         return;
       }
+      const finalValue = res?.data?.value;
+      if (typeof finalValue !== 'number' || !Number.isFinite(finalValue)) {
+        setWriteError('최종 반영값을 확인하지 못했습니다. 재조회하세요.');
+        return;
+      }
       setEntries((prev) =>
-        prev.map((e, i) => (i === toolIdx ? { ...e, [axis.key]: newValue } : e)),
+        prev.map((e, i) => (i === toolIdx ? { ...e, [axis.key]: finalValue } : e)),
       );
       // 정지 중 쓰기 시 CNC가 싸이클 스타트 후 반영 — 15초간 폴링 덮어쓰기 방지
       writeCooldownUntilRef.current = Date.now() + 15_000;
@@ -314,7 +316,7 @@ export function OffsetView({ machineId }: OffsetViewProps) {
               </>
             )}
             {focusCell && !canWrite && (
-              <span className="text-yellow-500 text-[10px]">제어권 필요</span>
+              <span className="text-yellow-500 text-[10px]">수정 권한 없음</span>
             )}
           </div>
 

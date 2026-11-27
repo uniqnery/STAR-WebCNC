@@ -1,5 +1,29 @@
 # DNC 모드 구현 계획 및 작업 원장
 
+## POP 카운터 기반 전환 (2026-11-25, 구현·배포 및 실카운터 증가 확인)
+
+- 사용자 승인: 스케줄러 제어는 유지하고 POP는 템플릿 카운터 증가량으로 전환한다. 원본·추정·수정/초기화·보정과 상태 시간 구간을 분리한다. 실제 가동/알람 원천은 현재 상단 표시와 같은 FOCAS 상태이며 초록 우선이다.
+- Agent 원자적 기준값/미전송 journal, 수동 수정 쓰기 전 의도 기록, 서버 원본/실적 동시 트랜잭션과 ID 중복 차단, 30초 초과 미관측 시간 확인 불가, MES 경계 변화 수량 보류를 구현했다. 최초 카운터 값은 기준만 설정하고, 양의 변화는 자동/단절 추정/항목 불명으로 구분한다. 감소·0 초기화는 기존 누적 수량을 차감하지 않는다. 웹앱 수정은 감사 correlation ID로 연결하며 ADMIN/HQ 수동 보정은 원본을 유지한 별도 ± 실적과 감사 이력이다. 추정/보정은 작업지시에 자동 반영하지 않는다.
+- 변경 파일: Agent `Collectors/CounterJournal.cs`, `DataCollectorService.cs`, `SchedulerManager.cs`(조회용 메타데이터만), `Commands/CommandHandler.cs`, `Mqtt/MqttService.cs`, `Program.cs`; Server `lib/{counterTracking,counterReporting,productionTracking,mqtt}.ts`, `routes/production.ts`, `index.ts`, Prisma schema와 `20261125020000_counter_production`; Web `pages/POP.tsx`, `lib/{api,popData}.ts`; 검증 `tests/StarWebCNC.Agent.Checks`, `packages/server/tests/{counterTracking,permissions,popData}.test.ts`, `tools/verify-pop.cjs`.
+- 검증: Server 155개·Agent 51개·격리 PostgreSQL/HTTP API 57개 통과. 동시 이벤트/보정 중복, USER 보정 차단, 원본 보존·감사 1회 기록, 0→1 정상 집계, 감소·읽기 실패·재시작 추정·메인 항목 경계 보류·서브 호출 무시·초록+빨강 초록 우선·상태 시간 합계를 확인했다. DB 세션 시간대에 따른 raw SQL 비교 오류를 찾아 UTC timestamp 경계로 명시했고 상태 시간과 일/주/월 차트 일치를 확인했다. Server/Web/Agent build 성공. 시험 생산·보정은 격리 스키마에만 넣고 시험 스키마는 종료 시 제거했다.
+- 배포: DB 백업 `agent-runtime/startup/rollback-counter-20261125-184603/database.dump` 후 추가 SQL 1건과 migrate resolve 적용. API 및 4대 Agent를 18:59~19:00 KST에 재기동하고 shared/MC-002 publish DLL 해시 `22AFBEACE62FACE169B667F2CB3B1F5D5C9F5622E9E3510EB3FC9C620E1ADFB4`, 기존 appsettings 해시 동일 확인. DLL 복구본은 `agent-runtime/startup/rollback-pop-agent-20261125-185941/agent-{0,1}.dll`. DB 복원은 실행 검증하지 않았다. 카운터 journal은 복구 시에도 삭제하지 않는다.
+- 실기기: 19:00:10 KST O4592, #900=902, 프리셋 P10000=2000을 초기 기준으로 저장했고, 19:00:43 KST 902→903 증가에서 실적 1개가 자동 기록됐다. DB ACK 후 pending=0, 일/주/월 totalParts=1 및 차트 합계=1, 가동 구간 19:00:10 이후 누적을 확인했다. 실제 원본 코멘트가 읽히지 않아 O4592/생산 항목 미지정으로 남겼으며 다른 제품명으로 추정하지 않았다. 브라우저 로그인 화면까지 접근했으나 별도 로그인 세션이 없어 실제 로그인 후 PC/모바일 시각 검증은 남았다. API 일/주/월 조회 200과 브라우저 미접속 수집은 확인했다.
+- 제한/다음 확인: 실제 CNC 카운터·프리셋을 시험용으로 변경하거나 설비 출력/알람을 발생시키지 않았다. 실기기 초기화·웹앱 수정·알람 전환은 미실행이며 격리 검사로 확인한 범위다. 통신 단절 중 초기화 후 증가 또는 여러 제품 가공은 최종 값만으로 복원 불가하다. 추정 수량은 재관측 시점에 배정하므로 단절 중 일자/작업 경계의 정확한 분배는 보정이 필요하다. 장기 단절 시 미전송 journal 크기가 증가하므로 향후 운영량/보관 정책을 검토한다. 스케줄러 M20 카운트 권한·자체 카운터 OFF 절차는 그대로다.
+- 19:07 KST 최종 보완판 재배포: 서버 장애 시 FALLBACK_TEMPLATE 기본 변수로 POP를 집계하지 않고 이전 정상 기준값을 보존하도록 보완했으며 Agent 51개 검사에 포함했다. 최종 DLL 해시 `1ACADC6C871C75831EFE8B65072F0470D863E8096695433299B8D8B42429381D`, 교체 직전 백업 `agent-runtime/startup/rollback-pop-agent-20261125-190735/agent-{0,1}.dll`. 앞선 18:59 백업은 카운터 전환 전 복구 기준이며, 19:07 백업은 카운터 초판이다. 생성한 runtime journal과 기존 DB 이력은 재기동 중 보존했다.
+- 19:08 KST 최종 확인: 실제 카운터 902→906에 총 4개(자동 4·추정 0·보정 0), 일/주/월 차트 합계 4, journal pending=0, 기준값 906과 4대 ready를 확인했다. 최종 재기동에서도 과거 4개를 다시 집계하지 않았고 19:07:34~19:08:02 수집 중단 구간은 대기/가동 대신 확인 불가로 분리됐다. 최종 격리 DB/API 검사는 사용자 감사 연결 및 120초 관측 공백에서 가동 30초·확인 불가 90초·이후 대기 10초 분리까지 포함해 57개 통과했다.
+
+## POP-M20 연계 (2026-11-25, 구현·배포 완료 / 실제 완료 신호 검증 대기)
+
+- 스케줄러의 유효 M20만 POP 완료 이벤트로 영속 기록한다. 첫 M20 및 Path2Only 완료 제외 규칙과 기존 제어 카운트는 유지한다.
+- 생산 코멘트·원본 프로그램·실행 행을 이벤트에 스냅샷으로 남기며 파일전송/DNC 운전 방식은 변경하지 않는다. 일반 운전도 동일한 M20 엣지로 집계한다. 재접속 첫 ON은 기준 상태로만 읽는다.
+- 변경 파일: Agent `Collectors/{DataCollectorService,SchedulerManager,ProductionOutbox,M20EdgeDetector,M20CompletionRules}.cs`, `Focas/FocasDataReader.cs`, `Mqtt/MqttService.cs`, `Program.cs`; Server `lib/{productionTracking,mqtt}.ts`, `routes/{production,scheduler,workOrder}.ts`, `index.ts`, Prisma schema 및 `20261125000000_add_m20_production`, `20261125010000_index_production_completion`; Web `pages/{POP,Scheduler,WorkOrder,Settings}.tsx`, `components/Layout.tsx`, `stores/{featureStore,machineStore}.ts`, `lib/api.ts`, `App.tsx`; 검증 `tests/StarWebCNC.Agent.Checks`, `packages/server/tests`, `tools/verify-pop.cjs`.
+- 서버 126개, Agent 35개, 분리 PostgreSQL 25개 검증 통과. 동시 중복 이벤트 1회 저장/작업지시 1회 증가, 재전송, 코멘트 우선순위·스냅샷, MES 시점별 연결·프로그램 불일치, 시작/재접속 ON 및 첫 M20/Path2Only 제외를 확인했다. 테스트는 CNC 쓰기 및 운영 생산 이력 생성 없이 수행했다. Server/Web build와 Agent Release build 성공, 운영 POP 일·주·월 조회 200 및 MES OFF 작업지시 API 403 확인.
+- 2026-11-25 10:07 KST API 및 4대 Agent에 적용. shared publish와 MC-002 전용 publish의 DLL을 교체했고 appsettings 해시가 동일함을 확인했다. 배포 전 스케줄 실행 행 및 최근 2분 대기 명령은 없었다. DB는 기존 이력 보존 추가 SQL 2건만 적용하고 각각 migration resolve 했으며 이전 미추적 migration은 실행하지 않았다.
+- 복구 자료: `agent-runtime/startup/rollback-pop-2026-11-25T00-44-14-683Z/database.dump` 및 `agent-runtime/startup/rollback-pop-agent-20261125-100657/agent-{0,1}.dll`. DB 복원 실행은 검증하지 않았다. 이전 DLL 복귀 시 새 DB 컬럼은 유지 가능하며 이벤트 journal을 삭제하지 않는다.
+- 남은 검증: 실제 설비의 자연 M20 완료 → journal → DB 저장/ACK, 스케줄러 실운전 및 모바일/PC 화면 확인. 전원 OFF 중 신호·100ms 폴링 사이 짧은 M20 누락은 보완할 수 없으며 래치+ACK는 별도 승인 후 검토한다. 과거 CNC 카운터 값은 소급 실적으로 만들지 않는다.
+- 실기기 관찰 결과: 배포 후 55초씩 2회 MC-002 텔레메트리 197/198건을 수신했고 O4592·runState=3, 표시 카운터 673→674를 확인했다. 같은 관찰에서 M20/event/production/ACK는 없고 새 생산 이력도 0건이었다. 현재 적용 템플릿의 `schedulerConfig.m20Addr=R6020.0`과 `pmcMap.scheduler.m20Complete=R6002.4`가 다르다. 어느 주소가 실완료 신호인지, 실제 신호 폭 및 일반 운전에서 출력되는지 확인해야 한다. 주소를 추정해 바꾸거나 카운터 증가를 M20으로 대체하지 않았다. 따라서 소프트웨어 적용은 완료했으나 실생산 집계 성공은 아직 확인하지 못했다.
+- 같은 날 POP 화면 `products.length` 오류 수정: 서버 교체 중 이전 형식 응답에 없는 목록을 직접 렌더링하던 문제였다. `packages/web/src/lib/popData.ts`에서 목록·수량 응답을 검사한 뒤 `pages/POP.tsx`의 상태를 교체한다. 누락 응답이면 안내와 마지막 정상 결과를 유지하고 기존 5초 자동 조회를 지속하며 정상 응답에서 안내를 지운다. MES 작업지시 목록도 배열을 확인한다. `packages/server/tests/popData.test.ts` 12개 통과, Web build 성공, 실행 중 Vite에서 수정 모듈 200 응답 확인. CNC/집계 로직 변경 없음. 이미 오류 경계가 표시된 탭은 한 번 새로고침해야 한다.
+
 > 최초 작성: 2026-08-30
 > 대상 설비: Star SB-20R2·SR-20J2B / FANUC 32i-B 포함
 > 전체 상태: **FOCAS DNC 스트리밍 보류 / MEM 파일전송 방식으로 방향 전환**

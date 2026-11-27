@@ -48,6 +48,11 @@ public class SchedulerManager
 
     public SchedulerRunState State => _state;
     public bool IsRunning => _state != SchedulerRunState.IDLE;
+    public event Action<ProductionCompletion>? OnProductionCompleted;
+    // Read-only production identity; scheduler control/count authority is unchanged.
+    public ProductionCompletion? ProductionContext => _state == SchedulerRunState.RUNNING && _currentRow != null
+        ? new() { ProgramNo = _currentRow.MainProgramNo, ProgramComment = _currentRow.MainProgramComment,
+            SchedulerRowId = _currentRow.Id, SchedulerComment = _currentRow.ProductionComment, ProgramSha256 = _currentRow.MainProgramSha256 } : null;
 
     public SchedulerManager(
         ILogger<SchedulerManager> logger,
@@ -99,7 +104,8 @@ public class SchedulerManager
         if (cfg == null) return false;
 
         // ── 첫 번째 M20 제외 (행 시작 직후) ──
-        if (_skipFirstM20)
+        var completionKind = M20CompletionRules.Classify(_skipFirstM20, _waitingForPath2OnlyM20);
+        if (completionKind == M20CompletionKind.SkipFirst)
         {
             _skipFirstM20 = false;
             _logger.LogInformation("[Scheduler] M20: 첫 번째 M20 제외 (행 시작 직후)");
@@ -119,7 +125,7 @@ public class SchedulerManager
 
         // ── Path2Only 완료 M20 — 카운트 미반영, 직접 행 완료 처리 ──
         // CompleteCurrentRow() 호출 시 SubProgramNo 조건으로 ExecutePath2Only 재호출되는 무한루프 방지
-        if (_waitingForPath2OnlyM20)
+        if (completionKind == M20CompletionKind.Path2Only)
         {
             _waitingForPath2OnlyM20 = false;
             _logger.LogInformation("[Scheduler] M20: Path2Only 완료 M20 수신 — 카운트 미반영, 행 완료");
@@ -129,6 +135,11 @@ public class SchedulerManager
 
         // ── Count 증가 ──
         _currentRow.Count++;
+        OnProductionCompleted?.Invoke(new ProductionCompletion {
+            ProgramNo = _currentRow.MainProgramNo, ExecutingProgramNo = programNo,
+            ProgramComment = _currentRow.MainProgramComment, SchedulerRowId = _currentRow.Id,
+            SchedulerComment = _currentRow.ProductionComment, ProgramSha256 = _currentRow.MainProgramSha256,
+        });
         _logger.LogInformation("[Scheduler] M20: count={Count}/{Preset} rowId={RowId}",
             _currentRow.Count, _currentRow.Preset, _currentRow.Id);
 
@@ -256,7 +267,7 @@ public class SchedulerManager
             {
                 Id            = r.Id,
                 Order         = r.Order,
-                MainProgramNo = r.MainProgramNo,
+                MainProgramNo = r.MainProgramNo, ProductionComment = r.ProductionComment, MainProgramComment = r.MainProgramComment, MainProgramSha256 = r.MainProgramSha256,
                 SubProgramNo  = r.SubProgramNo,
                 Preset        = r.Preset,
                 Count         = r.Count,
@@ -286,7 +297,7 @@ public class SchedulerManager
                 {
                     Id = payload.Id,
                     Order = payload.Order,
-                    MainProgramNo = payload.MainProgramNo,
+                    MainProgramNo = payload.MainProgramNo, ProductionComment = payload.ProductionComment, MainProgramComment = payload.MainProgramComment, MainProgramSha256 = payload.MainProgramSha256,
                     SubProgramNo = payload.SubProgramNo,
                     Preset = payload.Preset,
                     Count = payload.Count,
@@ -299,7 +310,7 @@ public class SchedulerManager
                 continue;
 
             existing.Order = payload.Order;
-            existing.MainProgramNo = payload.MainProgramNo;
+            existing.MainProgramNo = payload.MainProgramNo; existing.ProductionComment = payload.ProductionComment; existing.MainProgramComment = payload.MainProgramComment; existing.MainProgramSha256 = payload.MainProgramSha256;
             existing.SubProgramNo = payload.SubProgramNo;
             existing.Preset = payload.Preset;
             existing.Count = payload.Count;
@@ -1310,6 +1321,9 @@ public enum SchedulerRunState { IDLE, RUNNING, PAUSED, ERROR }
 
 public class SchedulerRowInfo
 {
+    public string? ProductionComment { get; set; }
+    public string? MainProgramComment { get; set; }
+    public string? MainProgramSha256 { get; set; }
     public string  Id            { get; set; } = "";
     public int     Order         { get; set; }
     public string  MainProgramNo { get; set; } = "";

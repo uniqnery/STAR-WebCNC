@@ -43,13 +43,13 @@ export function UserActivityFeed({ machineId, page }: UserActivityFeedProps) {
           className={`flex items-start gap-2 px-1.5 py-0.5 min-h-[24px] shrink-0 font-mono text-xs ${getRowStyle(a)}`}
         >
           <span className="text-gray-500 tabular-nums w-[72px] shrink-0">
-            {new Date(a.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            {new Date(a.timestamp).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </span>
           <span className="w-[72px] shrink-0 truncate">
             {a.actor ? (ROLE_LABEL[a.actor.role] ?? a.actor.role) : '—'}
           </span>
           <span className="w-[64px] shrink-0 truncate">
-            {a.actor?.username ?? '—'}
+            {a.actor?.displayName || a.actor?.username || '—'}
           </span>
           <span className="flex-1 truncate">
             {a.action}

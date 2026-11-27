@@ -43,6 +43,12 @@ public class MqttService : IAsyncDisposable
     public event Func<SchedulerMessage, Task>? OnSchedulerCommandReceived;
     public event Func<Task>? OnConnected;
     public event Func<Task>? OnDisconnected;
+    public event Action<string>? OnProductionAckReceived;
+    public event Action<string>? OnCounterAckReceived;
+    public Task PublishCounterAsync(StarWebCNC.Agent.Collectors.CounterEvent observation) =>
+        PublishAsync($"star-webcnc/agent/{_settings.MachineId}/counter", observation);
+    public Task PublishProductionAsync(StarWebCNC.Agent.Collectors.ProductionCompletion completion) =>
+        PublishAsync($"star-webcnc/agent/{_settings.MachineId}/production", completion);
 
     public MqttService(
         ILogger<MqttService> logger,
@@ -227,6 +233,10 @@ public class MqttService : IAsyncDisposable
 
         _logger.LogInformation("Subscribed to scheduler topic: {Topic}", schedulerTopic);
 
+        await _client.SubscribeAsync(new MqttTopicFilterBuilder().WithTopic($"star-webcnc/server/production/ack/{_settings.MachineId}")
+            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).Build());
+        await _client.SubscribeAsync(new MqttTopicFilterBuilder().WithTopic($"star-webcnc/server/counter/ack/{_settings.MachineId}")
+            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce).Build());
         if (OnConnected != null)
             await OnConnected.Invoke();
     }
@@ -266,7 +276,18 @@ public class MqttService : IAsyncDisposable
         try
         {
             // 명령 메시지 처리
-            if (topic.Contains("/command"))
+            if (topic == $"star-webcnc/server/counter/ack/{_settings.MachineId}")
+            {
+                var ack = JsonConvert.DeserializeObject<Dictionary<string, string>>(payload);
+                if (ack?.TryGetValue("eventId", out var id) == true) OnCounterAckReceived?.Invoke(id);
+                return;
+            }
+            if (topic == $"star-webcnc/server/production/ack/{_settings.MachineId}")
+            {
+                var ack = JsonConvert.DeserializeObject<Dictionary<string, string>>(payload);
+                if (ack?.TryGetValue("eventId", out var id) == true) OnProductionAckReceived?.Invoke(id);
+            }
+            else if (topic.Contains("/command"))
             {
                 var command = JsonConvert.DeserializeObject<CommandMessage>(payload);
                 if (command != null && OnCommandReceived != null)
@@ -525,6 +546,9 @@ public class ProgramTransferPayload
 
 public class SchedulerRowPayload
 {
+    public string? ProductionComment { get; set; }
+    public string? MainProgramComment { get; set; }
+    public string? MainProgramSha256 { get; set; }
     public string Id { get; set; } = "";
     public int Order { get; set; }
     public string MainProgramNo { get; set; } = "";
@@ -540,6 +564,7 @@ public class SchedulerRowPayload
 /// </summary>
 public class PmcBitsMessage : MqttMessage
 {
+    public string? RemoteInterlockSignature { get; set; }
     /// <summary>PMC 비트 값 맵 — Key: "R6001.3", Value: 0|1</summary>
     public Dictionary<string, int>? PmcBits { get; set; }
 }

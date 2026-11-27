@@ -35,7 +35,9 @@ public class DataCollectorService : BackgroundService
         });
 
     private readonly DateTime _startTime = DateTime.UtcNow;
-    private bool _lastM20State = false;
+    private readonly M20EdgeDetector _m20Edges = new();
+    private readonly ProductionOutbox _productionOutbox;
+    private readonly CounterJournal _counterJournal;
     // alarmNo → AlarmInfo: raise 시 전체 정보를 보존, clear 시 category/typeCode 로그에 사용
     private readonly Dictionary<int, AlarmInfo> _activeAlarms = new();
     private bool _alarmStateInitialized;
@@ -65,7 +67,7 @@ public class DataCollectorService : BackgroundService
         MqttService mqttService,
         TemplateLoader templateLoader,
         CommandHandler commandHandler,
-        SchedulerManager schedulerManager)
+        SchedulerManager schedulerManager, ProductionOutbox productionOutbox, CounterJournal counterJournal)
     {
         _logger = logger;
         _settings = options.Value;
@@ -75,6 +77,8 @@ public class DataCollectorService : BackgroundService
         _templateLoader = templateLoader;
         _commandHandler = commandHandler;
         _schedulerManager = schedulerManager;
+        _productionOutbox = productionOutbox;
+        _counterJournal = counterJournal;
 
         // MQTT 명령을 FOCAS 스레드 큐로 전달 (스레드 친화성 보장)
         _mqttService.OnCommandReceived += cmd =>
@@ -199,6 +203,8 @@ public class DataCollectorService : BackgroundService
             // 연결 끊김 감지 시 재연결 시도
             if (!_connection.IsConnected)
             {
+                _m20Edges.Reset();
+                try { _counterJournal.Disconnected(); } catch (Exception ex) { _logger.LogError(ex, "Counter disconnect journal failed"); }
                 _logger.LogWarning("CNC connection lost. Attempting reconnect...");
                 PublishAgentStatus("reconnecting").GetAwaiter().GetResult();
                 bool reconnected = _connection.ConnectAsync(stoppingToken).GetAwaiter().GetResult();
@@ -324,6 +330,7 @@ public class DataCollectorService : BackgroundService
 
         var msg = new PmcBitsMessage
         {
+            RemoteInterlockSignature = tpl.TopBarInterlock.Remote.Signature,
             MachineId = _settings.MachineId,
             PmcBits   = pmcBits,
         };
@@ -375,14 +382,29 @@ public class DataCollectorService : BackgroundService
         {
             _lastTelemetryCounts = pathsFinished;
             var cd = template.SchedulerConfig.CountDisplay;
-            int parts = _dataReader.ReadPartsCount(cd.CountMacroNo, cd.CountVarType) ?? 0;
+            int? parts = _dataReader.ReadPartsCount(cd.CountMacroNo, cd.CountVarType);
             double? preset = string.Equals(cd.PresetVarType, "pcode", StringComparison.OrdinalIgnoreCase)
                 ? _dataReader.ReadPcodeMacroVariable(cd.PresetMacroNo)
                 : _dataReader.ReadMacroVariable(cd.PresetMacroNo);
             bool useHms = !string.IsNullOrWhiteSpace(cd.CycleTimeHmsStartAddr);
             double cycleMs = _dataReader.ReadCycleTimeMs(
                 useHms ? cd.CycleTimeHmsStartAddr! : cd.CycleTimeAddr, cd.CycleTimeMultiplier, useHms) ?? 0.0;
-            _telemetryCounts = (parts, (int)(preset ?? 0), cycleMs / 1000.0);
+            _telemetryCounts = (parts ?? 0, (int)(preset ?? 0), cycleMs / 1000.0);
+            var context = _schedulerManager.ProductionContext;
+            var info = _dataReader.ReadProgramInfo();
+            int? original = info?.MainProgram > 0 ? info.MainProgram : info?.CurrentProgram;
+            bool? green = status == null ? null : status.Run == 2 || status.Run == 3;
+            bool? red = status?.HasAlarm;
+            try { _counterJournal.Observe(new CounterSample {
+                ProgramNo = context?.ProgramNo ?? (original.HasValue ? $"O{original:D4}" : null),
+                ExecutingProgramNo = info != null ? $"O{info.CurrentProgram:D4}" : null,
+                ProgramComment = context?.ProgramComment ?? (original.HasValue ? _dataReader.ReadProductionProgramComment(original.Value) : null),
+                SchedulerRowId = context?.SchedulerRowId, SchedulerComment = context?.SchedulerComment, ProgramSha256 = context?.ProgramSha256,
+                CounterSource = $"{template.TemplateId}:path1:{cd.CountVarType}:{cd.CountMacroNo}:preset:{cd.PresetVarType}:{cd.PresetMacroNo}",
+                Count = parts, Preset = preset.HasValue && double.IsFinite(preset.Value) && preset >= 0 && preset <= int.MaxValue ? (int)preset.Value : null,
+                Green = green, Red = red, State = CounterJournal.MachineState(green, red),
+                OperatorMessages = _opMsgSafe ? string.Join("\n", _cachedOpMessages.OrderBy(m => m.MsgType).ThenBy(m => m.Number).Select(m => $"[{m.MsgType}/{m.Number}] {m.Message}")) : null,
+            }); } catch (Exception ex) { _logger.LogError(ex, "Counter observation not journaled; baseline retained for retry"); }
         }
 
         string? programNo = path1?.ProgramNo;
@@ -678,8 +700,7 @@ public class DataCollectorService : BackgroundService
             if (m20Bit != null)
             {
                 bool currentM20State = m20Bit == 1;
-
-                if (currentM20State && !_lastM20State)
+                if (_m20Edges.Observe(currentM20State))
                 {
                     _logger.LogInformation("M20 edge detected");
 
@@ -691,6 +712,9 @@ public class DataCollectorService : BackgroundService
 
                     if (!schedulerConsumed)
                     {
+                        var originalNo = program?.MainProgram > 0 ? program.MainProgram : program?.CurrentProgram;
+                        // POP uses counter observations. Keep the legacy M20 monitoring
+                        // event and scheduler handling, but never create a second POP count.
                         // 스케줄러 미실행 시 — 원시 M20_COMPLETE 이벤트 발행 (레거시 모니터링용)
                         int count = schedulerCfg != null
                             ? (_dataReader.ReadPartsCount(schedulerCfg.CountDisplay.CountMacroNo, schedulerCfg.CountDisplay.CountVarType) ?? 0)
@@ -707,7 +731,6 @@ public class DataCollectorService : BackgroundService
                     }
                 }
 
-                _lastM20State = currentM20State;
             }
         }
     }

@@ -1,6 +1,7 @@
 // Machine Store - Zustand
 
 import { create } from 'zustand';
+import { useMemo } from 'react';
 import { wsClient } from '../lib/wsClient';
 import { machineApi, alarmApi, userActivityApi } from '../lib/api';
 import { useAuthStore } from './authStore';
@@ -25,6 +26,7 @@ export interface ModalGCodeInfo {
 // Path 데이터 (프로그램 + 좌표 + 모달정보)
 export interface PathData {
   programNo: string;           // 프로그램 번호
+  programComment?: string;    // 이 programNo에 대응하는 원본 프로그램 코멘트
   blockNo: string;             // 블록 번호 (N00020 등)
   programContent: string[];    // 실행 중인 프로그램 라인들 (약 6줄)
   currentLine: number;         // 현재 실행 중인 라인 인덱스 (> 표시)
@@ -53,7 +55,7 @@ export interface UserActivity {
   id: string;
   machineId: string;
   page: UserActivityPage;
-  actor: { username: string; role: string } | null;
+  actor: { username: string; displayName?: string; role: string } | null;
   action: string;
   detail?: string;
   timestamp: string;
@@ -124,6 +126,8 @@ export interface TelemetryData {
 
   // PMC 비트 실시간 값 (address string → 0|1, 예: { 'R6001.3': 1, 'R6001.2': 0 })
   pmcBits?: Record<string, 0 | 1>;
+  pmcReceivedAt?: number;
+  remoteInterlockSignature?: string;
 
   // 오퍼레이터 메시지 (NC프로그램 #3006, 외부 신호 등) — telemetry 1s 주기
   operatorMessages?: OperatorMessage[];
@@ -239,6 +243,7 @@ export interface SchedulerRow {
   mainProgramNo: string;
   subProgramNo?: string;
   mainProgramComment?: string;
+  productionComment?: string;
   mainProgramSha256?: string;
   preset: number;
   count: number;          // Agent authority — Server가 보고값으로 갱신
@@ -305,10 +310,25 @@ export interface ControlLockEntry {
   expiresAt: number | null; // timestamp ms
 }
 
+export interface DailyRunSummary {
+  machineId: string;
+  periodStart: string;
+  calculatedAt: string;
+  runningSeconds: number;
+  idleSeconds: number;
+  alarmSeconds: number;
+  unknownSeconds: number;
+  elapsedSeconds: number;
+  rate: number | null;
+  incomplete: boolean;
+}
+
 interface MachineState {
   machines: Machine[];
   selectedMachineId: string | null;
   telemetryMap: Record<string, TelemetryData>;
+  dailyRunRates: Record<string, DailyRunSummary>;
+  setDailyRunRates: (items: DailyRunSummary[]) => void;
   activeAlarms: Record<string, Alarm[]>;
   focasEvents: Record<string, FocasEvent[]>;  // FOCAS 이벤트 로그
   userActivities: Record<string, UserActivity[]>;  // 사용자 기록 (machineId:page 키)
@@ -327,7 +347,7 @@ interface MachineState {
   deleteMachine: (machineId: string) => void;
   selectMachine: (machineId: string | null) => void;
   updateTelemetry: (machineId: string, data: TelemetryData) => void;
-  updatePmcBits: (machineId: string, pmcBits: Record<string, 0 | 1>) => void;
+  updatePmcBits: (machineId: string, pmcBits: Record<string, 0 | 1>, signature?: string) => void;
   addAlarm: (machineId: string, alarm: Alarm) => void;
   clearAlarm: (machineId: string, alarmNo: number) => void;
   addFocasEvent: (machineId: string, event: FocasEvent) => void;
@@ -512,6 +532,8 @@ export const useMachineStore = create<MachineState>((set, get) => ({
   machines: loadMachines() ?? [],
   selectedMachineId: null,
   telemetryMap: {},
+  dailyRunRates: {},
+  setDailyRunRates: (items) => set({ dailyRunRates: Object.fromEntries(items.map(item => [item.machineId, item])) }),
   activeAlarms: {},
   focasEvents: {},
   userActivities: {},
@@ -581,11 +603,11 @@ export const useMachineStore = create<MachineState>((set, get) => ({
       };
     }),
 
-  updatePmcBits: (machineId, pmcBits) =>
+  updatePmcBits: (machineId, pmcBits, signature) =>
     set((state) => {
       const existing = state.telemetryMap[machineId];
       if (!existing) return state; // 텔레메트리가 아직 없으면 무시 (첫 telemetry 이후 적용)
-      const merged = { ...existing, pmcBits };
+      const merged = { ...existing, pmcBits, pmcReceivedAt: Date.now(), remoteInterlockSignature: signature };
       return {
         telemetryMap: { ...state.telemetryMap, [machineId]: merged },
       };
@@ -891,9 +913,9 @@ export const useMachineStore = create<MachineState>((set, get) => ({
           }
           case 'pmc_update': {
             // PMC 비트 빠른 업데이트 (100ms 주기) — pmcBits만 교체, 나머지 telemetry 유지
-            const p = msg.payload as { machineId: string; pmcBits: Record<string, 0 | 1> };
+            const p = msg.payload as { machineId: string; pmcBits: Record<string, 0 | 1>; signature?: string };
             if (p?.machineId && p?.pmcBits) {
-              store.updatePmcBits(p.machineId, p.pmcBits);
+              store.updatePmcBits(p.machineId, p.pmcBits, p.signature);
             }
             break;
           }
@@ -1140,7 +1162,14 @@ export const useProgramTransferConfig = (machineId: string) => {
 };
 
 export const useControlLock = (machineId: string) => {
-  return useMachineStore((state) => state.controlLockMap[machineId]);
+  const lock = useMachineStore((state) => state.controlLockMap[machineId]);
+  const role = useAuthStore((state) => state.user?.role);
+  return useMemo(() => {
+    if (lock?.isOwner && role !== 'ADMIN' && role !== 'HQ_ENGINEER') {
+      return { ...lock, isOwner: false };
+    }
+    return lock;
+  }, [lock, role]);
 };
 
 export const useControlLockDuration = () => {

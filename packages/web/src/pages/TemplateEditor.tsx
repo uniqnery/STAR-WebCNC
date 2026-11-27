@@ -1,5 +1,5 @@
 // Template Editor - 숨김 경로 관리 도구 (/admin/templates)
-// HQ_ENGINEER/ADMIN 전용: 장비 템플릿 작성/편집/Import/Export
+// HQ_ENGINEER 전용: 장비 템플릿 작성/편집/Import/Export
 
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useAuthStore } from '../stores/authStore';
@@ -475,7 +475,7 @@ function SectionSchedulerConfig({ data, update }: { data: CncTemplate; update: (
 
 const VAR_TYPE_OPTIONS = [
   { value: 'macro', label: '커스텀 변수 (#)', prefix: '#' },
-  { value: 'pcode', label: 'P코드 변수 (#)',  prefix: '#' },
+  { value: 'pcode', label: 'P코드 변수 (P)',  prefix: 'P' },
   { value: 'ddata', label: 'D데이터 (D)',      prefix: 'D' },
 ] as const;
 
@@ -863,7 +863,7 @@ function SectionCapabilities({ data, update }: { data: CncTemplate; update: (pat
 
 export function TemplateEditor() {
   const user = useAuthStore(s => s.user);
-  const canAccess = user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER';
+  const canAccess = user?.role === 'HQ_ENGINEER';
 
   const {
     templates, selectedTemplateId,
@@ -890,14 +890,14 @@ export function TemplateEditor() {
   useEffect(() => { loadTemplates(); }, [loadTemplates]);
 
   useEffect(() => {
-    if (selectedTemplate) {
+    if (selectedTemplate && (formData?.id !== selectedTemplate.id || !isDirty)) {
       setFormData(structuredClone(selectedTemplate));
       setIsDirty(false);
       setDeleteConfirm(false);
-    } else {
+    } else if (!selectedTemplate) {
       setFormData(null);
     }
-  }, [selectedTemplate?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedTemplate, isDirty, formData?.id]);
 
   const updateField = useCallback((path: string, value: unknown) => {
     setFormData(prev => {
@@ -909,10 +909,16 @@ export function TemplateEditor() {
     setIsDirty(true);
   }, []);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!formData) return;
-    updateTemplate(formData.id, formData);
-    setIsDirty(false);
+    try {
+      const applied = await updateTemplate(formData.id, formData);
+      setIsDirty(false);
+      if (applied?.pendingMachines?.length) {
+        alert(`설정 저장 완료\n${applied.notifiedMachines.length ? `적용 완료: ${applied.notifiedMachines.join(', ')}\n` : ''}적용 확인 대기: ${applied.pendingMachines.join(', ')}\n해당 설비의 연결 복구 후 적용 상태를 확인하세요.`);
+      }
+    }
+    catch (error) { alert(error instanceof Error ? error.message : '저장 또는 Agent 적용 실패'); }
   };
 
   const handleImport = () => {
@@ -964,7 +970,7 @@ export function TemplateEditor() {
     return (
       <div className="p-6">
         <div className="bg-red-900/20 text-red-400 p-4 rounded-lg text-sm">
-          HQ 엔지니어/ADMIN 전용 페이지입니다. 접근 권한이 없습니다.
+          본사 엔지니어 전용 페이지입니다. 접근 권한이 없습니다.
         </div>
       </div>
     );

@@ -11,6 +11,7 @@ import { authenticate, authorize } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error';
 import { ApiResponse } from '../types';
 import { UserRole, CommandStatus } from '@prisma/client';
+import { remoteInterlockFailure, isPanelSafetyAction } from '../lib/remoteInterlock';
 
 const router = Router();
 
@@ -28,7 +29,8 @@ router.post('/:machineId',
     res: Response<ApiResponse>
   ) => {
     const { machineId } = req.params;
-    const { command, params } = req.body;
+    const { command: rawCommand, params } = req.body;
+    const command = typeof rawCommand === 'string' ? rawCommand.toUpperCase() : '';
     // ?wait=true : Agent 결과를 최대 timeoutMs 동안 대기 후 반환
     const waitForResult = req.query['wait'] === 'true';
     const timeoutMs     = parseInt(req.query['timeout'] as string) || 30_000;
@@ -79,6 +81,19 @@ router.post('/:machineId',
     }
 
     // Generate correlation ID
+    if (['PMC_WRITE', 'WRITE_MACRO', 'START', 'RESET', 'CYCLE_START', 'SEARCH_PROGRAM', 'REWIND', 'REWIND_PROGRAM'].includes(command)) {
+      const template = command === 'PMC_WRITE' ? await prisma.template.findUnique({ where: { id: machine.templateId }, select: { panelLayout: true } }) : null;
+      const safety = command === 'PMC_WRITE' && isPanelSafetyAction(params ?? {}, template?.panelLayout);
+      const failure = safety ? null : await remoteInterlockFailure(machine.machineId);
+      if (failure) return res.status(409).json({ success: false, error: { code: 'INTERLOCK_FAILED', message: failure } });
+    }
+
+    // Data writes must use their audited, serialized endpoints.
+    if (['WRITE_OFFSET', 'WRITE_COUNT', 'WRITE_TOOL_LIFE_PRESET'].includes(command)) {
+      return res.status(400).json({ success: false, error: { code: 'USE_DATA_ENDPOINT', message: '전용 데이터 수정 API를 사용하세요.' } });
+    }
+
+    // Generate correlation ID
     const correlationId = uuidv4();
 
     // Create command log
@@ -92,32 +107,31 @@ router.post('/:machineId',
       },
     });
 
-    // Send command via MQTT
-    await mqttService.sendCommand(
-      machine.machineId,
-      command,
-      correlationId,
-      params
-    );
-
+    const waitingResult = waitForResult ? commandWaiter.wait(correlationId, timeoutMs) : null;
+    void waitingResult?.catch(() => undefined);
     // Create audit log
     await prisma.auditLog.create({
       data: {
         userId: req.user!.id,
+        actorDisplayName: req.user!.displayName || req.user!.username,
         userRole: req.user!.role,
         action: `command.${command.toLowerCase()}`,
         targetType: 'machine',
         targetId: machine.id,
-        params: { correlationId, params },
+        params: { correlationId, params,
+          ...(req.user!.testRole ? { roleTest: { actualRole: req.user!.actualRole!, effectiveRole: req.user!.role } } : {}) },
         result: 'pending',
         ipAddress: req.ip || 'unknown',
       },
     });
 
+    // Persist the actor before publishing, so a fast Agent response cannot outrun history creation.
+    await mqttService.sendCommand(machine.machineId, command, correlationId, params);
+
     // ── wait=true: Agent 응답을 동기적으로 대기 ──────────────────
     if (waitForResult) {
       try {
-        const cmdResult = await commandWaiter.wait(correlationId, timeoutMs);
+        const cmdResult = await waitingResult!;
         return res.json({
           success: cmdResult.status === 'success',
           data: {

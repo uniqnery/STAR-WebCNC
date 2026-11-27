@@ -212,7 +212,7 @@ router.post('/share/upload', upload.single('file'), async (req: Request, res: Re
       fileNames: [file.originalname],
       status: 'SUCCESS',
       userId: req.user!.id,
-      username: req.user!.username,
+      username: req.user!.username, displayName: req.user!.displayName || req.user!.username,
       fileSizeAfter: file.size,
     });
 
@@ -374,7 +374,7 @@ router.post('/repo/:machineId/path1/upload', requireRole('ADMIN', 'HQ_ENGINEER')
         fileSize: normalizedBytes.length,
         sha256,
         uploadedById: req.user!.id,
-        uploadedBy: req.user!.username,
+        uploadedBy: req.user!.displayName || req.user!.username,
       },
       update: {
         fileName: canonicalName,
@@ -383,7 +383,7 @@ router.post('/repo/:machineId/path1/upload', requireRole('ADMIN', 'HQ_ENGINEER')
         fileSize: normalizedBytes.length,
         sha256,
         uploadedById: req.user!.id,
-        uploadedBy: req.user!.username,
+        uploadedBy: req.user!.displayName || req.user!.username,
       },
     });
 
@@ -407,13 +407,13 @@ router.post('/repo/:machineId/path1/upload', requireRole('ADMIN', 'HQ_ENGINEER')
       path: 'path1',
       status: 'SUCCESS',
       userId: req.user!.id,
-      username: req.user!.username,
+      username: req.user!.username, displayName: req.user!.displayName || req.user!.username,
       fileSizeBefore: beforeSize,
       fileSizeAfter: normalizedBytes.length,
     });
 
     const stat = await fs.stat(filePath);
-    return res.json({ success: true, data: { name: canonicalName, isDirectory: false, size: stat.size, modifiedAt: stat.mtime.toISOString(), programNo, comment, sha256, originalFileName: file.originalname, uploadedBy: req.user!.username } });
+    return res.json({ success: true, data: { name: canonicalName, isDirectory: false, size: stat.size, modifiedAt: stat.mtime.toISOString(), programNo, comment, sha256, originalFileName: file.originalname, uploadedBy: req.user!.displayName || req.user!.username } });
   } catch (err) {
     next(err);
   } finally {
@@ -551,7 +551,7 @@ router.put('/write', async (req: Request, res: Response, next: NextFunction) => 
       fileNames: [fileName],
       status: 'SUCCESS',
       userId: req.user!.id,
-      username: req.user!.username,
+      username: req.user!.username, displayName: req.user!.displayName || req.user!.username,
       fileSizeBefore: beforeSize,
       fileSizeAfter: stat.size,
     });
@@ -647,7 +647,7 @@ router.post('/delete', async (req: Request, res: Response, next: NextFunction) =
         status: result.deleted ? 'SUCCESS' : 'FAILURE',
         errorMessage: result.deleted ? null : 'File delete failed',
         userId: req.user!.id,
-        username: req.user!.username,
+        username: req.user!.username, displayName: req.user!.displayName || req.user!.username,
       });
     }
 
@@ -728,7 +728,7 @@ router.post('/transfer', async (req: Request, res: Response, next: NextFunction)
             status: 'FAILURE',
             correlationId: jobCid,
             userId: req.user!.id,
-            username: req.user!.username,
+            username: req.user!.username, displayName: req.user!.displayName || req.user!.username,
             errorMessage: 'Source file not found in PC shared storage',
           });
           jobs.push({ fileName, correlationId: jobCid });
@@ -746,7 +746,7 @@ router.post('/transfer', async (req: Request, res: Response, next: NextFunction)
           status: 'PENDING',
           correlationId: jobCid,
           userId: req.user!.id,
-          username: req.user!.username,
+          username: req.user!.username, displayName: req.user!.displayName || req.user!.username,
           fileSizeBefore: Buffer.byteLength(content, 'utf-8'),
         });
         // targetProgramNo 지정 시 content의 O라인 치환
@@ -776,7 +776,7 @@ router.post('/transfer', async (req: Request, res: Response, next: NextFunction)
           status: 'PENDING',
           correlationId: jobCid,
           userId: req.user!.id,
-          username: req.user!.username,
+          username: req.user!.username, displayName: req.user!.displayName || req.user!.username,
         });
         mqttService.publish(TOPICS.COMMAND_TO(machineId), {
           timestamp: new Date().toISOString(),

@@ -1388,6 +1388,18 @@ public class FocasDataReader
     /// 마모 오프셋 쓰기 (단일 항목)
     /// axis: "X"=>#2001+t, "Y"=>#2401+t, "Z"=>#2101+t, "R"=>#2201+t
     /// </summary>
+    public double? ReadWearOffsetValue(int pathNo, int toolNo, int axisIdx)
+    {
+        if (!_connection.IsConnected || pathNo < 1 || pathNo > 2 || toolNo < 1 || toolNo > 64 || axisIdx < 0 || axisIdx > 3) return null;
+        try
+        {
+            if (Focas1.cnc_setpath(_connection.Handle, (short)pathNo) != Focas1.EW_OK) return null;
+            var value = ReadMacroVariable(new[] { 2001, 2401, 2101, 2201 }[axisIdx] + toolNo - 1);
+            return value.HasValue ? NormalizeMacro(value.Value) : null;
+        }
+        finally { Focas1.cnc_setpath(_connection.Handle, 1); }
+    }
+
     public bool WriteWearOffset(int pathNo, int toolNo, int axisIdx, double value)
     {
         if (!_connection.IsConnected)
@@ -1693,7 +1705,16 @@ public class FocasDataReader
         }
     }
 
-    private string? ReadProgramCommentViaUpload3(int programNo, int pathNo)
+    public string? ReadProductionProgramComment(int programNo)
+    {
+        if (programNo <= 0 || programNo >= 9000) return null;
+        if (_programCommentCache.TryGetValue((1, programNo), out var cached) && DateTime.UtcNow - cached.ReadAt < ProgramCommentCacheLifetime) return cached.Comment;
+        var comment = ReadProgramCommentViaUpload3(programNo, 1, 200);
+        _programCommentCache[(1, programNo)] = new ProgramCommentCacheEntry(comment ?? "", DateTime.UtcNow);
+        return comment;
+    }
+
+    private string? ReadProgramCommentViaUpload3(int programNo, int pathNo, int timeoutMs = 2000)
     {
         ushort handle = _connection.Handle;
         bool pathSwitched = false;
@@ -1719,7 +1740,7 @@ public class FocasDataReader
 
                 var header = new StringBuilder();
                 byte[] buffer = new byte[512];
-                DateTime deadline = DateTime.UtcNow.AddSeconds(2);
+                DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
 
                 try
                 {

@@ -74,7 +74,7 @@ router.get('/', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req:
     res.json({
       success: true,
       data: {
-        items: logs,
+        items: logs.map(log => ({ ...log, username: log.actorDisplayName ?? log.user?.username ?? '—' })),
         total,
         page,
         limit,
@@ -211,6 +211,7 @@ export async function createAuditLog(input: AuditLogInput): Promise<void> {
     await prisma.auditLog.create({
       data: {
         userId: input.userId,
+        actorDisplayName: (await prisma.user.findUnique({ where: { id: input.userId }, select: { username: true, displayName: true } }))?.displayName || null,
         userRole: input.userRole,
         action: input.action,
         targetType: input.targetType,

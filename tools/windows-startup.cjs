@@ -44,11 +44,12 @@ async function json(url) {
 }
 
 function launch(key, file, args, cwd, env = process.env) {
-  // A detached process can still be starting when the next check runs.
+  // A process can still be starting when the next check runs. On Windows,
+  // detached console children may open Windows Terminal despite windowsHide.
   if (Date.now() - (pending.get(key) ?? 0) < 30000) return;
   const logFile = path.join(runtime, `${key}.log`);
   const output = fs.openSync(logFile, 'a');
-  const child = spawn(file, args, { cwd, env, windowsHide: true, detached: true, stdio: ['ignore', output, output] });
+  const child = spawn(file, args, { cwd, env, windowsHide: true, detached: false, stdio: ['ignore', output, output] });
   child.on('error', () => log(`${key}: launch failed`));
   child.unref();
   fs.closeSync(output);

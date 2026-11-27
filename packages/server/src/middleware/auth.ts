@@ -5,16 +5,18 @@ import { Request, Response, NextFunction } from 'express';
 import { UserRole } from '@prisma/client';
 import { verifyAccessToken, extractBearerToken } from '../auth/jwt';
 import { ApiResponse } from '../types';
+import { resolveTestRole } from '../auth/roleTest';
+import { prisma } from '../lib/prisma';
 
 /**
  * Authentication middleware
  * Verifies JWT Access Token from Authorization header
  */
-export function authenticate(
+export async function authenticate(
   req: Request,
   res: Response<ApiResponse>,
   next: NextFunction
-): void {
+): Promise<void> {
   const token = extractBearerToken(req.headers.authorization);
 
   if (!token) {
@@ -45,8 +47,29 @@ export function authenticate(
   req.user = {
     id: payload.sub,
     username: payload.username,
+    displayName: payload.displayName || payload.username,
     role: payload.role,
   };
+
+  const testRole = req.headers['x-role-test'];
+  if (testRole !== undefined) {
+    try {
+      req.user.role = await resolveTestRole(req.user, testRole);
+      req.user.actualRole = payload.role;
+      req.user.testRole = req.user.role;
+      const actor = req.user;
+      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !req.originalUrl.startsWith('/api/auth/role-test')) {
+        res.once('finish', () => {
+          void prisma.auditLog.create({ data: { userId: actor.id, actorDisplayName: actor.displayName || actor.username, userRole: actor.role, action: 'auth.role_test_request',
+            targetType: 'api', targetId: req.originalUrl.split('?')[0], params: { actualRole: actor.actualRole, testRole: actor.role, method: req.method, status: res.statusCode },
+            result: res.statusCode < 400 ? 'success' : 'failure', ipAddress: req.ip ?? 'unknown' } }).catch(() => console.error('[RoleTest] Request audit failed'));
+        });
+      }
+    } catch {
+      res.status(403).json({ success: false, error: { code: 'ROLE_TEST_FORBIDDEN', message: '권한 테스트는 활성 본사 엔지니어 계정만 사용할 수 있습니다.' } });
+      return;
+    }
+  }
 
   next();
 }
@@ -114,6 +137,7 @@ export function optionalAuth(
       req.user = {
         id: payload.sub,
         username: payload.username,
+        displayName: payload.displayName || payload.username,
         role: payload.role,
       };
     }

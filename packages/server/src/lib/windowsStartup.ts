@@ -24,7 +24,7 @@ export class WindowsStartupError extends Error {
 }
 
 const messages: Record<string, string> = {
-  STARTUP_ADMIN_REQUIRED: 'Windows 예약 작업 등록 권한이 필요합니다. 서버 PC에서 본사 엔지니어가 권한을 확인해 주세요.',
+  STARTUP_ADMIN_REQUIRED: 'Windows 예약 작업 등록 권한이 필요합니다. 서버 PC에서 Windows 계정의 예약 작업 등록 권한을 확인해 주세요.',
   STARTUP_TASK_CONFLICT: '같은 이름의 Windows 작업이 다른 경로나 사용자에 등록되어 있습니다.',
   STARTUP_DEPENDENCIES_MISSING: '서버 PC에 Node.js, .NET과 Docker 설치가 필요합니다.',
   STARTUP_CONFIGURATION_FAILED: 'Windows 자동 시작 설정을 확인하지 못했습니다. 서버 PC의 예약 작업 권한과 설치 파일을 확인해 주세요.',

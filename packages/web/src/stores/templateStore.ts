@@ -313,15 +313,15 @@ const _pendingServerCreates = new Set<string>();
 function syncCreateToServer(
   localId: string,
   tpl: CncTemplate,
-  onSuccess: (serverId: string) => void
+  onSuccess: (serverId: string, serverUpdatedAt: string) => void
 ) {
   if (_pendingServerCreates.has(localId)) return;
   _pendingServerCreates.add(localId);
   templateApi.create(tpl as unknown as Record<string, unknown>)
     .then((res) => {
       _pendingServerCreates.delete(localId);
-      const serverTpl = res.data as { id: string } | null;
-      if (res.success && serverTpl?.id) onSuccess(serverTpl.id);
+      const serverTpl = res.data as { id: string; updatedAt: string } | null;
+      if (res.success && serverTpl?.id && serverTpl.updatedAt) onSuccess(serverTpl.id, serverTpl.updatedAt);
     })
     .catch((err) => {
       _pendingServerCreates.delete(localId);
@@ -334,14 +334,18 @@ interface TemplateState {
   selectedTemplateId: string | null;
 
   loadTemplates: () => void;
+  refreshTemplates: () => Promise<void>;
   selectTemplate: (id: string | null) => void;
   createTemplate: () => string;
   duplicateTemplate: (id: string) => string;
-  updateTemplate: (id: string, updates: Partial<CncTemplate>) => void;
+  updateTemplate: (id: string, updates: Partial<CncTemplate>) => Promise<{ notifiedMachines: string[]; pendingMachines: string[] } | undefined>;
   deleteTemplate: (id: string) => void;
   importFromJsonc: (text: string) => string;
   exportToJsonc: (id: string) => string;
 }
+
+let templateReadGeneration = 0;
+let pendingRefresh: { generation: number; promise: Promise<void> } | undefined;
 
 function saveToStorage(templates: CncTemplate[]) {
   try {
@@ -780,35 +784,45 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
 
   loadTemplates: () => {
     const stored = loadFromStorage();
-    if (stored && stored.length > 0) {
+    if (get().templates.length === 0 && stored && stored.length > 0) {
       // 로컬 데이터 우선 (사용자 편집 내용 보존)
       const savedId = localStorage.getItem(SELECTED_KEY);
       const restoredId = stored.find(t => t.id === savedId)?.id ?? stored[0].id;
       set({ templates: stored.map((template) => ({ ...template, schedulerConfig: migrateSchedulerConfig(template.schedulerConfig) })), selectedTemplateId: restoredId });
     }
 
-    // 항상 서버에서 최신 템플릿 로드 (로컬 캐시 덮어쓰기)
-    templateApi.getAll()
+    void get().refreshTemplates().catch(() => undefined);
+  },
+
+  refreshTemplates: () => {
+    const generation = templateReadGeneration;
+    if (pendingRefresh?.generation === generation) return pendingRefresh.promise;
+    const promise = templateApi.getAll()
       .then((res) => {
+        if (!res.success || !Array.isArray(res.data)) throw new Error('템플릿 최신 설정을 확인하지 못했습니다.');
+        if (generation !== templateReadGeneration) return;
         const serverTemplates = (res.data as CncTemplate[] | null);
-        if (serverTemplates && serverTemplates.length > 0) {
+        if (serverTemplates) {
           const migrated = serverTemplates.map((t) => ({
             ...t,
             topBarInterlock: migrateTopBarInterlock(t.topBarInterlock as unknown),
             schedulerConfig: migrateSchedulerConfig(t.schedulerConfig),
-          }));
+          })).map(t => {
+            const previous = get().templates.find(p => p.id === t.id);
+            return previous && JSON.stringify(previous) === JSON.stringify(t) ? previous : t;
+          });
+          migrated.push(...get().templates.filter(t => t.id.startsWith('tpl-')));
           saveToStorage(migrated);
           set((s) => ({
             templates: migrated,
             selectedTemplateId: migrated.find((t) => t.id === s.selectedTemplateId)
               ? s.selectedTemplateId
-              : migrated[0].id,
+              : migrated[0]?.id ?? null,
           }));
         }
-      })
-      .catch(() => {
-        // 서버 미연결 시 로컬 캐시 유지. 로컬도 없으면 빈 배열 유지
-      });
+      }).finally(() => { if (pendingRefresh?.promise === promise) pendingRefresh = undefined; });
+    pendingRefresh = { generation, promise };
+    return promise;
   },
 
   selectTemplate: (id) => {
@@ -841,9 +855,9 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     saveToStorage(updated);
     set({ templates: updated, selectedTemplateId: dup.id });
 
-    syncCreateToServer(localId, dup, (serverId) => {
+    syncCreateToServer(localId, dup, (serverId, serverUpdatedAt) => {
       set((s) => {
-        const templates = s.templates.map(t => t.id === localId ? { ...t, id: serverId } : t);
+        const templates = s.templates.filter(t => t.id !== serverId).map(t => t.id === localId ? { ...t, id: serverId, updatedAt: serverUpdatedAt } : t);
         saveToStorage(templates);
         return {
           templates,
@@ -855,22 +869,22 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     return dup.id;
   },
 
-  updateTemplate: (id, updates) => {
+  updateTemplate: async (id, updates) => {
+    templateReadGeneration++;
     const updated = get().templates.map(t =>
-      t.id === id ? { ...t, ...updates, updatedAt: new Date().toISOString() } : t
+      t.id === id ? { ...t, ...updates } : t
     );
-    saveToStorage(updated);
-    set({ templates: updated });
-
     const tpl = updated.find(t => t.id === id);
     if (!tpl) return;
 
     if (id.startsWith('tpl-')) {
+      saveToStorage(updated);
+      set({ templates: updated });
       // 로컬 전용 템플릿 — 필수 필드가 채워지면 서버에 신규 생성
       if (tpl.templateId && tpl.name && tpl.systemInfo?.cncType && tpl.systemInfo?.seriesName) {
-        syncCreateToServer(id, tpl, (serverId) => {
+        syncCreateToServer(id, tpl, (serverId, serverUpdatedAt) => {
           set((s) => {
-            const templates = s.templates.map(t => t.id === id ? { ...t, id: serverId } : t);
+            const templates = s.templates.filter(t => t.id !== serverId).map(t => t.id === id ? { ...t, id: serverId, updatedAt: serverUpdatedAt } : t);
             saveToStorage(templates);
             return {
               templates,
@@ -881,9 +895,29 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
       }
     } else {
       // 서버에 이미 존재하는 템플릿 — 업데이트
-      templateApi.update(id, tpl as unknown as Record<string, unknown>)
-        .then(() => templateApi.reload(id))
-        .catch((err) => console.error('[TemplateStore] Server update failed:', err));
+      const saved = await templateApi.update(id, { ...tpl, expectedUpdatedAt: updates.updatedAt ?? tpl.updatedAt } as unknown as Record<string, unknown>);
+      if (!saved.success) {
+        if (saved.error?.code === 'TEMPLATE_CONFLICT') void get().refreshTemplates().catch(() => undefined);
+        throw new Error(saved.error?.message ?? '서버 저장 실패');
+      }
+      const savedTemplate = saved.data as CncTemplate | undefined;
+      if (!savedTemplate?.updatedAt) throw new Error('저장된 템플릿 버전을 확인하지 못했습니다. 최신 설정을 다시 불러오세요.');
+      templateReadGeneration++;
+      try {
+        const applied = await templateApi.reload(id);
+        if (!applied.success) return { notifiedMachines: [], pendingMachines: ['적용 상태 확인 불가'] };
+        return applied.data as { notifiedMachines: string[]; pendingMachines: string[] };
+      } catch {
+        // Saving succeeded even if the apply request lost its connection.
+        return { notifiedMachines: [], pendingMachines: ['적용 상태 확인 불가'] };
+      } finally {
+        // Publish changed variable settings only after the apply attempt, so an
+        // open monitor does not query the Agent with its previous configuration.
+        templateReadGeneration++;
+        const templates = get().templates.map(t => t.id === id && new Date(t.updatedAt).getTime() <= new Date(savedTemplate.updatedAt).getTime() ? savedTemplate : t);
+        saveToStorage(templates);
+        set({ templates });
+      }
     }
   },
 

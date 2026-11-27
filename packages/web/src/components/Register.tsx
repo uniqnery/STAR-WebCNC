@@ -9,6 +9,7 @@ export function Register() {
 
   const [formData, setFormData] = useState({
     username: '',
+    displayName: '',
     email: '',
     password: '',
     passwordConfirm: '',
@@ -44,7 +45,8 @@ export function Register() {
         formData.username,
         formData.email,
         formData.password,
-        formData.registrationCode
+        formData.registrationCode,
+        formData.displayName
       );
 
       if (response.success) {
@@ -94,7 +96,7 @@ export function Register() {
                 htmlFor="username"
                 className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
               >
-                사용자명
+                로그인 ID
               </label>
               <input
                 id="username"
@@ -103,10 +105,21 @@ export function Register() {
                 value={formData.username}
                 onChange={handleChange}
                 className={inputCls}
-                placeholder="사용자명 입력"
+                placeholder="로그인 ID 입력"
                 required
                 autoComplete="username"
               />
+            </div>
+
+            <div>
+              <label
+                htmlFor="displayName"
+                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+              >
+                사용자명 (이름)
+              </label>
+              <input id="displayName" name="displayName" type="text" value={formData.displayName} onChange={handleChange}
+                className={inputCls} placeholder="이름 입력" autoComplete="name" maxLength={80} required />
             </div>
 
             <div>

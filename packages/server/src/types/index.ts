@@ -4,6 +4,7 @@ import { UserRole } from '@prisma/client';
 
 // JWT Payload
 export interface AccessTokenPayload {
+  displayName?: string;
   sub: string;        // User ID
   username: string;
   role: UserRole;
@@ -29,6 +30,7 @@ export interface LoginResponse {
   user: {
     id: string;
     username: string;
+    displayName?: string;
     email: string;
     role: UserRole;
   };
@@ -45,7 +47,10 @@ declare global {
       user?: {
         id: string;
         username: string;
+        displayName?: string;
         role: UserRole;
+        actualRole?: UserRole;
+        testRole?: UserRole;
       };
     }
   }

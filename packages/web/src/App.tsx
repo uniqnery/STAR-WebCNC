@@ -1,6 +1,7 @@
 import { useEffect, Component, ReactNode, useState } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
+import { useFeatureStore } from './stores/featureStore';
 import { useMachineStore } from './stores/machineStore';
 import { useCameraStore } from './stores/cameraStore';
 import { Login } from './components/Login';
@@ -22,6 +23,7 @@ import { InterlockEditor } from './pages/InterlockEditor';
 import { SchedulerConfig } from './pages/SchedulerConfig';
 import { Simtos } from './pages/Simtos';
 import { Monitoring } from './pages/Monitoring';
+import { useTemplateSync } from './hooks/useTemplateSync';
 
 // ── Copy Button ───────────────────────────────────────────
 function CopyButton({ text }: { text: string }) {
@@ -118,9 +120,16 @@ clearStaleMockCache();
 // ── WebSocket lifecycle + machines loading on login ───────
 function WsConnector() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  useTemplateSync(isAuthenticated);
   const accessToken = useAuthStore((s) => s.accessToken);
   const setAuth = useAuthStore((s) => s.setAuth);
   const setAccessToken = useAuthStore((s) => s.setAccessToken);
+  const testRole = useAuthStore((s) => s.testRole);
+  useEffect(() => {
+    if (!isAuthenticated || !accessToken) return;
+    const load = () => { void useFeatureStore.getState().load().catch(() => undefined); };
+    load(); const timer = setInterval(load, 15000); return () => clearInterval(timer);
+  }, [isAuthenticated, accessToken]);
   const logout = useAuthStore((s) => s.logout);
   const initWebSocket = useMachineStore((s) => s.initWebSocket);
   const destroyWebSocket = useMachineStore((s) => s.destroyWebSocket);
@@ -186,7 +195,7 @@ function WsConnector() {
     return () => {
       destroyWebSocket();
     };
-  }, [isAuthenticated, accessToken, initWebSocket, destroyWebSocket, fetchMachines]);
+  }, [isAuthenticated, accessToken, testRole, initWebSocket, destroyWebSocket, fetchMachines]);
 
   return null;
 }

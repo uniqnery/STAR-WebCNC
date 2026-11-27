@@ -36,6 +36,23 @@ export function Dashboard() {
 
   const { isConnected, subscribe } = useWebSocket();
 
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      try {
+        const response = await machineApi.getDailyRunRates();
+        if (!cancelled) useMachineStore.getState().setDailyRunRates(response.success && response.data ? response.data.items : []);
+      } catch {
+        if (!cancelled) useMachineStore.getState().setDailyRunRates([]);
+      } finally {
+        if (!cancelled) timer = setTimeout(refresh, 10000);
+      }
+    };
+    void refresh();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, []);
+
   // Load machines on mount (skip if mock data already exists)
   useEffect(() => {
     if (machines.length > 0) {

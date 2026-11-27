@@ -6,6 +6,8 @@ import { config } from '../config';
 
 // MQTT Topics
 export const TOPICS = {
+  AGENT_COUNTER: 'star-webcnc/agent/+/counter',
+  AGENT_PRODUCTION: 'star-webcnc/agent/+/production',
   // Agent → Server
   AGENT_STATUS: 'star-webcnc/agent/+/status',           // Agent 상태 보고
   AGENT_TELEMETRY: 'star-webcnc/agent/+/telemetry',     // 장비 실시간 데이터
@@ -187,6 +189,8 @@ class MqttService {
       TOPICS.AGENT_ALARM,
       TOPICS.AGENT_COMMAND_RESULT,
       TOPICS.AGENT_EVENT,
+      TOPICS.AGENT_PRODUCTION,
+      TOPICS.AGENT_COUNTER,
     ];
 
     this.client.subscribe(topics, { qos: 1 }, (err) => {

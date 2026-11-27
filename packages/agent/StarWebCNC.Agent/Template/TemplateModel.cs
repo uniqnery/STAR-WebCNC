@@ -72,6 +72,8 @@ public class PanelGroupMinimal
 
 public class PanelKeyMinimal
 {
+    public string Id { get; set; } = "";
+    public string ReqAddr { get; set; } = "";
     public bool HasLamp { get; set; }
     [JsonProperty("lampAddr")]
     public string? LampAddr { get; set; }
@@ -361,6 +363,9 @@ public class TopBarInterlockField
 /// </summary>
 public class TopBarInterlockPageConfig
 {
+    [JsonIgnore]
+    public string Signature => string.Join("|", new[] { InterlockEnabled ? "1" : "0" }.Concat(
+        Fields.Where(f => f.Enabled).Select(f => $"{f.PmcAddr.ToUpperInvariant()}:{f.Contact.ToUpperInvariant()}").OrderBy(s => s, StringComparer.Ordinal)));
     /// <summary>이 페이지 전체 인터락 활성화 여부 (false면 "인터락 OFF" 표시)</summary>
     public bool InterlockEnabled { get; set; } = true;
 
@@ -379,9 +384,10 @@ public class TopBarInterlockPageConfig
         foreach (var field in Fields)
         {
             if (!field.Enabled) continue;
+            if (field.Contact != "A" && field.Contact != "B") return false;
 
             var addr = field.ParsedAddress;
-            if (addr == null) return false;
+            if (addr == null || addr.Bit < 0 || addr.Bit > 7 || addr.Address < 0) return false;
 
             var raw = pmcReader(addr);
             if (raw == null) return false;

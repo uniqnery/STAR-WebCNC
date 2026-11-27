@@ -1,6 +1,7 @@
 // API Client
 
 import { useAuthStore } from '../stores/authStore';
+import type { DailyRunSummary } from '../stores/machineStore';
 import type { CounterField } from '../stores/templateStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -32,6 +33,8 @@ class ApiClient {
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
+    const testRole = useAuthStore.getState().testRole;
+    if (testRole) headers['X-Role-Test'] = testRole;
 
     return headers;
   }
@@ -140,6 +143,8 @@ class ApiClient {
     const headers: HeadersInit = {};
     const token = useAuthStore.getState().accessToken;
     if (token) headers['Authorization'] = `Bearer ${token}`;
+    const testRole = useAuthStore.getState().testRole;
+    if (testRole) headers['X-Role-Test'] = testRole;
     return this.request<T>(`${this.baseUrl}${path}`, {
       method: 'POST',
       headers,
@@ -153,24 +158,28 @@ export const api = new ApiClient(API_BASE_URL);
 
 // Auth API
 export const authApi = {
+  setTestRole: (role: 'USER' | 'ADMIN' | 'HQ_ENGINEER') =>
+    api.post<{ role: 'USER' | 'ADMIN' | 'HQ_ENGINEER'; releasedMachines: string[] }>('/api/auth/role-test', { role }),
   login: (username: string, password: string) =>
     api.post<{
       accessToken: string;
       user: {
         id: string;
         username: string;
+        displayName?: string;
         email: string;
         role: 'USER' | 'ADMIN' | 'HQ_ENGINEER';
       };
     }>('/api/auth/login', { username, password }),
 
-  register: (username: string, email: string, password: string, registrationCode: string) =>
+  register: (username: string, email: string, password: string, registrationCode: string, displayName: string) =>
     api.post<{ id: string; username: string; email: string }>(
       '/api/auth/register',
-      { username, email, password, registrationCode }
+      { username, displayName, email, password, registrationCode }
     ),
 
   logout: () => api.post('/api/auth/logout'),
+  updateProfile: (displayName: string) => api.put<{ accessToken: string; user: import('../stores/authStore').User }>('/api/auth/profile', { displayName }),
 
   refresh: () =>
     api.post<{ accessToken: string }>('/api/auth/refresh'),
@@ -179,6 +188,7 @@ export const authApi = {
     api.get<{
       id: string;
       username: string;
+      displayName?: string;
       email: string;
       role: 'USER' | 'ADMIN' | 'HQ_ENGINEER';
     }>('/api/auth/me'),
@@ -186,6 +196,7 @@ export const authApi = {
 
 // Machine API
 export const machineApi = {
+  getDailyRunRates: () => api.get<{ items: DailyRunSummary[] }>('/api/machines/daily-run-rates'),
   getAll: (page = 1, limit = 20) =>
     api.get<{
       items: unknown[];
@@ -289,7 +300,7 @@ export const schedulerApi = {
   resyncProgramRow: (rowId: string) =>
     api.post(`/api/scheduler/rows/${rowId}/resync-program`),
 
-  updateRow: (rowId: string, data: { mainProgramNo?: string; subProgramNo?: string | null; preset?: number; count?: number }) =>
+  updateRow: (rowId: string, data: { mainProgramNo?: string; subProgramNo?: string | null; preset?: number; count?: number; productionComment?: string }) =>
     api.put(`/api/scheduler/rows/${rowId}`, data),
 
   deleteRow: (rowId: string) =>
@@ -388,6 +399,11 @@ export const backupApi = {
 
 // Production API
 export const productionApi = {
+  correct: (data: { eventId: string; machineId: string; referenceEventId: string; quantity: number; reason: string; programNo: string; productionName: string }) => api.post('/api/production/corrections', data),
+  getFeatures: () => api.get<{ mesEnabled: boolean }>('/api/production/features'),
+  setFeatures: (mesEnabled: boolean) => api.put<{ mesEnabled: boolean }>('/api/production/features', { mesEnabled }),
+  getAssignment: (machineId: string) => api.get<{ assignment: { workOrderId: string } | null; orders: { id: string; orderNumber: string; productName?: string; programNumber?: string }[] }>(`/api/production/assignments/${machineId}`),
+  setAssignment: (machineId: string, workOrderId: string | null) => api.put(`/api/production/assignments/${machineId}`, { workOrderId }),
   getStats: (timeRange: 'today' | 'week' | 'month', machineId?: string) => {
     const params = new URLSearchParams({ timeRange });
     if (machineId) params.append('machineId', machineId);
@@ -413,6 +429,7 @@ export const workOrderApi = {
     orderNumber: string;
     productCode: string;
     productName: string;
+    productionComment: string;
     targetQuantity: number;
     assignedMachine: string;
     programNumber: string;
@@ -513,9 +530,9 @@ export const ncDataApi = {
 
   // 카운터 데이터 읽기 (템플릿 CounterConfig 기반)
   readCount: (machineId: string) =>
-    api.get<{ fields: (CounterField & { value: number | null })[] }>(`/api/machines/${machineId}/count`),
+    api.get<{ fields: (CounterField & { value: number | null })[]; cycleTimeSeconds?: number | null; runState?: number | null; presetMinGap?: number }>(`/api/machines/${machineId}/count`),
 
-  // 카운터 변수 쓰기 (제어권 필요)
+  // 카운터 변수 쓰기 (수정 권한 필요)
   writeCountVar: (machineId: string, field: Pick<CounterField, 'key' | 'varType' | 'varNo'>, value: number) =>
     api.put(`/api/machines/${machineId}/count`, { key: field.key, varType: field.varType, varNo: field.varNo, value }),
 
@@ -523,9 +540,9 @@ export const ncDataApi = {
   readToolLife: (machineId: string, path = 1) =>
     api.get(`/api/machines/${machineId}/tool-life?path=${path}`),
 
-  // 공구 수명 변수 쓰기 (제어권 필요)
-  writeToolLifeVar: (machineId: string, varNo: number, value: number, varType?: string, dataType?: string) =>
-    api.put(`/api/machines/${machineId}/tool-life`, { varNo, value, varType, dataType }),
+  // 공구 수명 변수 쓰기 (수정 권한 필요)
+  writeToolLifeVar: (machineId: string, varNo: number, value: number, varType?: string, dataType?: string, path = 1) =>
+    api.put(`/api/machines/${machineId}/tool-life`, { varNo, value, varType, dataType, path }),
 };
 
 // File Management API (저장소/트랜스퍼/뷰어)

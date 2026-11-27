@@ -1,5 +1,7 @@
 // WebSocket Client - Singleton service for real-time server connection
 // Handles connect/disconnect/reconnect and message dispatching
+import { useAuthStore } from '../stores/authStore';
+import { websocketUrl } from './websocketUrl';
 
 export interface WsMessage {
   type: string;
@@ -24,6 +26,7 @@ class WsClientService {
   private tokenGetter: () => string = () => '';
   private shouldReconnect: boolean = false;
   private lastMessageAt: number = 0; // 0 = 아직 메시지 미수신
+  private subscriptions = new Set<string>();
 
   private readonly messageHandlers: Set<MessageHandler> = new Set();
   private readonly connectHandlers: Set<ConnectHandler> = new Set();
@@ -53,6 +56,7 @@ class WsClientService {
   }
 
   disconnect(): void {
+    this.subscriptions.clear();
     this.shouldReconnect = false;
     this._clearStalenessTimer();
     if (this.reconnectTimer) {
@@ -72,6 +76,7 @@ class WsClientService {
   }
 
   subscribe(machineIds: string[]): void {
+    machineIds.forEach(id => this.subscriptions.add(id));
     this.send({ type: 'subscribe', payload: { machineIds } });
   }
 
@@ -106,11 +111,9 @@ class WsClientService {
     }
 
     const token = this.tokenGetter();
-    // VITE_API_URL이 설정된 경우 사용, 없으면 현재 브라우저 hostname + 3000 포트 (모바일/LAN 접속 대응)
-    const apiBase: string = import.meta.env.VITE_API_URL
-      || `http://${window.location.hostname}:3000`;
-    const wsBase = apiBase.replace(/^http/, 'ws');
-    const url = `${wsBase}/ws?token=${encodeURIComponent(token)}`;
+    const wsBase = websocketUrl(window.location, import.meta.env.VITE_API_URL, import.meta.env.VITE_WS_URL);
+    const testRole = useAuthStore.getState().testRole;
+    const url = `${wsBase}${wsBase.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}${testRole ? `&testRole=${testRole}` : ''}`;
 
     try {
       // 로컬 변수에 저장 — 클로저가 this.ws가 아닌 생성 시점의 인스턴스를 참조해야 함
@@ -128,6 +131,7 @@ class WsClientService {
           this.reconnectTimer = null;
         }
         this.connectHandlers.forEach((h) => h());
+        if (this.subscriptions.size) this.send({ type: 'subscribe', payload: { machineIds: [...this.subscriptions] } });
 
         // 좀비 연결 감지: 연결은 OPEN이지만 메시지가 없을 때 강제 재연결
         // M-15: 로컬 ws 변수 클로저로 캡처, this.ws !== ws 체크로 오래된 타이머 무효화

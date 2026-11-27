@@ -12,15 +12,28 @@ $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $hash = [Security.Cryptography.SHA256]::Create()
 $suffix = ([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($root.ToLowerInvariant())))).Replace('-', '').Substring(0, 10)
 $taskName = "Star-WebCNC-Startup-$suffix"
-$taskArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $PSCommandPath + '" -Action Run'
+$legacyTaskArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $PSCommandPath + '" -Action Run'
+$launcher = Join-Path $PSScriptRoot 'windows-startup.vbs'
+$taskExecute = Join-Path $env:SystemRoot 'System32\wscript.exe'
+$taskArgs = '//B //Nologo "' + $launcher + '"'
 
 try {
     if ($Action -eq 'Run') {
         if (!(Test-Path -LiteralPath $intentFile)) { exit 0 }
         $node = (Get-Command node.exe -ErrorAction Stop).Source
-        Set-Location -LiteralPath $root
-        & $node (Join-Path $PSScriptRoot 'windows-startup.cjs')
-        exit $LASTEXITCODE
+        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $startInfo.FileName = $node
+        $startInfo.Arguments = '"' + (Join-Path $PSScriptRoot 'windows-startup.cjs') + '"'
+        $startInfo.WorkingDirectory = $root
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $coordinator = [System.Diagnostics.Process]::Start($startInfo)
+        try {
+            $coordinator.WaitForExit()
+            exit $coordinator.ExitCode
+        } finally {
+            $coordinator.Dispose()
+        }
     }
 
     $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -29,7 +42,10 @@ try {
         if ($owner -notmatch '^S-1-') {
             $owner = (New-Object Security.Principal.NTAccount($owner)).Translate([Security.Principal.SecurityIdentifier]).Value
         }
-        if ($task.Actions.Arguments -ne $taskArgs -or $owner -ne $identity.User.Value) {
+        $actions = @($task.Actions)
+        $currentAction = $actions.Count -eq 1 -and $actions[0].Arguments -eq $taskArgs -and $actions[0].Execute -eq $taskExecute
+        $legacyAction = $actions.Count -eq 1 -and $actions[0].Arguments -eq $legacyTaskArgs -and $actions[0].Execute -eq (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')
+        if ((!$currentAction -and !$legacyAction) -or $owner -ne $identity.User.Value) {
             throw 'STARTUP_TASK_CONFLICT'
         }
     }
@@ -39,10 +55,9 @@ try {
         foreach ($dependency in @('dotnet.exe', 'docker.exe')) {
             if (!(Get-Command $dependency -ErrorAction SilentlyContinue)) { throw 'STARTUP_DEPENDENCIES_MISSING' }
         }
-        if (!(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'windows-startup.cjs'))) { throw 'STARTUP_FILES_MISSING' }
+        if (!(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'windows-startup.cjs')) -or !(Test-Path -LiteralPath $launcher) -or !(Test-Path -LiteralPath $taskExecute)) { throw 'STARTUP_FILES_MISSING' }
         New-Item -ItemType Directory -Path $runtime -Force | Out-Null
-        $execute = Join-Path $PSHOME 'powershell.exe'
-        $taskAction = New-ScheduledTaskAction -Execute $execute -Argument $taskArgs -WorkingDirectory $root
+        $taskAction = New-ScheduledTaskAction -Execute $taskExecute -Argument $taskArgs -WorkingDirectory $root
         $trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity.Name
         $principal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Limited
         $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries

@@ -19,6 +19,7 @@ public class CommandHandler
     private readonly FocasDataReader _dataReader;
     private readonly MqttService _mqttService;
     private readonly TemplateLoader _templateLoader;
+    private readonly StarWebCNC.Agent.Collectors.CounterJournal _counterJournal;
 
     public CommandHandler(
         ILogger<CommandHandler> logger,
@@ -26,7 +27,7 @@ public class CommandHandler
         FocasConnection connection,
         FocasDataReader dataReader,
         MqttService mqttService,
-        TemplateLoader templateLoader)
+        TemplateLoader templateLoader, StarWebCNC.Agent.Collectors.CounterJournal counterJournal)
     {
         _logger = logger;
         _settings = options.Value;
@@ -34,6 +35,7 @@ public class CommandHandler
         _dataReader = dataReader;
         _mqttService = mqttService;
         _templateLoader = templateLoader;
+        _counterJournal = counterJournal;
     }
 
     /// <summary>
@@ -65,7 +67,7 @@ public class CommandHandler
         {
             // 인터락 체크 (제어 명령의 경우)
             // NC 데이터 쓰기(오프셋/카운터/공구수명)는 PMC 인터락 면제 — 제어권만으로 허용
-            if (IsControlCommand(command.Command) && !IsNcDataWriteCommand(command.Command))
+            if (IsControlCommand(command.Command) && !IsNcDataWriteCommand(command.Command) && !IsPanelSafetyAction(command))
             {
                 if (!CheckInterlock())
                 {
@@ -116,6 +118,10 @@ public class CommandHandler
     {
         return command?.ToUpper() switch
         {
+            "PMC_WRITE"              => true,
+            "SEARCH_PROGRAM"         => true,
+            "REWIND"                 => true,
+            "REWIND_PROGRAM"         => true,
             "WRITE_MACRO"            => true,
             "START"                  => true,
             "STOP"                   => true,
@@ -145,7 +151,7 @@ public class CommandHandler
 
     private bool CheckInterlock()
     {
-        if (_templateLoader.CurrentTemplate == null)
+        if (_templateLoader.CurrentTemplate == null || _templateLoader.CurrentTemplate.TemplateId == "FALLBACK_TEMPLATE")
             return false;
 
         // 인터락 조건 체크 (탑바 인터락 통합 — Remote 페이지 기준)
@@ -162,6 +168,16 @@ public class CommandHandler
     }
 
     #region Command Implementations
+
+    private bool IsPanelSafetyAction(CommandMessage command)
+    {
+        if (command.Command?.ToUpperInvariant() != "PMC_WRITE" || command.Params == null) return false;
+        var address = command.Params.GetValueOrDefault("address")?.ToString();
+        if (!int.TryParse(command.Params.GetValueOrDefault("value")?.ToString(), out var value)) return false;
+        var matches = _templateLoader.CurrentTemplate?.PanelLayout.SelectMany(g => g.Keys).Where(k =>
+            string.Equals(k.ReqAddr, address, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(address)).ToList();
+        return matches?.Count == 1 && (value == 0 || (value == 1 && new[] { "STOP", "FEED_HOLD", "CYCLE_STOP" }.Contains(matches[0].Id)));
+    }
 
     private Task<CommandResultMessage> ExecuteGetStatusAsync(CommandMessage command)
     {
@@ -243,7 +259,7 @@ public class CommandHandler
     private async Task<CommandResultMessage> ExecuteReloadTemplateAsync(CommandMessage command)
     {
         var template = await _templateLoader.ReloadTemplateAsync();
-        if (template == null)
+        if (template == null || template.TemplateId == "FALLBACK_TEMPLATE")
             return CreateFailureResult(command, "RELOAD_FAILED", "템플릿 리로드 실패");
 
         return new CommandResultMessage
@@ -492,17 +508,18 @@ public class CommandHandler
         if (!command.Params.TryGetValue("value",   out var vObj)  || !double.TryParse(vObj?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double value))
             return Task.FromResult(CreateFailureResult(command, "INVALID_PARAMS", "value(double) 필요"));
 
-        bool ok = _dataReader.WriteWearOffset(pathNo, toolNo, axisIdx, value);
-        if (!ok)
-            return Task.FromResult(CreateFailureResult(command, "WRITE_FAILED", "오프셋 쓰기 실패"));
-
-        return Task.FromResult(new CommandResultMessage
+        if (pathNo < 1 || pathNo > 2 || toolNo < 1 || toolNo > 64 || axisIdx < 0 || axisIdx > 3)
+            return Task.FromResult(CreateFailureResult(command, "INVALID_PARAMS", "Path/공구/축 범위를 확인하세요."));
+        double? delta = null;
+        if (command.Params.TryGetValue("additiveDelta", out var deltaObj) && deltaObj != null)
         {
-            MachineId     = _settings.MachineId,
-            CorrelationId = command.CorrelationId,
-            Status        = "success",
-            Result        = new { path = pathNo, toolNo, axisIdx, value, written = true },
-        });
+            if (!double.TryParse(deltaObj.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d))
+                return Task.FromResult(CreateFailureResult(command, "INVALID_PARAMS", "증감값이 올바르지 않습니다."));
+            delta = d;
+        }
+        var outcome = VerifiedDataWrite.Execute(() => _dataReader.ReadWearOffsetValue(pathNo, toolNo, axisIdx),
+            target => _dataReader.WriteWearOffset(pathNo, toolNo, axisIdx, target), value, delta);
+        return Task.FromResult(VerifiedResult(command, outcome, new() { ["path"] = pathNo, ["toolNo"] = toolNo, ["axisIdx"] = axisIdx }));
     }
 
     /// <summary>
@@ -531,12 +548,15 @@ public class CommandHandler
             return new { key = r.Key, label = f.Label, value = r.Value, unit = f.Unit, varNo = r.VarNo, varType = f.VarType.ToLowerInvariant(), @readonly = f.Readonly };
         }).ToList();
 
+        var display = _templateLoader.CurrentTemplate!.SchedulerConfig.CountDisplay;
+        bool hms = !string.IsNullOrWhiteSpace(display.CycleTimeHmsStartAddr);
+        double? cycleMs = _dataReader.ReadCycleTimeMs(hms ? display.CycleTimeHmsStartAddr! : display.CycleTimeAddr, display.CycleTimeMultiplier, hms);
         return Task.FromResult(new CommandResultMessage
         {
             MachineId     = _settings.MachineId,
             CorrelationId = command.CorrelationId,
             Status        = "success",
-            Result        = new { fields = output },
+            Result        = new { fields = output, cycleTimeSeconds = cycleMs / 1000.0, runState = _dataReader.ReadStatus()?.Run, presetMinGap = 2 },
         });
     }
 
@@ -589,22 +609,39 @@ public class CommandHandler
         if (candidates.Count != 1 || candidates[0].Readonly)
             return Task.FromResult(CreateFailureResult(command, "COUNTER_FIELD_CHANGED", "수정 가능한 카운터 변수를 다시 조회하세요."));
 
-        bool ok = candidates[0].VarType.ToLowerInvariant() switch
-        {
-            "pcode" => _dataReader.WritePcodeMacroVariable(varNo, value),
-            "macro" => _dataReader.WriteMacroVariable(varNo, value),
-            _ => false,
-        };
-        if (!ok)
-            return Task.FromResult(CreateFailureResult(command, "WRITE_FAILED", "카운터 쓰기 실패"));
+        bool quantityField = candidates[0].Key is "preset" or "count" or "total";
+        if (quantityField && !CounterWriteRules.IsQuantity(value))
+            return Task.FromResult(CreateFailureResult(command, "INVALID_COUNTER_VALUE", "수량은 허용 범위의 0 이상 정수로 입력하세요."));
 
-        return Task.FromResult(new CommandResultMessage
-        {
-            MachineId     = _settings.MachineId,
-            CorrelationId = command.CorrelationId,
-            Status        = "success",
-            Result        = new { varNo, value, written = true },
-        });
+        var type = candidates[0].VarType.ToLowerInvariant();
+        var display = _templateLoader.CurrentTemplate!.SchedulerConfig.CountDisplay;
+        string? trackedField = varNo == display.CountMacroNo && string.Equals(type, display.CountVarType, StringComparison.OrdinalIgnoreCase) ? "count"
+            : varNo == display.PresetMacroNo && string.Equals(type, display.PresetVarType, StringComparison.OrdinalIgnoreCase) ? "preset" : null;
+        bool firstRead = true;
+        CounterWriteRules.PresetResult? presetCheck = null;
+        bool Write(double target) => type == "pcode" ? _dataReader.WritePcodeMacroVariable(varNo, target) : _dataReader.WriteMacroVariable(varNo, target);
+        var outcome = VerifiedDataWrite.Execute(
+            () => {
+                var read = type == "pcode" ? _dataReader.ReadPcodeMacroVariable(varNo) : _dataReader.ReadMacroVariable(varNo);
+                // Persist intent BEFORE writing. If interrupted, the next observation
+                // is still classified as a manual adjustment, not production.
+                if (firstRead && trackedField != null && read.HasValue) _counterJournal.BeginAdjustment(trackedField, read.Value, command.CorrelationId ?? Guid.NewGuid().ToString());
+                firstRead = false; return read;
+            },
+            target => {
+                if (candidates[0].Key != "preset") return Write(target);
+                presetCheck = CounterWriteRules.WritePreset(target,
+                    () => string.Equals(display.CountVarType, "pcode", StringComparison.OrdinalIgnoreCase) ? _dataReader.ReadPcodeMacroVariable(display.CountMacroNo) : _dataReader.ReadMacroVariable(display.CountMacroNo), Write);
+                return presetCheck.Written;
+            }, value);
+        try { if (trackedField != null) _counterJournal.CompleteAdjustment(trackedField, outcome.Value); }
+        catch (Exception ex) { _logger.LogError(ex, "Counter adjustment final journal pending; persisted intent retained"); }
+        if (presetCheck?.ErrorCode != null) outcome = outcome with { ErrorCode = presetCheck.ErrorCode };
+        var result = VerifiedResult(command, outcome, new() { ["varNo"] = varNo, ["varType"] = type, ["key"] = key, ["checkedCount"] = presetCheck?.Count, ["minimumPreset"] = presetCheck?.Count + 2 });
+        if (presetCheck?.ErrorCode != null) result.ErrorMessage = presetCheck.ErrorCode == "COUNT_READ_FAILED"
+            ? "현재 CNC 카운트를 확인하지 못해 저장하지 않았습니다. 다시 조회하세요."
+            : $"프리셋은 현재 CNC 카운트({presetCheck.Count})보다 최소 2 이상 커야 합니다. 저장하지 않았습니다.";
+        return Task.FromResult(result);
     }
 
     /// <summary>
@@ -634,7 +671,7 @@ public class CommandHandler
         // 컬럼 타입 맵 (key → column 메타)
         var colMap = pathCfg.Columns.ToDictionary(c => c.Key);
 
-        var toolData = pathCfg.Entries
+        var toolData = InToolLifePath(pathNo, () => pathCfg.Entries
             .Where(e => !e.IsSeparator)
             .Select(entry =>
             {
@@ -642,16 +679,10 @@ public class CommandHandler
                 foreach (var (colKey, varNo) in entry.VarNos)
                 {
                     if (!colMap.TryGetValue(colKey, out var col)) continue;
-                    object val = col.VarType switch
-                    {
-                        // macro/pcode: 모두 FOCAS cnc_rdmacro (실수형)
-                        "ddata" => (object)(_dataReader.ReadPmcAreaValue("D", varNo, col.DataType ?? "word") ?? 0),
-                        _       => (object)_dataReader.ReadMacroVariableSafe(varNo),
-                    };
-                    colValues[colKey] = val;
+                    colValues[colKey] = ReadToolLifeVariable(col.VarType, varNo, col.DataType ?? "word")!;
                 }
                 return new { toolNo = entry.ToolNo, values = colValues };
-            }).ToList();
+            }).ToList());
 
         return Task.FromResult(new CommandResultMessage
         {
@@ -678,24 +709,52 @@ public class CommandHandler
 
         string varType  = command.Params.TryGetValue("varType",  out var vtObj)  ? vtObj?.ToString() ?? "macro" : "macro";
         string dataType = command.Params.TryGetValue("dataType", out var dtObj)  ? dtObj?.ToString() ?? "word"  : "word";
+        int pathNo = command.Params.TryGetValue("path", out var pathObj) && int.TryParse(pathObj?.ToString(), out var requestedPath) ? requestedPath : 1;
 
-        bool ok;
-        // macro/pcode: 모두 cnc_wrmacro (실수형), ddata만 PMC D영역
-        if (varType == "ddata")
-            ok = _dataReader.WritePmcAreaValue("D", varNo, dataType, (long)value);
-        else
-            ok = _dataReader.WriteMacroVariable(varNo, value);
+        var allowed = _templateLoader.CurrentTemplate?.ToolLifeConfig.Paths.Any(path => path.PathNo == pathNo && path.Columns.Any(col =>
+            !col.Readonly && col.VarType == varType && (varType != "ddata" || (col.DataType ?? "word") == dataType) &&
+            path.Entries.Any(entry => !entry.IsSeparator && entry.VarNos.GetValueOrDefault(col.Key, -1) == varNo))) == true;
+        if (!allowed || !double.IsFinite(value) || (varType == "ddata" &&
+            (!new[] { "byte", "word", "dword" }.Contains(dataType) || value < 0 || value != Math.Truncate(value) ||
+            value > (dataType == "byte" ? byte.MaxValue : dataType == "word" ? ushort.MaxValue : uint.MaxValue))))
+            return Task.FromResult(CreateFailureResult(command, "INVALID_PARAMS", "수정 가능한 공구수명 항목과 값 범위를 확인하세요."));
+        var outcome = InToolLifePath(pathNo, () => VerifiedDataWrite.Execute(
+            () => ReadToolLifeVariable(varType, varNo, dataType),
+            target => ToolLifeVariables.Write(varType,
+                () => _dataReader.WriteMacroVariable(varNo, target),
+                () => _dataReader.WritePcodeMacroVariable(varNo, target),
+                () => _dataReader.WritePmcAreaValue("D", varNo, dataType, (long)target)), value));
+        return Task.FromResult(VerifiedResult(command, outcome, new() { ["path"] = pathNo, ["varNo"] = varNo, ["varType"] = varType, ["dataType"] = dataType }));
+    }
 
-        if (!ok)
-            return Task.FromResult(CreateFailureResult(command, "WRITE_FAILED", "공구 수명 변수 쓰기 실패"));
+    private double? ReadToolLifeVariable(string type, int varNo, string dataType)
+        => ToolLifeVariables.Read(type,
+            () => _dataReader.ReadMacroVariable(varNo),
+            () => _dataReader.ReadPcodeMacroVariable(varNo),
+            () => _dataReader.ReadPmcAreaValue("D", varNo, dataType));
 
-        return Task.FromResult(new CommandResultMessage
+    private T InToolLifePath<T>(int pathNo, Func<T> action)
+    {
+        try
         {
-            MachineId     = _settings.MachineId,
-            CorrelationId = command.CorrelationId,
-            Status        = "success",
-            Result        = new { varNo, value, varType, written = true },
-        });
+            if (pathNo < 1 || pathNo > 2 || Focas1.cnc_setpath(_connection.Handle, (short)pathNo) != Focas1.EW_OK)
+                throw new InvalidOperationException("공구수명 CNC 경로를 선택하지 못했습니다.");
+            return action();
+        }
+        finally { Focas1.cnc_setpath(_connection.Handle, 1); }
+    }
+
+    private CommandResultMessage VerifiedResult(CommandMessage command, VerifiedDataWrite.Outcome outcome, Dictionary<string, object?> fields)
+    {
+        fields["beforeValue"] = outcome.BeforeValue;
+        fields["value"] = outcome.Value;
+        fields["requestedValue"] = outcome.RequestedValue;
+        fields["additiveDelta"] = outcome.AdditiveDelta;
+        fields["written"] = outcome.Written;
+        fields["completedAt"] = DateTime.UtcNow.ToString("o");
+        return new CommandResultMessage { MachineId = _settings.MachineId, CorrelationId = command.CorrelationId,
+            Status = outcome.ErrorCode == null ? "success" : "failure", Result = fields, ErrorCode = outcome.ErrorCode,
+            ErrorMessage = outcome.ErrorCode == null ? null : "수정 결과를 확정할 수 없습니다. 실제 값을 재조회하세요. 자동 재전송하지 마세요." };
     }
 
     /// <summary>
@@ -865,6 +924,11 @@ public class CommandHandler
 
         _logger.LogInformation("PMC_WRITE {Addr} = {Val} (holdMs={Hold})", addrStr, bitValue, holdMs);
 
+        if ((bitValue != 0 && bitValue != 1) || holdMs < 0 || holdMs > 5000)
+            return CreateFailureResult(command, "INVALID_PARAMS", "PMC 값 또는 출력 시간을 확인하세요.");
+        if (!IsPanelSafetyAction(command) && !CheckInterlock())
+            return CreateFailureResult(command, "INTERLOCK_FAILED", "출력 직전 인터록 조건 불만족");
+
         bool ok = _dataReader.WritePmcBit(addr, bitValue);
         if (!ok)
             return CreateFailureResult(command, "PMC_WRITE_FAILED", $"pmc_wrpmcrng 실패: {addrStr}");
@@ -873,7 +937,8 @@ public class CommandHandler
         if (holdMs > 0)
         {
             System.Threading.Thread.Sleep(holdMs);
-            _dataReader.WritePmcBit(addr, 0);
+            if (!_dataReader.WritePmcBit(addr, 0))
+                return CreateFailureResult(command, "PMC_RELEASE_FAILED", "PMC 출력 해제 실패");
             _logger.LogInformation("PMC_WRITE auto-release {Addr} = 0", addrStr);
         }
 

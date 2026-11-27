@@ -44,3 +44,15 @@ temp/
 
 # Claude Code local settings
 .claude/
+
+# Local deployments, runtime state and database backups
+/agent-dist/
+/agent-runtime/
+/publish/
+**/publish/
+/packages/server/data/
+*.tsbuildinfo
+*.lscache
+__pycache__/
+/output/
+/nul

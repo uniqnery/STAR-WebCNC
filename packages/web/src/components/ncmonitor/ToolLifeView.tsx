@@ -1,35 +1,62 @@
 // ToolLifeView - 공구 수명 관리 (템플릿 기반 ToolLifeConfig, Path1/Path2)
 
-import { useState, useEffect, useCallback } from 'react';
-import { useControlLock } from '../../stores/machineStore';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuthStore } from '../../stores/authStore';
-import { useSelectedTemplate, type ToolLifeColumn, type ToolLifeEntry } from '../../stores/templateStore';
-import { ncDataApi } from '../../lib/api';
+import { useTemplateStore, type ToolLifeColumn, type ToolLifeEntry } from '../../stores/templateStore';
+import { machineApi, ncDataApi } from '../../lib/api';
+import { wsClient } from '../../lib/wsClient';
 
 interface ToolDataEntry {
   entry: ToolLifeEntry;
-  values: Record<string, number>;
+  values: Record<string, number | null>;
 }
 
-const VAR_PREFIX: Record<string, string> = { macro: '#', pcode: '#', ddata: 'D' };
+const VAR_PREFIX: Record<string, string> = { macro: '#', pcode: 'P', ddata: 'D' };
 
 interface ToolLifeViewProps {
   machineId?: string;
 }
 
 export function ToolLifeView({ machineId }: ToolLifeViewProps) {
-  const template = useSelectedTemplate();
-  const controlLock = useControlLock(machineId || '');
+  const templates = useTemplateStore(s => s.templates);
+  const [assignment, setAssignment] = useState<{ machineId: string; templateId: string } | null>(null);
+  const [templateLoading, setTemplateLoading] = useState(true);
+  const [templateError, setTemplateError] = useState('');
+  const template = assignment && assignment.machineId === machineId ? templates.find(t => t.templateId === assignment.templateId || t.id === assignment.templateId) : undefined;
+  useEffect(() => {
+    let cancelled = false;
+    let request = 0;
+    const refresh = async () => {
+      const generation = ++request;
+      if (!machineId) { setTemplateLoading(false); return; }
+      try {
+        const [machine] = await Promise.all([machineApi.getById(machineId), useTemplateStore.getState().refreshTemplates()]);
+        if (cancelled || generation !== request) return;
+        const templateId = (machine.data as { template?: { templateId?: string } } | undefined)?.template?.templateId;
+        if (!machine.success || !templateId) throw new Error('설비에 할당된 템플릿을 확인하지 못했습니다.');
+        setAssignment({ machineId, templateId }); setTemplateError('');
+      } catch (error) {
+        if (!cancelled && generation === request) { setAssignment(null); setTemplateError(error instanceof Error ? error.message : '템플릿 조회 실패'); }
+      } finally { if (!cancelled && generation === request) setTemplateLoading(false); }
+    };
+    setAssignment(null); setTemplateLoading(true); void refresh();
+    const visible = () => { if (document.visibilityState !== 'hidden') void refresh(); };
+    const offConnect = wsClient.onConnect(() => { void refresh(); });
+    const offMessage = wsClient.onMessage(message => { if (message.type === 'template_changed') void refresh(); });
+    window.addEventListener('focus', visible); document.addEventListener('visibilitychange', visible);
+    return () => { cancelled = true; offConnect(); offMessage(); window.removeEventListener('focus', visible); document.removeEventListener('visibilitychange', visible); };
+  }, [machineId]);
   const user = useAuthStore((s) => s.user);
 
   const canEdit = user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER';
-  const hasControl = !!controlLock?.isOwner;
-  const canWrite = canEdit && hasControl;
+  const canWrite = canEdit;
 
   const [activePath, setActivePath] = useState<1 | 2>(1);
   const [toolData, setToolData] = useState<ToolDataEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [savingCell, setSavingCell] = useState<string | null>(null); // "entryId:colKey"
+  const generation = useRef(0);
 
   const pathConfig = template?.toolLifeConfig?.paths?.find((p) => p.pathNo === activePath);
   const columns = pathConfig?.columns ?? [];
@@ -37,7 +64,11 @@ export function ToolLifeView({ machineId }: ToolLifeViewProps) {
 
   // 데이터 로드
   useEffect(() => {
-    if (!machineId || !pathConfig || entries.length === 0) return;
+    generation.current++;
+    setSavingCell(null);
+    setToolData(entries.map(entry => ({ entry, values: {} })));
+    setLoadError(null);
+    if (!machineId || !pathConfig || entries.length === 0) { setLoading(false); return; }
     let cancelled = false;
     setLoading(true);
     ncDataApi
@@ -45,30 +76,29 @@ export function ToolLifeView({ machineId }: ToolLifeViewProps) {
       .then((res) => {
         if (cancelled) return;
         // API 응답: { data: { tools: [{ toolNo, values, varNos }] } }
-        const raw = ((res as any)?.data?.tools ?? []) as Array<{ toolNo: string; values: Record<string, number> }>;
+        if (!res.success) throw new Error(res.error?.message ?? '공구 수명 읽기 실패');
+        const raw = (res.data as { tools?: Array<{ toolNo: string; values: Record<string, number | null> }> } | undefined)?.tools;
+        if (!Array.isArray(raw)) throw new Error('공구 수명 응답을 확인할 수 없습니다.');
         const rawMap = Object.fromEntries(raw.map((t) => [t.toolNo, t.values]));
         setToolData(
           entries.map((e) => ({
             entry: e,
             values: e.isSeparator
               ? {}
-              : rawMap[e.toolNo] ?? Object.fromEntries(columns.map((c) => [c.key, 0])),
+              : Object.fromEntries(columns.map(c => {
+                const value = rawMap[e.toolNo]?.[c.key];
+                return [c.key, typeof value === 'number' && Number.isFinite(value) ? value : null];
+              })),
           })),
         );
       })
-      .catch(() => {
+      .catch((error) => {
         if (cancelled) return;
-        // 폴백: 0으로 채움
-        setToolData(
-          entries.map((e) => ({
-            entry: e,
-            values: e.isSeparator ? {} : Object.fromEntries(columns.map((c) => [c.key, 0])),
-          })),
-        );
+        setLoadError(error instanceof Error ? error.message : '공구 수명 읽기 실패');
       })
       .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [machineId, activePath]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => { cancelled = true; generation.current++; };
+  }, [machineId, activePath, pathConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCommit = useCallback(
     async (entryId: string, col: ToolLifeColumn, entry: ToolLifeEntry, newValue: number) => {
@@ -77,23 +107,30 @@ export function ToolLifeView({ machineId }: ToolLifeViewProps) {
       if (varNo === undefined) return;
 
       const cellKey = `${entryId}:${col.key}`;
+      const writeGeneration = generation.current;
       setSavingCell(cellKey);
       try {
-        await ncDataApi.writeToolLifeVar(machineId, varNo, newValue, col.varType, col.dataType);
+        const response = await ncDataApi.writeToolLifeVar(machineId, varNo, newValue, col.varType, col.dataType, activePath);
+        if (writeGeneration !== generation.current) return;
+        const finalValue = (response.data as { value?: number } | undefined)?.value;
+        if (!response.success || typeof finalValue !== 'number') {
+          alert(response.error?.message ?? '공구수명 최종 반영값 확인 불가. 재조회하세요.');
+          return;
+        }
         setToolData((prev) =>
           prev.map((td) =>
             td.entry.id === entryId
-              ? { ...td, values: { ...td.values, [col.key]: newValue } }
+              ? { ...td, values: { ...td.values, [col.key]: finalValue } }
               : td,
           ),
         );
       } catch (err) {
         console.error('writeToolLifeVar failed:', err);
       } finally {
-        setSavingCell(null);
+        if (writeGeneration === generation.current) setSavingCell(null);
       }
     },
-    [machineId, canWrite],
+    [machineId, canWrite, activePath],
   );
 
   if (!machineId) {
@@ -103,6 +140,8 @@ export function ToolLifeView({ machineId }: ToolLifeViewProps) {
       </div>
     );
   }
+
+  if (templateLoading || templateError) return <div role="status" className="p-3 text-sm text-gray-400">{templateLoading ? '템플릿 확인 중...' : templateError}</div>;
 
   if (!pathConfig || columns.length === 0 || entries.length === 0) {
     return (
@@ -124,21 +163,23 @@ export function ToolLifeView({ machineId }: ToolLifeViewProps) {
   const countKey  = columns.find((c) => c.key.toLowerCase().includes('count'))?.key;
   const showUsage = !!presetKey && !!countKey;
 
-  const gridTemplate = `56px ${columns.map(() => '1fr').join(' ')}${showUsage ? ' 80px' : ''}`;
+  const gridTemplate = `10% repeat(${columns.length + (showUsage ? 1 : 0)}, minmax(0, 1fr))`;
 
   return (
     <div className="flex flex-col h-full text-green-400 font-mono text-xs">
       {/* 헤더 */}
       <div className="flex items-center justify-between px-2 py-1.5 bg-gray-800 border-b border-gray-700 flex-shrink-0">
         <div className="flex items-center gap-2">
-          <ToggleBtn active={activePath === 1} onClick={() => { setActivePath(1); setToolData([]); }}>PATH1</ToggleBtn>
-          <ToggleBtn active={activePath === 2} onClick={() => { setActivePath(2); setToolData([]); }}>PATH2</ToggleBtn>
+          <ToggleBtn active={activePath === 1} onClick={() => setActivePath(1)}>PATH1</ToggleBtn>
+          <ToggleBtn active={activePath === 2} onClick={() => setActivePath(2)}>PATH2</ToggleBtn>
           {loading && <span className="text-gray-500 text-[10px] animate-pulse">로딩...</span>}
         </div>
         {!canWrite && (
-          <span className="text-yellow-600 text-[10px]">제어권 필요 (읽기 전용)</span>
+          <span className="text-yellow-600 text-[10px]">수정 권한 없음 (읽기 전용)</span>
         )}
       </div>
+
+      {loadError && <div role="alert" className="px-2 py-1 text-yellow-400">{loadError}</div>}
 
       {/* 컬럼 헤더 */}
       <div
@@ -147,7 +188,7 @@ export function ToolLifeView({ machineId }: ToolLifeViewProps) {
       >
         <div>TOOL</div>
         {columns.map((col) => (
-          <div key={col.key} className="text-right">
+          <div key={col.key} className="min-w-0 pl-2 text-left">
             {col.label}
             <span className="text-gray-500 ml-0.5 text-[9px]">
               ({VAR_PREFIX[col.varType] ?? '#'})
@@ -155,7 +196,7 @@ export function ToolLifeView({ machineId }: ToolLifeViewProps) {
             </span>
           </div>
         ))}
-        {showUsage && <div className="text-center">USAGE</div>}
+        {showUsage && <div className="ml-4 text-center">USAGE</div>}
       </div>
 
       {/* 본문 */}
@@ -173,10 +214,10 @@ export function ToolLifeView({ machineId }: ToolLifeViewProps) {
             );
           }
 
-          const preset = presetKey ? (td.values[presetKey] ?? 0) : 0;
-          const count  = countKey  ? (td.values[countKey]  ?? 0) : 0;
-          const pct = preset > 0 ? (count / preset) * 100 : 0;
-          const barColor = pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-yellow-500' : 'bg-emerald-500';
+          const preset = presetKey ? td.values[presetKey] : null;
+          const count  = countKey ? td.values[countKey] : null;
+          const pct = preset != null && count != null ? (preset > 0 ? (count / preset) * 100 : 0) : null;
+          const barColor = (pct ?? 0) > 90 ? 'bg-red-500' : (pct ?? 0) > 70 ? 'bg-yellow-500' : 'bg-emerald-500';
 
           return (
             <div
@@ -189,15 +230,16 @@ export function ToolLifeView({ machineId }: ToolLifeViewProps) {
               {columns.map((col) => {
                 const cellKey = `${td.entry.id}:${col.key}`;
                 const isSaving = savingCell === cellKey;
-                const value = td.values[col.key] ?? 0;
-                const editable = !col.readonly && canWrite;
+                const value = td.values[col.key] ?? null;
+                const editable = !col.readonly && canWrite && value !== null && !loading;
 
                 return (
-                  <div key={col.key} className="text-right">
+                  <div key={col.key} className="min-w-0 pl-2 text-left">
                     {isSaving ? (
                       <span className="text-blue-400 text-[10px]">...</span>
                     ) : (
                       <CellValue
+                        key={`${machineId}:${activePath}:${col.varType}:${col.dataType}:${td.entry.varNos[col.key]}`}
                         value={value}
                         editable={editable}
                         onCommit={(v) => handleCommit(td.entry.id, col, td.entry, v)}
@@ -208,15 +250,15 @@ export function ToolLifeView({ machineId }: ToolLifeViewProps) {
               })}
 
               {showUsage && (
-                <div className="flex items-center gap-1 px-1">
+                <div className="ml-4 flex min-w-0 items-center gap-1">
                   <div className="flex-1 bg-gray-700 rounded-full h-1.5 overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all ${barColor}`}
-                      style={{ width: `${Math.min(pct, 100)}%` }}
+                      style={{ width: `${Math.max(0, Math.min(pct ?? 0, 100))}%` }}
                     />
                   </div>
                   <span className="text-gray-400 text-[9px] w-7 text-right shrink-0">
-                    {pct.toFixed(0)}%
+                    {pct === null ? '—' : `${pct.toFixed(0)}%`}
                   </span>
                 </div>
               )}
@@ -233,7 +275,7 @@ export function ToolLifeView({ machineId }: ToolLifeViewProps) {
 
 // ── 셀 값 편집 (onBlur commit) ──
 function CellValue({ value, editable, onCommit }: {
-  value: number;
+  value: number | null;
   editable: boolean;
   onCommit: (v: number) => void;
 }) {
@@ -266,7 +308,7 @@ function CellValue({ value, editable, onCommit }: {
         onBlur={commitEdit}
         onKeyDown={handleKeyDown}
         autoFocus
-        className="w-full bg-gray-700 border border-blue-500 text-white text-right text-xs font-mono px-1 py-0 rounded-sm outline-none"
+        className="w-full bg-gray-700 border border-blue-500 text-white text-left text-xs font-mono px-1 py-0 rounded-sm outline-none"
       />
     );
   }
@@ -275,10 +317,10 @@ function CellValue({ value, editable, onCommit }: {
     <span
       onClick={startEdit}
       className={`text-white text-xs font-mono ${
-        editable ? 'cursor-pointer border-l border-l-blue-500/30 pl-1 hover:bg-gray-700/50' : ''
+        editable ? 'cursor-pointer pl-1 hover:bg-gray-700/50' : ''
       }`}
     >
-      {Number.isInteger(value) ? value.toLocaleString() : value.toFixed(3)}
+      {value === null ? '—' : Math.trunc(value).toLocaleString()}
     </span>
   );
 }

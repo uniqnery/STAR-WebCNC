@@ -4,8 +4,9 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { useMachineStore, TelemetryData } from '../stores/machineStore';
 import { WS_RECONNECT_DELAY } from '../lib/constants';
+import { websocketUrl } from '../lib/websocketUrl';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3000/ws';
+const WS_URL = websocketUrl(window.location, import.meta.env.VITE_API_URL, import.meta.env.VITE_WS_URL);
 
 interface WsMessage {
   type: string;

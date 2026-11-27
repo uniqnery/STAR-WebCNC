@@ -22,6 +22,7 @@ function rowToDto(row: {
   mainProgramNo: string;
   subProgramNo: string | null;
   mainProgramComment: string | null;
+  productionComment?: string | null;
   mainProgramSha256: string | null;
   preset: number;
   count: number;
@@ -42,6 +43,7 @@ function rowToDto(row: {
     mainProgramNo: row.mainProgramNo,
     subProgramNo: row.subProgramNo ?? undefined,
     mainProgramComment: row.mainProgramComment ?? undefined,
+    productionComment: row.productionComment ?? undefined,
     mainProgramSha256: row.mainProgramSha256 ?? undefined,
     preset: row.preset,
     count: row.count,
@@ -174,7 +176,7 @@ router.post('/rows', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, r
         preset,
         count: 0,
         status: 'PENDING',
-        createdBy: req.user!.username,
+        createdBy: req.user!.displayName || req.user!.username,
       },
     });
 
@@ -282,7 +284,7 @@ router.post('/rows/batch-register', requireRole('ADMIN', 'HQ_ENGINEER'), async (
               status: 'PENDING',
               mainProgramComment: item.comment,
               mainProgramSha256: manifest.sha256,
-              createdBy: req.user!.username,
+              createdBy: req.user!.displayName || req.user!.username,
             },
           }));
         }
@@ -357,7 +359,8 @@ router.put('/rows/:id', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request
       return res.status(400).json({ success: false, error: { code: 'INVALID_STATUS', message: '실행 중인 행은 수정할 수 없습니다' } });
     }
 
-    const { mainProgramNo, subProgramNo, preset, count } = req.body as {
+    const { mainProgramNo, subProgramNo, preset, count, productionComment } = req.body as {
+      productionComment?: string;
       mainProgramNo?: string;
       subProgramNo?: string | null;
       preset?: number;
@@ -367,6 +370,7 @@ router.put('/rows/:id', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request
       where: { id: row.id },
       data: {
         mainProgramNo: mainProgramNo ?? row.mainProgramNo,
+        productionComment: typeof productionComment === 'string' ? productionComment.trim().slice(0, 500) : row.productionComment,
         ...(mainProgramNo !== undefined && mainProgramNo !== row.mainProgramNo
           ? { mainProgramComment: null, mainProgramSha256: null, lastError: null, lastErrorCode: null, lastErrorAt: null }
           : {}),
@@ -615,7 +619,7 @@ router.post('/start', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request, 
     });
 
     wsService.sendSchedulerState(machineId, 'RUNNING');
-    wsService.sendUserActivity(machineId, 'scheduler', { username: req.user!.username, role: req.user!.role }, '스케줄러 시작');
+    wsService.sendUserActivity(machineId, 'scheduler', { username: req.user!.username, displayName: req.user!.displayName || req.user!.username, role: req.user!.role }, '스케줄러 시작');
 
     res.json({ success: true });
   } catch (err) {
@@ -651,7 +655,7 @@ router.post('/resume', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request,
     });
 
     wsService.sendSchedulerState(machineId, 'RUNNING');
-    wsService.sendUserActivity(machineId, 'scheduler', { username: req.user!.username, role: req.user!.role }, '스케줄러 재개');
+    wsService.sendUserActivity(machineId, 'scheduler', { username: req.user!.username, displayName: req.user!.displayName || req.user!.username, role: req.user!.role }, '스케줄러 재개');
 
     res.json({ success: true });
   } catch (err) {
@@ -731,7 +735,7 @@ router.post('/cancel', requireRole('ADMIN', 'HQ_ENGINEER'), async (req: Request,
     });
     wsService.sendSchedulerUpdate(machineId, allRows.map(r => rowToDto(r, machineId)));
     wsService.sendSchedulerState(machineId, 'IDLE');
-    wsService.sendUserActivity(machineId, 'scheduler', { username: req.user!.username, role: req.user!.role }, '스케줄러 취소');
+    wsService.sendUserActivity(machineId, 'scheduler', { username: req.user!.username, displayName: req.user!.displayName || req.user!.username, role: req.user!.role }, '스케줄러 취소');
 
     res.json({ success: true });
   } catch (err) {

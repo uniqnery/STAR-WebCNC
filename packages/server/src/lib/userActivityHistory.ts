@@ -5,6 +5,7 @@ export type UserActivityPage = 'scheduler' | 'control';
 export interface UserActivityActor {
   id?: string;
   username: string;
+  displayName?: string;
   role: string;
 }
 
@@ -21,7 +22,7 @@ export interface UserActivityHistoryItem {
   id: string;
   machineId: string;
   page: UserActivityPage;
-  actor: { username: string; role: string } | null;
+  actor: { username: string; displayName?: string; role: string } | null;
   action: string;
   detail?: string;
   timestamp: string;
@@ -33,7 +34,7 @@ function toItem(row: Awaited<ReturnType<typeof prisma.userActivityHistory.findFi
     id: row.id,
     machineId: row.machineCode,
     page: row.page as UserActivityPage,
-    actor: row.actorUsername && row.actorRole ? { username: row.actorUsername, role: row.actorRole } : null,
+    actor: row.actorUsername && row.actorRole ? { username: row.actorUsername, displayName: row.actorDisplayName ?? row.actorUsername, role: row.actorRole } : null,
     action: row.action,
     ...(row.detail ? { detail: row.detail } : {}),
     timestamp: row.createdAt.toISOString(),
@@ -60,6 +61,7 @@ export async function recordUserActivity(input: RecordUserActivityInput): Promis
       page: input.page,
       actorUserId,
       actorUsername: input.actor?.username ?? null,
+      actorDisplayName: input.actor ? input.actor.displayName || input.actor.username : null,
       actorRole: input.actor?.role ?? null,
       action: input.action,
       detail: input.detail || null,

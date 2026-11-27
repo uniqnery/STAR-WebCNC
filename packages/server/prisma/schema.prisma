@@ -17,6 +17,7 @@ datasource db {
 model User {
   id           String    @id @default(uuid())
   username     String    @unique
+  displayName  String    @default("") @map("display_name")
   email        String    @unique
   passwordHash String    @map("password_hash")
   role         UserRole  @default(USER)
@@ -174,6 +175,7 @@ model Template {
 // ============================================
 
 model SchedulerRow {
+  productionComment String? @map("production_comment")
   id                 String             @id @default(uuid())
   machineDbId        String             @map("machine_id") // Machine.id (FK)
   order              Int // 실행 순서 (1부터, 큐 내 위치)
@@ -291,6 +293,7 @@ enum CommandStatus {
 }
 
 model AuditLog {
+  actorDisplayName String? @map("actor_display_name")
   id         String   @id @default(uuid())
   userId     String   @map("user_id")
   userRole   String   @map("user_role")
@@ -311,6 +314,7 @@ model AuditLog {
 }
 
 model FileOperationHistory {
+  actorDisplayName String? @map("actor_display_name")
   id             String    @id @default(uuid())
   machineDbId    String?   @map("machine_id")
   machineCode    String?   @map("machine_code")
@@ -342,6 +346,7 @@ model FileOperationHistory {
 }
 
 model UserActivityHistory {
+  actorDisplayName String? @map("actor_display_name")
   id            String   @id @default(uuid())
   machineDbId   String?  @map("machine_id")
   machineCode   String   @map("machine_code")
@@ -383,6 +388,20 @@ model ControlLockLog {
 // ============================================
 
 model ProductionLog {
+  countSource String @default("m20") @map("count_source")
+  countQuality String @default("confirmed") @map("count_quality")
+  eventId String? @unique @map("event_id")
+  productionName String? @map("production_name")
+  commentSource String? @map("comment_source")
+  schedulerComment String? @map("scheduler_comment")
+  mesComment String? @map("mes_comment")
+  schedulerRowId String? @map("scheduler_row_id")
+  workOrderId String? @map("work_order_id")
+  workOrderNumber String? @map("work_order_number")
+  productCode String? @map("product_code")
+  executingProgramNo String? @map("executing_program_no")
+  runKey String? @map("run_key")
+  contextStatus String @default("legacy") @map("context_status")
   id             String   @id @default(uuid())
   machineId      String   @map("machine_id")
   programNo      String   @map("program_no")
@@ -398,6 +417,7 @@ model ProductionLog {
   machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
 
   @@index([machineId, startTime])
+  @@index([machineId, endTime])
   @@map("production_logs")
 }
 
@@ -406,6 +426,7 @@ model ProductionLog {
 // ============================================
 
 model WorkOrder {
+  productionComment String? @map("production_comment")
   id              String          @id @default(uuid())
   orderNumber     String          @unique @map("order_number")
   productCode     String          @map("product_code")
@@ -431,6 +452,53 @@ enum WorkOrderStatus {
   IN_PROGRESS
   COMPLETED
   CANCELLED
+}
+
+model ProductionPolicy {
+  id String @id @default(uuid())
+  enabled Boolean
+  createdAt DateTime @default(now()) @map("created_at")
+  changedBy String @map("changed_by")
+  @@index([createdAt])
+  @@map("production_policies")
+}
+
+model ProductionCounterEvent {
+  eventId String @id @map("event_id")
+  machineCode String @map("machine_code")
+  observedAt DateTime @map("observed_at")
+  previousAt DateTime? @map("previous_at")
+  intervalState String @map("interval_state")
+  kind String
+  quality String
+  quantity Int @default(0)
+  countBefore Int? @map("count_before")
+  countAfter Int? @map("count_after")
+  presetBefore Int? @map("preset_before")
+  presetAfter Int? @map("preset_after")
+  programNo String? @map("program_no")
+  programComment String? @map("program_comment")
+  correlationId String? @map("correlation_id")
+  actor String?
+  reason String?
+  raw Json
+  createdAt DateTime @default(now()) @map("created_at")
+  @@index([machineCode, observedAt])
+  @@map("production_counter_events")
+}
+
+model ProductionAssignment {
+  id String @id @default(uuid())
+  machineCode String @map("machine_code")
+  workOrderId String @map("work_order_id")
+  orderNumber String @map("order_number")
+  productCode String @map("product_code")
+  productionComment String @map("production_comment")
+  programNo String @map("program_no")
+  startedAt DateTime @default(now()) @map("started_at")
+  endedAt DateTime? @map("ended_at")
+  @@index([machineCode, startedAt])
+  @@map("production_assignments")
 }
 
 // ============================================

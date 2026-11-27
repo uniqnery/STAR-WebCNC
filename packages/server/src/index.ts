@@ -1,4 +1,7 @@
 import express from 'express';
+import { dataWriteActivity } from './lib/dataWriteHistory';
+import { recordCompletion, type ProductionCompletion } from './lib/productionTracking';
+import { recordCounterEvent } from './lib/counterTracking';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { createServer } from 'http';
@@ -72,6 +75,8 @@ const MODE_PANEL_KEY_IDS = new Set(['EDIT', 'MEMORY', 'MEM', 'MDI', 'JOG', 'HAND
 
 function buildControlActivity(command: string, params: unknown, result: unknown): { action: string; detail?: string } | null {
   const normalized = command.toUpperCase();
+  const dataActivity = dataWriteActivity(normalized, params, result);
+  if (dataActivity) return dataActivity;
 
   if (normalized === 'WRITE_OFFSET') {
     const pathNo = readNumberField(result, 'path') ?? readNumberField(params, 'path');
@@ -152,15 +157,13 @@ function buildControlActivity(command: string, params: unknown, result: unknown)
   return actionLabel[normalized] ? { action: actionLabel[normalized] } : null;
 }
 
-async function updateCommandAuditResult(correlationId: string, status: string, errorMessage?: string | null): Promise<void> {
+async function updateCommandAuditResult(correlationId: string, status: string, errorMessage?: string | null, writeResult?: unknown): Promise<void> {
   try {
-    await prisma.auditLog.updateMany({
-      where: { params: { path: ['correlationId'], equals: correlationId } },
-      data: {
-        result: status === 'success' ? 'success' : 'failure',
-        errorMsg: status === 'success' ? null : errorMessage ?? null,
-      },
-    });
+    const logs = await prisma.auditLog.findMany({ where: { params: { path: ['correlationId'], equals: correlationId } } });
+    for (const log of logs) await prisma.auditLog.update({ where: { id: log.id }, data: {
+      result: status, errorMsg: status === 'success' ? null : errorMessage ?? null,
+      params: JSON.parse(JSON.stringify({ ...(log.params as object), writeResult, completedAt: new Date().toISOString() })),
+    } });
   } catch (err) {
     console.error('[Audit] Failed to update command audit result:', err);
   }
@@ -173,14 +176,13 @@ async function emitSuccessfulCommandActivity(
   result: unknown,
   commandUpdated: boolean,
 ): Promise<void> {
-  if (status !== 'success') return;
-
   try {
     const commandLog = await prisma.commandLog.findFirst({
       where: { correlationId },
       include: { machine: { select: { machineId: true } } },
     });
     if (!commandLog) return;
+    if (status !== 'success' && !['WRITE_OFFSET', 'WRITE_COUNT', 'WRITE_TOOL_LIFE_PRESET'].includes(commandLog.command)) return;
     if (commandLog.command === 'WRITE_OFFSET' && !commandUpdated) return;
 
     const activity = buildControlActivity(commandLog.command, commandLog.params, result);
@@ -198,10 +200,11 @@ async function emitSuccessfulCommandActivity(
       auditLog?.user ? {
         id: auditLog.user.id,
         username: auditLog.user.username,
+        displayName: auditLog.actorDisplayName ?? auditLog.user.username,
         role: auditLog.userRole ?? auditLog.user.role,
       } : null,
-      activity.action,
-      activity.detail,
+      status === 'success' ? activity.action : `${activity.action} ${status === 'unknown' ? '결과 확인 불가' : '실패'}`,
+      [activity.detail, (auditLog?.params as { roleTest?: unknown } | null)?.roleTest ? `권한 테스트 · 본사 엔지니어 → ${auditLog?.userRole}` : null].filter(Boolean).join(' / '),
     );
   } catch (err) {
     console.error('[UserActivity] Failed to emit command activity:', err);
@@ -330,6 +333,17 @@ async function initializeServices(): Promise<void> {
 
 // Setup MQTT message handlers
 function setupMqttHandlers(): void {
+  mqttService.on(TOPICS.AGENT_COUNTER, (topic, payload) => {
+    if (topic.split('/')[2] !== payload.machineId) return;
+    void recordCounterEvent(payload).then(() => mqttService.publish(`star-webcnc/server/counter/ack/${payload.machineId}`, { eventId: payload.eventId, timestamp: new Date().toISOString() }))
+      .catch(error => console.error('[POP] Counter event retained for retry:', error instanceof Error ? error.name : 'unknown'));
+  });
+  mqttService.on('star-webcnc/agent/+/production', (topic, payload) => {
+    const completion = payload as unknown as ProductionCompletion;
+    if (topic.split('/')[2] !== completion.machineId) return;
+    void recordCompletion(completion).then(() => mqttService.publish(`star-webcnc/server/production/ack/${completion.machineId}`, { eventId: completion.eventId, timestamp: new Date().toISOString() }))
+      .catch(() => console.error('[POP] Production event not committed; Agent retains event for retry'));
+  });
   // Handle telemetry data from agents
   mqttService.on<TelemetryMessage>(TOPICS.AGENT_TELEMETRY, async (_topic, message) => {
     const { machineId, data } = message;
@@ -346,10 +360,15 @@ function setupMqttHandlers(): void {
   });
 
   // Handle fast PMC bits update from agents (100ms 주기 — 램프 응답속도)
-  mqttService.on<PmcBitsMessage>(TOPICS.AGENT_PMC_BITS, (_topic, message) => {
+  mqttService.on<PmcBitsMessage>(TOPICS.AGENT_PMC_BITS, async (_topic, message) => {
     const { machineId, pmcBits } = message;
     if (!machineId || !pmcBits) return;
-    wsService.sendPmcBits(machineId, pmcBits);
+    const sampledAt = Date.parse(String(message.timestamp ?? ''));
+    if (!Number.isFinite(sampledAt) || Date.now() - sampledAt > 3500 || sampledAt > Date.now() + 1000) return;
+    const signature = (message as unknown as { remoteInterlockSignature?: string }).remoteInterlockSignature;
+    try { await redisService.set(`machine:${machineId}:interlock-pmc`, { receivedAt: Date.now(), pmcBits, signature }, 4); }
+    catch { console.error('[Interlock] PMC snapshot unavailable'); }
+    wsService.sendPmcBits(machineId, pmcBits, signature);
   });
 
   // Handle alarms from agents
@@ -436,8 +455,9 @@ function setupMqttHandlers(): void {
       }
     }
     commandWaiter.notify(correlationId, { status, result, errorCode, errorMessage });
-    await updateCommandAuditResult(correlationId, status, errorMessage ?? errorCode ?? null);
-    await emitSuccessfulCommandActivity(machineId, correlationId, status, result, commandUpdated);
+    const auditStatus = errorCode === 'WRITE_UNCONFIRMED' ? 'unknown' : status;
+    await updateCommandAuditResult(correlationId, auditStatus, errorMessage ?? errorCode ?? null, result);
+    await emitSuccessfulCommandActivity(machineId, correlationId, auditStatus, result, commandUpdated);
 
     // ── 3. DOWNLOAD_PROGRAM 결과: share/ 폴더에 파일 저장 ────────
     // preview-로 시작하는 correlationId는 더블클릭 미리보기용 — share/ 저장 제외

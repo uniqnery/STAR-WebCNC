@@ -27,6 +27,7 @@ import { FocasEventLog } from '../components/FocasEventLog';
 import { UserActivityFeed } from '../components/UserActivityFeed';
 import { MachineTopBar } from '../components/MachineTopBar';
 import { useLongPress } from '../hooks/useLongPress';
+import { useRemoteInterlock } from '../hooks/useRemoteInterlock';
 
 export function RemoteControl() {
   const { machines, selectedMachineId, addFocasEvent } = useMachineStore();
@@ -61,6 +62,7 @@ export function RemoteControl() {
     .filter(m => m.pmcAddr && pmcBits[m.pmcAddr] === 1);
 
   const hasControlLock = controlLock?.isOwner ?? false;
+  const interlockFailure = useRemoteInterlock(selectedMachineId || '');
 
   const [monitorTab, setMonitorTab] = useState<MonitorTab>('monitor');
   const [mobileTab, setMobileTab] = useState<'monitor' | 'panel'>('monitor');
@@ -77,7 +79,10 @@ export function RemoteControl() {
     if (dx > 0 && idx > 0) setMobileTab(TABS_ORDER[idx - 1]);
   };
   const [activePressId, setActivePressId] = useState<string | null>(null);
-  const [activeProgress, setActiveProgress] = useState(0);
+  const progressCircleRef = useRef<SVGCircleElement>(null);
+  const updatePressProgress = useCallback((progress: number) => {
+    if (progressCircleRef.current) progressCircleRef.current.style.strokeDashoffset = String(2 * Math.PI * 50 * (1 - progress));
+  }, []);
   const [activeLabel, setActiveLabel] = useState('');
   const [lampStates, setLampStates] = useState<Record<string, boolean>>({});
   const [buttonWarnings, setButtonWarnings] = useState<Record<string, string>>({});
@@ -142,6 +147,10 @@ export function RemoteControl() {
     }
 
     const group = panelGroups.find((g) => g.keys.some((k) => k.id === key.id));
+    if (interlockFailure && !['STOP', 'FEED_HOLD', 'CYCLE_STOP'].includes(key.id)) {
+      setWarning(key.id, interlockFailure);
+      return;
+    }
 
     if (warningTimers.current[key.id]) {
       clearTimeout(warningTimers.current[key.id]);
@@ -162,7 +171,7 @@ export function RemoteControl() {
     });
 
     try {
-      const response = await commandApi.send(selectedMachineId, 'PMC_WRITE', {
+      const response = await commandApi.sendAndWait(selectedMachineId, 'PMC_WRITE', {
         address: key.reqAddr,
         value: 1,
         holdMs: key.timing.holdMs,
@@ -171,6 +180,10 @@ export function RemoteControl() {
         panelGroupName: group?.name,
       });
 
+      if (!response.success || response.data?.status !== 'SUCCESS') {
+        setWarning(key.id, response.error?.message ?? response.data?.errorMessage ?? '실행 결과 확인 불가');
+        return;
+      }
       addFocasEvent(selectedMachineId, {
         id: `evt-${Date.now()}-release`,
         machineId: selectedMachineId,
@@ -192,7 +205,7 @@ export function RemoteControl() {
         timestamp: new Date().toISOString(),
       });
     }
-  }, [selectedMachineId, hasControlLock, panelGroups, addFocasEvent, setWarning]);
+  }, [selectedMachineId, hasControlLock, panelGroups, addFocasEvent, setWarning, interlockFailure]);
 
   return (
     <div
@@ -206,6 +219,7 @@ export function RemoteControl() {
           pageTitle="원격 조작반"
           pageId="remote"
         />
+        {interlockFailure && <p role="status" className="text-sm text-yellow-500">{interlockFailure} · 조작 차단 (정지·해제 제외)</p>}
       </div>
 
       {/* 2분할 레이아웃: NC 모니터 / 오퍼레이션 패널 */}
@@ -274,11 +288,12 @@ export function RemoteControl() {
                   groups={panelGroups}
                   lampStates={lampStates}
                   buttonWarnings={buttonWarnings}
-                  disabled={false}
+                  disabled={!hasControlLock}
+                  interlockBlocked={!!interlockFailure}
                   activePressId={activePressId}
                   onPressStart={(id, label) => { setActivePressId(id); setActiveLabel(label); }}
-                  onPressProgress={(p) => setActiveProgress(p)}
-                  onPressEnd={() => { setActivePressId(null); setActiveProgress(0); setActiveLabel(''); }}
+                  onPressProgress={updatePressProgress}
+                  onPressEnd={() => { setActivePressId(null); setActiveLabel(''); }}
                   onExecute={handleButtonExecute}
                 />
               </div>
@@ -296,7 +311,7 @@ export function RemoteControl() {
 
           {/* 롱프레스 중앙 오버레이 */}
           {activePressId && (
-            <LongPressOverlay progress={activeProgress} label={activeLabel} />
+            <LongPressOverlay circleRef={progressCircleRef} label={activeLabel} />
           )}
 
           {/* 제어권 미획득 팝업 */}
@@ -312,6 +327,7 @@ export function RemoteControl() {
 // ─── 오퍼레이션 패널 (PanelGroup 기반) ───
 
 interface OperationPanelProps {
+  interlockBlocked: boolean;
   groups: PanelGroup[];
   lampStates: Record<string, boolean>;
   buttonWarnings: Record<string, string>;
@@ -324,7 +340,7 @@ interface OperationPanelProps {
 }
 
 function OperationPanel({
-  groups, lampStates, buttonWarnings, disabled,
+  groups, lampStates, buttonWarnings, disabled, interlockBlocked,
   activePressId, onPressStart, onPressProgress, onPressEnd, onExecute,
 }: OperationPanelProps) {
   // 같은 줄 그룹을 묶어 "행" 단위로 구성
@@ -350,7 +366,7 @@ function OperationPanel({
               panelKey={key}
               lampOn={lampStates[key.id] ?? false}
               warning={buttonWarnings[key.id]}
-              disabled={disabled || (activePressId !== null && activePressId !== key.id)}
+              disabled={disabled || (interlockBlocked && !['STOP', 'FEED_HOLD', 'CYCLE_STOP'].includes(key.id)) || (activePressId !== null && activePressId !== key.id)}
               onPressStart={onPressStart}
               onPressProgress={onPressProgress}
               onPressEnd={onPressEnd}
@@ -434,21 +450,19 @@ interface PmcButtonProps {
 }
 
 function PmcButton({ panelKey, lampOn, warning, disabled, onPressStart, onPressProgress, onPressEnd, onExecute }: PmcButtonProps) {
-  const { isPressed, progress, handlers } = useLongPress({
+  const progressBarRef = useRef<HTMLDivElement>(null);
+  const { isPressed, handlers } = useLongPress({
     longPressMs: panelKey.timing.longPressMs,
     onComplete: () => { onPressEnd(); onExecute(panelKey); },
     onStart: () => onPressStart(panelKey.id, panelKey.label),
     onCancel: () => onPressEnd(),
+    trackProgress: false,
+    onProgress: (progress) => {
+      if (progressBarRef.current) progressBarRef.current.style.transform = `scaleX(${progress})`;
+      onPressProgress(progress);
+    },
     disabled,
   });
-
-  const onPressProgressRef = useRef(onPressProgress);
-  onPressProgressRef.current = onPressProgress;
-  useEffect(() => {
-    if (isPressed) {
-      onPressProgressRef.current(progress);
-    }
-  }, [isPressed, progress]);
 
   const colorConfig: Record<string, { bg: string; bgPressed: string; border: string; text: string; glow: string }> = {
     green: {
@@ -531,8 +545,9 @@ function PmcButton({ panelKey, lampOn, warning, disabled, onPressStart, onPressP
       {isPressed && (
         <div className="absolute bottom-0 left-1 right-1 h-1 bg-black/30 rounded-full overflow-hidden">
           <div
-            className="h-full bg-white/70 rounded-full transition-none"
-            style={{ width: `${progress * 100}%` }}
+            ref={progressBarRef}
+            className="h-full bg-white/70 rounded-full transition-none origin-left"
+            style={{ transform: 'scaleX(0)' }}
           />
         </div>
       )}
@@ -638,10 +653,9 @@ function ControlLockPopup({ onClose }: { onClose: () => void }) {
 
 // ─── 롱프레스 중앙 오버레이 ───
 
-function LongPressOverlay({ progress, label }: { progress: number; label: string }) {
+function LongPressOverlay({ circleRef, label }: { circleRef: React.RefObject<SVGCircleElement>; label: string }) {
   const radius = 50;
   const circumference = 2 * Math.PI * radius;
-  const offset = circumference * (1 - progress);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 pointer-events-none">
@@ -649,13 +663,14 @@ function LongPressOverlay({ progress, label }: { progress: number; label: string
         <svg width="120" height="120" className="transform -rotate-90">
           <circle cx="60" cy="60" r={radius} stroke="#374151" strokeWidth="6" fill="none" />
           <circle
+            ref={circleRef}
             cx="60" cy="60" r={radius}
             stroke="#60a5fa"
             strokeWidth="6"
             fill="none"
             strokeLinecap="round"
             strokeDasharray={circumference}
-            strokeDashoffset={offset}
+            strokeDashoffset={circumference}
             className="transition-none"
           />
         </svg>

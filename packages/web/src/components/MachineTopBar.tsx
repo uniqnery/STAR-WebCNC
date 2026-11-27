@@ -12,6 +12,7 @@ import {
 import { useAuthStore } from '../stores/authStore';
 import { useTemplateStore, type TopBarInterlockField } from '../stores/templateStore';
 import { machineApi } from '../lib/api';
+import { useRemoteInterlock } from '../hooks/useRemoteInterlock';
 
 export type TopBarPageId = 'remote' | 'scheduler' | 'monitoring' | 'transfer' | 'backup';
 
@@ -33,7 +34,8 @@ function getPillOk(
   hasTelemetry: boolean,
 ): boolean | undefined {
   if (!hasTelemetry) return undefined;
-  const raw = (pmcBits ?? {})[field.pmcAddr] ?? 0;
+  const raw = (pmcBits ?? {})[field.pmcAddr];
+  if (raw !== 0 && raw !== 1) return undefined;
   return field.contact === 'A' ? raw === 1 : raw === 0;
 }
 
@@ -49,6 +51,8 @@ export function MachineTopBar({ pageTitle, pageId, settingsContent, settingsAdja
   } = useMachineStore();
   const telemetry = useMachineTelemetry(selectedMachineId || '');
   const controlLock = useControlLock(selectedMachineId || '');
+  const remoteInterlock = useRemoteInterlock(selectedMachineId || '');
+  const interlockBlocked = lockDisabled || (pageId === 'remote' && !!remoteInterlock);
   const machine = machines.find((m) => m.machineId === selectedMachineId);
   const canManage = user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER';
 
@@ -97,7 +101,7 @@ export function MachineTopBar({ pageTitle, pageId, settingsContent, settingsAdja
   }, [selectedMachineId, machines, selectMachine]);
 
   // Control lock state
-  const hasControlLock = controlLock?.isOwner ?? false;
+  const hasControlLock = canManage && (controlLock?.isOwner ?? false);
   const lockOwner = controlLock?.ownerUsername ?? null;
   const expiresAt = controlLock?.expiresAt ?? null;
 
@@ -142,7 +146,7 @@ export function MachineTopBar({ pageTitle, pageId, settingsContent, settingsAdja
   const pmcBits = telemetry?.pmcBits;
 
   const handleControlLock = async () => {
-    if (!selectedMachineId || !canManage) return;
+    if (!selectedMachineId || !canManage || (!hasControlLock && interlockBlocked)) return;
     setLockLoading(true);
     setLockError(null);
     if (hasControlLock) {
@@ -171,12 +175,13 @@ export function MachineTopBar({ pageTitle, pageId, settingsContent, settingsAdja
   };
 
   const handleExtend = async () => {
-    if (!selectedMachineId || !hasControlLock) return;
+    if (!selectedMachineId || !hasControlLock || !canManage) return;
     try {
-      await machineApi.extendControl(selectedMachineId);
-      extendControlLock(selectedMachineId);
+      const response = await machineApi.extendControl(selectedMachineId);
+      if (response.success) extendControlLock(selectedMachineId);
+      else setLockError(response.error?.message || '제어권 연장 실패');
     } catch {
-      extendControlLock(selectedMachineId);
+      setLockError('제어권 연장 실패');
     }
   };
 
@@ -217,8 +222,8 @@ export function MachineTopBar({ pageTitle, pageId, settingsContent, settingsAdja
           <div className="flex flex-col items-end gap-1">
             <button
               onClick={handleControlLock}
-              disabled={lockLoading || !canManage || !selectedMachineId || (!hasControlLock && lockDisabled)}
-              title={!hasControlLock && lockDisabled ? '인터록 조건 미충족' : undefined}
+              disabled={lockLoading || !canManage || !selectedMachineId || (!hasControlLock && interlockBlocked)}
+              title={!canManage ? '업체 관리자와 본사 엔지니어만 제어권을 획득할 수 있습니다.' : !hasControlLock && lockDisabled ? '인터록 조건 미충족' : undefined}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
                 hasControlLock
                   ? 'bg-green-600 text-white hover:bg-green-700'

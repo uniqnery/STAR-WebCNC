@@ -6,6 +6,8 @@ import { useMachineStore, useControlLockDuration } from '../stores/machineStore'
 import { useCameraStore, CameraConfig } from '../stores/cameraStore';
 import { diagnosticsApi, DiagnosticsData, AgentDiagStatus, settingsApi, notificationApi } from '../lib/api';
 import type { WindowsStartupStatus } from '../lib/api';
+import { useFeatureStore } from '../stores/featureStore';
+import { ProfileSettings } from '../components/ProfileSettings';
 
 export function Settings() {
   const user = useAuthStore((state) => state.user);
@@ -18,6 +20,9 @@ export function Settings() {
   const setControlLockDuration = useMachineStore((s) => s.setControlLockDuration);
 
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER';
+  const { mesEnabled, setMesEnabled } = useFeatureStore();
+  const [mesBusy, setMesBusy] = useState(false);
+  const [mesError, setMesError] = useState('');
   const [startup, setStartup] = useState<WindowsStartupStatus | null>(null);
   const [startupBusy, setStartupBusy] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
@@ -144,14 +149,22 @@ export function Settings() {
         <p className="text-gray-500">제어권 타이머, 카메라 연동 및 시스템 옵션 관리</p>
       </div>
 
+      <ProfileSettings />
       {isAdmin && (
         <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
+          <label className="flex items-center gap-3 mb-2">
+            <input type="checkbox" checked={mesEnabled} disabled={mesBusy || user?.role !== 'HQ_ENGINEER'}
+              onChange={async e => { setMesBusy(true); setMesError(''); try { await setMesEnabled(e.target.checked); } catch (error) { setMesError(error instanceof Error ? error.message : '설정 실패'); } finally { setMesBusy(false); } }} />
+            <span>MES 작업지시 연동 활성화</span>
+          </label>
+          <p className="text-xs text-gray-500 mb-4">본사 엔지니어만 변경 · 꺼도 M20 생산 집계는 계속됩니다. 변경 후 작업지시는 POP에서 다시 연결하세요.</p>
+          {mesError && <p role="alert" className="text-red-500 text-sm">{mesError}</p>}
           <label className="flex items-start gap-3">
             <input
               type="checkbox"
               className="mt-1 h-5 w-5 shrink-0 accent-blue-600"
               checked={startup?.enabled ?? false}
-              disabled={startupBusy || !startup?.supported || user?.role !== 'HQ_ENGINEER'}
+              disabled={startupBusy || !startup?.supported || !isAdmin}
               onChange={(event) => void changeStartup(event.target.checked)}
             />
             <span>
@@ -175,7 +188,7 @@ export function Settings() {
               </>
             )}
           </div>
-          {user?.role !== 'HQ_ENGINEER' && <p className="text-xs text-gray-500 mt-2">본사 엔지니어가 변경할 수 있습니다.</p>}
+          <p className="text-xs text-gray-500 mt-2">업체 관리자와 본사 엔지니어가 변경할 수 있습니다.</p>
           {startupError && <p role="alert" className="text-sm text-red-500 mt-2">{startupError}</p>}
           <button type="button" onClick={() => void loadStartup()} disabled={startupBusy} className="mt-3 text-sm text-blue-600 hover:underline disabled:opacity-50">
             등록 상태 확인

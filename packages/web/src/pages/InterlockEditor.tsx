@@ -48,15 +48,18 @@ export function InterlockEditor() {
 
   const [activeTab, setActiveTab] = useState<TabId>('remote');
   const [dirty, setDirty] = useState(false);
+  const [draftSource, setDraftSource] = useState({ id: '', updatedAt: '' });
   const [config, setConfig] = useState<TopBarInterlockConfig>(EMPTY_CONFIG);
 
-  const canEdit = user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER';
+  const canEdit = user?.role === 'HQ_ENGINEER';
 
   useEffect(() => { loadTemplates(); }, [loadTemplates]);
 
   useEffect(() => {
     const tpl = templates.find((t) => t.id === selectedTemplateId);
+    if (dirty && draftSource.id === selectedTemplateId) return;
     if (tpl) {
+      setDraftSource({ id: tpl.id, updatedAt: tpl.updatedAt });
       const tbi = tpl.topBarInterlock;
       setConfig(structuredClone({
         remote:     tbi?.remote     ?? { ...EMPTY_PAGE },
@@ -67,12 +70,12 @@ export function InterlockEditor() {
       }));
       setDirty(false);
     }
-  }, [selectedTemplateId, templates]);
+  }, [selectedTemplateId, templates, dirty, draftSource.id]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!selectedTemplateId) return;
-    updateTemplate(selectedTemplateId, { topBarInterlock: config });
-    setDirty(false);
+    try { await updateTemplate(selectedTemplateId, { topBarInterlock: config, updatedAt: draftSource.updatedAt }); setDirty(false); }
+    catch (error) { alert(error instanceof Error ? error.message : '저장 또는 Agent 적용 실패'); }
   };
 
   const updatePage = (tab: TabId, page: TopBarInterlockPageConfig) => {
@@ -86,7 +89,7 @@ export function InterlockEditor() {
     return (
       <div className="p-6">
         <div className="bg-red-900/20 text-red-400 p-6 rounded-lg">
-          관리자 또는 HQ 엔지니어만 접근할 수 있습니다.
+          본사 엔지니어만 접근할 수 있습니다.
         </div>
       </div>
     );

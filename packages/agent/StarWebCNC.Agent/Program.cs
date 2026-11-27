@@ -40,6 +40,10 @@ builder.Services.AddSingleton<CommandHandler>();
 
 // Scheduler Manager
 builder.Services.AddSingleton<SchedulerManager>();
+builder.Services.AddSingleton<ProductionOutbox>();
+builder.Services.AddHostedService(p => p.GetRequiredService<ProductionOutbox>());
+builder.Services.AddSingleton<CounterJournal>();
+builder.Services.AddHostedService(p => p.GetRequiredService<CounterJournal>());
 
 // Background Service
 builder.Services.AddHostedService<DataCollectorService>();

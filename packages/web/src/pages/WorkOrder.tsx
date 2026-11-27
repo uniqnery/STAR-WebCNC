@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useMachineStore } from '../stores/machineStore';
 import { useAuthStore } from '../stores/authStore';
 import { workOrderApi } from '../lib/api';
+import { useFeatureStore } from '../stores/featureStore';
 
 type WorkOrderStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
 
@@ -28,6 +29,7 @@ interface WorkOrder {
 
 
 export function WorkOrder() {
+  const mesEnabled = useFeatureStore(s => s.mesEnabled);
   const user = useAuthStore((state) => state.user);
   const machines = useMachineStore((state) => state.machines);
 
@@ -131,6 +133,8 @@ export function WorkOrder() {
     inProgress: orders.filter((o) => o.status === 'IN_PROGRESS').length,
     completed: orders.filter((o) => o.status === 'COMPLETED').length,
   };
+
+  if (!mesEnabled) return <div className="p-6 text-gray-500">MES 작업지시 기능이 비활성화되어 있습니다.</div>;
 
   return (
     <div className="p-6">
@@ -412,6 +416,7 @@ function CreateWorkOrderModal({
     orderNumber: '',
     productCode: '',
     productName: '',
+    productionComment: '',
     targetQuantity: 100,
     assignedMachine: '',
     programNumber: '',
@@ -443,6 +448,9 @@ function CreateWorkOrderModal({
         </div>
 
         <form onSubmit={handleSubmit} className="p-4 space-y-4">
+          <label className="block text-sm dark:text-white">생산 코멘트 (비어 있으면 제품명 사용)
+            <input maxLength={500} value={formData.productionComment} onChange={e => setFormData({ ...formData, productionComment: e.target.value })} className="block w-full border rounded p-2 dark:bg-gray-700" />
+          </label>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">

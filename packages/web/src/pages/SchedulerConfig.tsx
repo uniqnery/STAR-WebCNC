@@ -184,33 +184,40 @@ export function SchedulerConfig() {
 
   const [cfg, setCfg] = useState<SchedulerConfig>(EMPTY);
   const [dirty, setDirty] = useState(false);
+  const [draftSource, setDraftSource] = useState({ id: '', updatedAt: '' });
 
-  const canEdit = user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER';
+  const canEdit = user?.role === 'HQ_ENGINEER';
 
   useEffect(() => { loadTemplates(); }, [loadTemplates]);
 
   useEffect(() => {
     const tpl = templates.find((t) => t.id === selectedTemplateId);
+    if (dirty && draftSource.id === selectedTemplateId) return;
     if (tpl?.schedulerConfig) {
+      setDraftSource({ id: tpl.id, updatedAt: tpl.updatedAt });
       setCfg({ ...EMPTY, ...tpl.schedulerConfig, countDisplay: { ...EMPTY.countDisplay, ...tpl.schedulerConfig.countDisplay } });
       setDirty(false);
     }
-  }, [selectedTemplateId, templates]);
+  }, [selectedTemplateId, templates, dirty, draftSource.id]);
 
   const patch = (partial: Partial<SchedulerConfig>) => {
     setCfg((prev) => ({ ...prev, ...partial }));
     setDirty(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!selectedTemplateId) return;
-    updateTemplate(selectedTemplateId, { schedulerConfig: cfg });
-    setDirty(false);
+    try { await updateTemplate(selectedTemplateId, { schedulerConfig: cfg, updatedAt: draftSource.updatedAt }); setDirty(false); }
+    catch (error) { alert(error instanceof Error ? error.message : '저장 또는 적용 실패'); }
   };
 
   const selectedTpl = templates.find((t) => t.id === selectedTemplateId);
 
   // ── 렌더 ──────────────────────────────────────────────
+  if (!canEdit) {
+    return <div className="p-6 text-red-400">본사 엔지니어만 접근할 수 있습니다.</div>;
+  }
+
   return (
     <div className="flex h-full bg-gray-900 text-white">
 

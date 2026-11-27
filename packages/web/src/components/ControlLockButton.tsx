@@ -20,11 +20,12 @@ export function ControlLockButton({
   onLockChange,
 }: ControlLockButtonProps) {
   const user = useAuthStore((state) => state.user);
+  const canControl = user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER';
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionId] = useState(() => crypto.randomUUID());
 
-  const isMyLock = currentLock?.ownerId === user?.id;
+  const isMyLock = canControl && currentLock?.ownerId === user?.id;
   const isLocked = !!currentLock;
 
   // Heartbeat to extend lock
@@ -43,6 +44,7 @@ export function ControlLockButton({
   }, [machineId, isMyLock]);
 
   const handleAcquire = useCallback(async () => {
+    if (!canControl) return;
     setIsLoading(true);
     setError(null);
 
@@ -58,7 +60,7 @@ export function ControlLockButton({
     } finally {
       setIsLoading(false);
     }
-  }, [machineId, sessionId, onLockChange]);
+  }, [machineId, sessionId, onLockChange, canControl]);
 
   const handleRelease = useCallback(async () => {
     setIsLoading(true);
@@ -79,8 +81,6 @@ export function ControlLockButton({
   }, [machineId, onLockChange]);
 
   // Check if user has permission to control
-  const canControl = user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER';
-
   if (!canControl) {
     return (
       <div className="text-sm text-gray-500">

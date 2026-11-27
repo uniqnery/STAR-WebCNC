@@ -14,13 +14,24 @@ interface AuditLogEntry {
   targetId?: string;
   targetName?: string;
   params?: Record<string, unknown>;
-  result: 'success' | 'failure';
+  result: 'success' | 'failure' | 'pending' | 'unknown';
   errorMsg?: string;
   ipAddress: string;
   createdAt: string;
 }
 
 type ActionFilter = 'all' | 'control' | 'scheduler' | 'transfer' | 'auth' | 'admin';
+
+function writeDetail(log: AuditLogEntry): string | null {
+  if (!['command.write_offset', 'command.write_count', 'command.write_tool_life_preset'].includes(log.action)) return null;
+  const p = (log.params?.params ?? {}) as Record<string, unknown>;
+  const r = (log.params?.writeResult ?? {}) as Record<string, unknown>;
+  const delta = p.additiveDelta;
+  const input = typeof delta === 'number' ? `${delta >= 0 ? '+' : ''}${delta}` : `직접 입력 ${p.value ?? '—'}`;
+  const target = log.action === 'command.write_offset' ? `Path ${p.path} · 공구 ${p.toolNo} · ${['X', 'Y', 'Z', 'R'][Number(p.axisIdx)]}` : `${p.varType ?? 'macro'} ${p.varNo}`;
+  const completed = log.params?.completedAt;
+  return `${target} · ${input} → 최종 ${r.value ?? '확인 불가'} (이전 ${r.beforeValue ?? '확인 불가'})${typeof completed === 'string' ? ` · 처리 ${new Date(completed).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}` : ''}`;
+}
 
 
 export function AuditLog() {
@@ -231,7 +242,7 @@ export function AuditLog() {
               logs.map((log) => (
                 <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                   <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
-                    {new Date(log.createdAt).toLocaleString()}
+                    {new Date(log.createdAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
                   </td>
                   <td className="px-4 py-3">
                     <div className="text-sm font-medium text-gray-900 dark:text-white">
@@ -243,6 +254,8 @@ export function AuditLog() {
                     <span className={`px-2 py-1 rounded text-xs font-medium ${getActionColor(log.action)}`}>
                       {formatAction(log.action)}
                     </span>
+                    {writeDetail(log) && <p className="text-xs text-gray-500 mt-1 whitespace-normal">{writeDetail(log)}</p>}
+                    {(log.params?.roleTest || log.params?.actualRole) ? <p className="text-xs text-amber-600">권한 테스트 · 실제 본사 엔지니어 → {log.userRole}</p> : null}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-500">
                     {log.targetName || log.targetId || '-'}
@@ -250,6 +263,8 @@ export function AuditLog() {
                   <td className="px-4 py-3 text-center">
                     {log.result === 'success' ? (
                       <span className="text-green-600">성공</span>
+                    ) : log.result === 'pending' || log.result === 'unknown' ? (
+                      <span className="text-yellow-600" title={log.errorMsg}>{log.result === 'pending' ? '처리 중' : '결과 확인 불가'}</span>
                     ) : (
                       <span className="text-red-600" title={log.errorMsg}>
                         실패
@@ -299,6 +314,11 @@ export function AuditLog() {
 // Format action string for display
 function formatAction(action: string): string {
   const actionMap: Record<string, string> = {
+    'auth.role_test': '권한 테스트 전환',
+    'auth.role_test_request': '권한 테스트 요청',
+    'command.write_offset': '오프셋 수정',
+    'command.write_count': '카운터 수정',
+    'command.write_tool_life_preset': '공구수명 수정',
     'control.acquire': '제어권 획득',
     'control.release': '제어권 반납',
     'control.command': '명령 전송',

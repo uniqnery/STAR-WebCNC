@@ -9,6 +9,39 @@
 
 ## 현재 구현 구조
 
+### 툴라이프 변수 타입·재적용 수정 (2026-11-26)
+
+- `READ_TOOL_LIFE`와 `WRITE_TOOL_LIFE_PRESET`은 `ToolLifeVariables`로 macro→일반 매크로, pcode→P코드 전용 API, ddata→PMC D영역을 구분한다. 쓰기 전후 검증도 동일 타입을 사용하고 읽기 실패는 0으로 만들지 않는다. 요청 Path를 선택하고 처리 후 Path1로 복귀하며 수정 가능 항목은 같은 Path 설정에서만 검증한다. 웹/API의 쓰기 요청·감사 의도에도 Path를 전달한다.
+- ToolLifeView는 템플릿 Path 설정 변경 시 재조회하고 미확인 값은 `—`로 표시하며 편집을 막는다. P코드 표기는 P로 구분한다. 템플릿 저장은 서버 저장 실패와 Agent 적용 확인 대기를 구분하고, 적용 완료/대기 설비를 각각 안내한다. 기존 최신 PMC·인터록 서명 검사와 관리자 수정 권한·감사 이력은 유지한다. 연결 안 된 설비의 재적용 ACK는 여전히 CNC 연결 후 처리되며 연결 복구 후 확인이 필요하다.
+- 검증: Agent 74개, 서버 193개(저장 성공/적용 대기 분리 회귀 3개 포함), 실제 ToolLifeView 격리 DOM 12개 검사 및 서버/Web 빌드 통과. 2호기 실읽기 Path1 585ms(T0100 P14040=999999, P14280≈4000; T0500 COUNT≈5564), Path2 478ms/200 응답. 실기기 쓰기는 하지 않았다. 템플릿 주소는 사용자가 설정한 값을 유지했다.
+- 운영 DLL SHA256 `FA8A6C70E77A03E595B16383724328D2C727464DB2C0813E5C4CC508A30FCD14`, 교체 전 백업 `agent-runtime/startup/rollback-pop-agent-20261126-091939`. 공유 publish와 MC-002 publish 두 곳에 반영했으며 자동 기동 상태 Agent 프로세스 4개 ready 및 2호기 CNC/PMC 연결 복구를 확인했다.
+
+### 카운터 화면 수동 저장·프리셋 하한 (2026-11-26)
+
+- 같은 날 첫 조회 지연 수정: 개발 StrictMode가 effect를 정리·재실행할 때 cleanup의 generation 증가가 최초 READ_COUNT 응답을 폐기하고 다음 5초 poll까지 기다리게 했다. 실제 조회 API/웹 경유 측정은 293~497ms였고, 30ms 고정 응답의 격리 화면은 수정 전 5054ms(요청 2회)였다. 기기 변경은 keyed 패널의 mounted guard가 보호하므로 cleanup의 불필요한 generation 증가만 제거했고 쓰기 전후 generation 보호는 유지했다. 동일 재현 수정 후 StrictMode 64ms/요청 1회, 일반 모드 41ms/요청 1회. 첫 응답 즉시 표시·중복 조회 없음·기기 전환 및 저장 전 응답 폐기를 포함한 실제 CountView 격리 UI 28개와 Web build 통과. 서버/Agent/CNC 설정 변경 없음.
+- 같은 날 화면 간소화: 재조회 버튼·상시 안내·변수 번호·하단 가동 설명을 제거했다. PRESET/COUNT/TOTAL 및 시간 행은 최초 응답 전부터 고정하고 값만 `—`에서 교체한다. 자동 조회, 저장/취소, 프리셋 COUNT+2 제한 및 실제 실패 알림은 유지했다. 지연된 최초 응답에서도 행 유지·미로딩 편집 차단을 포함한 격리 UI 24개 검사와 Web build 통과, 실행 중 Vite 모듈 200 및 새 화면 코드 제공 확인. Agent/서버/설비 설정은 이 간소화에서 변경하지 않았다.
+- `READ_COUNT`는 템플릿 변수 목록과 함께 현재 설정의 사이클 타임(초), Run 상태, `presetMinGap=2` 지원을 반환한다. 화면은 5초마다 조회하고 편집 초안은 분리한다. PRESET/COUNT/TOTAL은 정수 표시이며 승인된 관리자만 항목별 저장/취소할 수 있다.
+- `WRITE_COUNT`는 기존 FOCAS 스레드·서버 직렬 처리·수정 의도 journal·확인값 이력을 유지한다. `preset` 쓰기에서는 `CounterWriteRules.WritePreset`가 실제 CNC COUNT를 바로 읽고 target >= COUNT+2인 경우에만 write 함수를 호출한다. 읽기 실패나 조건 미달은 CNC 쓰기 없이 실패 원인을 반환한다. 화면 표시값이나 요청 파라미터의 count를 신뢰해 판정하지 않는다. 하드웨어 카운터는 검사와 쓰기 사이에도 변할 수 있어 PLC 수준의 원자적 인터록과 동일한 보장은 아니다.
+- 수량은 0~Int32.MaxValue 정수로 제한하고, 작은 소수 환산 오차만 정수 표시에서 정리한다. COUNT/TOTAL에는 PRESET 하한을 적용하지 않으며 TOTAL의 P10001 직접 수정은 기존 WRITE_COUNT 감사 경로에 남는다. 스케줄러 내부 제어 쓰기에는 이 수동 저장 조건을 추가하지 않았다.
+- 대상 템플릿 PRESET/COUNT를 CountDisplay와 맞추고 TOTAL은 P10001/writable로 저장했다. 기존 #503 remaining 필드를 계산 잔여 시간으로 대체했으며 D97 초/D98 분/D99 시간 설정은 유지했다. 템플릿 변경 전 백업은 `agent-runtime/startup/rollback-count-panel-1795648456746`, Agent 교체 전 DLL은 `agent-runtime/startup/rollback-pop-agent-20261126-081427`에 있다. 최종 DLL SHA256 `D851034E895DDA42E7F4B870C0CB56C50485A92E66BCFB4C0054CF6DA9143152`.
+- 변경 파일: Agent `Commands/{CounterWriteRules,CommandHandler}.cs`, Server `routes/machines.ts`, Web `components/ncmonitor/CountView.tsx`, `lib/{countDisplay,api}.ts`, 해당 템플릿 JSON. Server 186개(시간 계산 22개 포함), Agent 61개, 별도 DOM의 실제 CountView/API 모의 검사 18개 통과. blur/Enter/취소 무전송·저장 1회·USER 차단·구형 Agent 차단·실패 시 초안 유지·CNC count 상승 후 하한 갱신을 확인했다. `tools/verify-count-ui.mjs`는 happy-dom을 별도 runtime 테스트 폴더에 설치해서 실행하며 본 프로젝트 의존성 변경은 없다.
+- 2호기 운영 적용 후 READ_COUNT 200, PRESET P10000=2000.0000000000002→2000 표시, COUNT #900=1278, TOTAL P10001=1278 및 전부 readonly=false, presetMinGap=2, 사이클 2분 6초·잔여 25시간 16분 12초·예상 2026-11-27 09:31을 확인했다. 이 검증은 읽기만 했고 CNC 수량은 시험용으로 쓰지 않았다. 4대 Agent ready와 journal pending=0도 확인했다.
+
+### POP 카운터 변화 수집 (2026-11-25 운영 전환)
+
+- POP는 `DataCollectorService`의 기존 카운트 상세 조회에서 템플릿 CountDisplay 변수값을 재사용한다. 카운트/프리셋 읽기 실패를 0으로 변환하지 않고 원본 null로 보관한다. 원본 메인 프로그램(스케줄러 실행 시 원본 행 메타데이터), 실행 번호, 코멘트, 카운터 주소, 상단과 동일한 Run/HasAlarm 근거를 스냅샷으로 기록한다. 상태는 초록(Run 2/3) 우선, 빨강(HasAlarm), 대기, 확인 불가 순이다.
+- `CounterJournal`의 `counter-journal/MC-xxx/state.json`에 마지막 관측·유효 카운트·미전송 이벤트·수정 의도를 한 번에 원자적으로 저장한다. 변경 시 및 15초 생존 표본을 보관하고 서버 DB 커밋 ACK까지 재전송한다. 스케줄러 제어는 건드리지 않으며 POP M20 생성 구독만 해제했다. 과거 M20 미전송 파일은 보존하고 서버가 설비별 최초 카운터 수집 시점 이후 M20 실적을 중복 반영하지 않는다.
+- 서버에서 실제 템플릿을 받지 못해 `FALLBACK_TEMPLATE`를 사용하는 동안은 기본 변수값을 POP 기준으로 신뢰하지 않는다. 카운트·프리셋은 미확인으로 기록하고 마지막 정상 카운터 기준을 유지한다. 정상 설정 복구 후 변화는 단절 구간 규칙을 적용한다.
+- 카운터 수정은 `CommandHandler`의 기존 읽기→쓰기→재확인 중 최초 읽기에서 수정 의도를 먼저 영속 저장한다. 쓰기 도중 프로세스가 종료돼도 다음 표본을 수정으로 분리한다. 기록 실패 시 수정 의도 저장 전에 CNC 쓰기를 진행하지 않는다. 수정 완료 기록 실패는 의도를 유지하며 다음 정상 조회에서 복구한다.
+- 상태 구간은 관측 간격 기준이며 30초보다 긴 미관측 구간을 계속 가동으로 계산하지 않는다. PC/설비 단절 중 초기화·원복·여러 프로그램 가공은 복원할 수 없다. 별도 초기화 불가 누적 카운터와 래치 설계는 이번 변경에 포함하지 않았다. 메시지는 수집 가능한 오퍼레이터 메시지 변경 스냅샷을 원본에 저장하고 실제 알람 발생/해제 DB 이력은 기존 경로를 유지한다.
+
+### 이전 POP M20 완료 수집 (같은 날 카운터 방식으로 대체)
+
+- `DataCollectorService`의 기존 M20 주소/전용 FOCAS 스레드에서 상승 엣지를 감지한다. 최초 읽기·CNC 재연결 첫 ON은 완료로 만들지 않는다. `SchedulerManager`가 소비하는 신호는 유효 생산만 별도 이벤트로 내보내 첫 M20/Path2Only 중복 집계를 피한다.
+- `ProductionOutbox`가 설비별 `production-outbox/MC-xxx`에 이벤트를 영속 기록하고 DB 저장 ACK까지 재전송한다. MQTT 전송 성공만으로 삭제하지 않으며 DB eventId 유일키로 중복 수량을 막는다. 디스크 기록 실패 시 메모리 재시도는 하지만 그 상태의 PC 종료까지 무손실을 보장하지 않는다.
+- 일반 운전 원본 프로그램 코멘트는 해당 O번호만 조회하고 기존 5분 캐시를 사용한다. POP 전용 upload3 읽기 예산은 타입별 200ms이며 기본 파일전송의 제한시간은 유지한다. O9000 이상은 이 추가 조회를 하지 않으며 코멘트가 없으면 O번호/미지정으로 기록한다.
+- 이 기능은 CNC/PMC 출력 및 카운터 증감으로 실적을 만들지 않는다. 원래 스케줄러의 제어용 변수 쓰기는 유지한다. PC 정지 중 신호·폴링보다 짧은 펄스는 별도 PLC 래치 없이는 복구하지 못한다.
+
 Star-WebCNC의 FANUC 통신은 C# Agent가 담당한다.
 
 ```text
@@ -41,6 +74,14 @@ Web UI
   - 설비별 PMC 주소, scheduler 주소, interlock, panel, count display 등 템플릿 정의
 
 ## 핵심 설계 원칙
+
+### 원격 인터록·데이터 수정 기준 (2026-11-25)
+
+- 원격 패널 PMC_WRITE는 Agent의 제어 명령 인터록 대상이며 실제 출력 직전에 다시 검사한다. STOP/FEED_HOLD/CYCLE_STOP 및 명시적 0 출력 예외는 설치 템플릿에 유일하게 매칭되는 reqAddr만 허용한다. 모멘터리 자동 0 복귀는 인터록이 떨어져도 수행하고 해제 실패는 성공 처리하지 않는다.
+- 서버는 최신 PMC 샘플과 remote 인터록 설정 서명 일치를 검사한다. 구 Agent처럼 서명이 없거나, 설정 재적용 미완료·미수신·3.5초 초과인 경우 획득/출력을 허용하지 않는다. 재적용 API는 Agent 응답을 기다리며 fallback 템플릿은 적용 성공으로 취급하지 않는다.
+- WRITE_OFFSET/WRITE_COUNT/WRITE_TOOL_LIFE_PRESET은 ADMIN/HQ_ENGINEER의 전용 API로만 허용하고 제어권·PMC 인터록은 요구하지 않는다. 감사 로그를 전송 전에 만들며 actor/당시 role/입력/응답의 beforeValue·value/처리 시각/결과를 보존한다. 응답이 없거나 재조회 불일치이면 unknown이며 자동 재전송하지 않는다.
+- `VerifiedDataWrite`는 FOCAS 스레드에서 동기적으로 기존값 읽기→증감 계산→쓰기→재조회한다. 읽기 실패를 0으로 치환해 덧셈하지 않는다. 오프셋 Path를 선택해 한 항목만 읽고 Path 1로 복귀한다. 서버 설비별 직렬화와 Agent 명령 큐를 함께 유지한다.
+- 검증: 서버 86건, CNC를 로드하지 않는 `tests/StarWebCNC.Agent.Checks` 18건 통과. 로컬 API/Agent에 적용하고 2호기의 X0.1 불만족 판정 및 설정 서명 수신을 확인했다. 실제 PMC 출력과 데이터 쓰기를 통한 확인은 미실시다. 이전 DLL은 `agent-runtime/startup/rollback-interlock-20261125-080009`에 보관했다.
 
 ### 1. 1 Agent = 1 CNC
 

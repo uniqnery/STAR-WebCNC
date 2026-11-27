@@ -10,6 +10,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
 import { prisma } from '../lib/prisma';
 import { verifyAccessToken, extractBearerToken } from '../auth/jwt';
+import { authenticate, requireRole } from '../middleware/auth';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const ffmpegPath: string | null = require('ffmpeg-static');
@@ -117,7 +118,7 @@ function authenticateStream(req: Request, res: Response, next: NextFunction): vo
   if (!token) { res.status(401).end(); return; }
   const payload = verifyAccessToken(token);
   if (!payload) { res.status(401).end(); return; }
-  req.user = { id: payload.sub, username: payload.username, role: payload.role };
+  req.user = { id: payload.sub, username: payload.username, displayName: payload.displayName || payload.username, role: payload.role };
   next();
 }
 
@@ -185,7 +186,7 @@ router.get('/configs', authenticateStream, async (_req: Request, res: Response) 
 // ──────────────────────────────────────────────
 // PUT /api/camera/configs
 // ──────────────────────────────────────────────
-router.put('/configs', authenticateStream, async (req: Request, res: Response) => {
+router.put('/configs', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response) => {
   try {
     const cameras = req.body as CameraConfig[];
     if (!Array.isArray(cameras)) {

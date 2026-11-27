@@ -12,11 +12,18 @@ import { authenticate, authorize } from '../middleware/auth';
 import { asyncHandler } from '../middleware/error';
 import { ApiResponse, PaginatedResponse } from '../types';
 import { UserRole, CommandStatus } from '@prisma/client';
+import { remoteInterlockFailure } from '../lib/remoteInterlock';
+import { serialDataWrite } from '../lib/serialDataWrite';
+import { getDailyRunRates } from '../lib/dailyRunRates';
 
 const router = Router();
 
 // ── NC 데이터 명령 헬퍼 ──────────────────────────────────────────
-async function sendNcCommand(
+function sendNcCommand(...args: Parameters<typeof sendNcCommandNow>) {
+  return ['WRITE_OFFSET', 'WRITE_COUNT', 'WRITE_TOOL_LIFE_PRESET'].includes(args[2])
+    ? serialDataWrite(args[1], () => sendNcCommandNow(...args)) : sendNcCommandNow(...args);
+}
+async function sendNcCommandNow(
   machineDbId: string,
   machineId: string,
   command: string,
@@ -41,11 +48,13 @@ async function sendNcCommand(
       prisma.auditLog.create({
         data: {
           userId: actor.id,
+        actorDisplayName: actor.displayName || actor.username,
           userRole: actor.role,
           action: `command.${command.toLowerCase()}`,
           targetType: 'machine',
           targetId: machineDbId,
-          params: { correlationId, params: (historyParams as object | undefined) ?? null },
+          params: { correlationId, params: (historyParams as object | undefined) ?? null,
+            ...(actor.testRole ? { roleTest: { actualRole: actor.actualRole!, effectiveRole: actor.role } } : {}) },
           result: 'pending',
           ipAddress: ipAddress || 'unknown',
         },
@@ -54,19 +63,31 @@ async function sendNcCommand(
   } else {
     await commandLog;
   }
-  await mqttService.sendCommand(machineId, command, correlationId, params);
-  return commandWaiter.wait(correlationId);
+  const waiting = commandWaiter.wait(correlationId);
+  void waiting.catch(() => undefined);
+  try {
+    await mqttService.sendCommand(machineId, command, correlationId, params);
+    return await waiting;
+  } catch (error) {
+    if (actor) await prisma.auditLog.updateMany({ where: { params: { path: ['correlationId'], equals: correlationId }, result: 'pending' },
+      data: { result: 'unknown', errorMsg: '응답을 확인하지 못했습니다. 자동 재전송하지 말고 실제 값을 재조회하세요.' } });
+    throw error;
+  }
 }
 
 // All routes require authentication
 router.use(authenticate);
+
+router.get('/daily-run-rates', asyncHandler(async (_req, res) => {
+  res.json({ success: true, data: await getDailyRunRates() });
+}));
 
 /**
  * GET /machines/next-id
  * Returns the next auto-generated machineId (preview before registration)
  */
 router.get('/next-id',
-  authorize(UserRole.HQ_ENGINEER, UserRole.ADMIN),
+  authorize(UserRole.HQ_ENGINEER),
   asyncHandler(async (_req: Request, res: Response<ApiResponse>) => {
     const activeMachines = await prisma.machine.findMany({ where: { isActive: true }, select: { machineId: true } });
     const maxNum = activeMachines.reduce((max, m) => {
@@ -83,7 +104,7 @@ router.get('/next-id',
  * Register a new machine (HQ_ENGINEER only)
  */
 router.post('/',
-  authorize(UserRole.HQ_ENGINEER, UserRole.ADMIN),
+  authorize(UserRole.HQ_ENGINEER),
   asyncHandler(async (req: Request, res: Response<ApiResponse>) => {
     const { name, ipAddress, port, modelName, serialNumber, location, templateId } = req.body as {
       name: string;
@@ -141,7 +162,7 @@ router.post('/',
  * Update machine info (HQ_ENGINEER only)
  */
 router.put('/:id',
-  authorize(UserRole.HQ_ENGINEER, UserRole.ADMIN),
+  authorize(UserRole.HQ_ENGINEER),
   asyncHandler(async (req: Request, res: Response<ApiResponse>) => {
     const { id } = req.params;
     const { name, ipAddress, port, modelName, serialNumber, location, templateId } = req.body as {
@@ -191,7 +212,7 @@ router.put('/:id',
  * Soft-delete machine (isActive = false) — HQ_ENGINEER only
  */
 router.delete('/:id',
-  authorize(UserRole.HQ_ENGINEER, UserRole.ADMIN),
+  authorize(UserRole.HQ_ENGINEER),
   asyncHandler(async (req: Request, res: Response<ApiResponse>) => {
     const { id } = req.params;
 
@@ -472,7 +493,7 @@ router.get('/:id/alarms', asyncHandler(async (
  * POST /machines/:id/control/acquire
  * Acquire control lock
  */
-router.post('/:id/control/acquire', asyncHandler(async (
+router.post('/:id/control/acquire', authorize(UserRole.ADMIN, UserRole.HQ_ENGINEER), asyncHandler(async (
   req: Request,
   res: Response<ApiResponse>
 ) => {
@@ -507,6 +528,9 @@ router.post('/:id/control/acquire', asyncHandler(async (
       },
     });
   }
+
+  const interlockError = await remoteInterlockFailure(machine.machineId);
+  if (interlockError) return res.status(409).json({ success: false, error: { code: 'INTERLOCK_FAILED', message: interlockError } });
 
   // Check existing lock
   const existingLock = await redisService.getControlLock(machine.machineId);
@@ -560,7 +584,7 @@ router.post('/:id/control/acquire', asyncHandler(async (
     },
   });
 
-  wsService.sendUserActivity(machine.machineId, 'control', { username: req.user!.username, role: req.user!.role }, '제어권 획득');
+  wsService.sendUserActivity(machine.machineId, 'control', { username: req.user!.username, displayName: req.user!.displayName || req.user!.username, role: req.user!.role }, '제어권 획득');
 
   return res.json({
     success: true,
@@ -611,7 +635,7 @@ router.post('/:id/control/release', asyncHandler(async (
         sessionId: '',
       },
     });
-    wsService.sendUserActivity(machine.machineId, 'control', { username: req.user!.username, role: req.user!.role }, '제어권 해제');
+    wsService.sendUserActivity(machine.machineId, 'control', { username: req.user!.username, displayName: req.user!.displayName || req.user!.username, role: req.user!.role }, '제어권 해제');
   }
 
   return res.json({
@@ -624,7 +648,7 @@ router.post('/:id/control/release', asyncHandler(async (
  * POST /machines/:id/control/extend
  * Extend control lock TTL (heartbeat)
  */
-router.post('/:id/control/extend', asyncHandler(async (
+router.post('/:id/control/extend', authorize(UserRole.ADMIN, UserRole.HQ_ENGINEER), asyncHandler(async (
   req: Request,
   res: Response<ApiResponse>
 ) => {
@@ -715,6 +739,13 @@ router.post('/:id/control/force-release',
 
 // ── NC 데이터 라우트 ─────────────────────────────────────────────
 
+router.get('/:id/remote-interlock', asyncHandler(async (req, res) => {
+  const machine = await prisma.machine.findFirst({ where: { OR: [{ id: req.params.id }, { machineId: req.params.id }] } });
+  if (!machine) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '장비를 찾을 수 없습니다.' } });
+  const reason = await remoteInterlockFailure(machine.machineId);
+  return res.json({ success: true, data: { allowed: reason === null, reason } });
+}));
+
 /**
  * GET /machines/:id/offsets?path=1&count=64
  * 마모 오프셋 읽기 (FOCAS2 READ_OFFSETS 명령)
@@ -744,10 +775,10 @@ router.get('/:id/offsets', asyncHandler(async (
 
 /**
  * PUT /machines/:id/offsets
- * 마모 오프셋 쓰기 (제어권 필요)
+ * 마모 오프셋 쓰기 (수정 권한 필요)
  * body: { path, no, axis, value, additiveDelta? }  axis: 'X'|'Z'|'Y'|'R'
  */
-router.put('/:id/offsets', asyncHandler(async (
+router.put('/:id/offsets', authorize(UserRole.ADMIN, UserRole.HQ_ENGINEER), asyncHandler(async (
   req: Request,
   res: Response<ApiResponse>
 ) => {
@@ -761,11 +792,6 @@ router.put('/:id/offsets', asyncHandler(async (
   });
   if (!machine) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '장비를 찾을 수 없습니다.' } });
 
-  // 제어권 확인
-  const lock = await redisService.getControlLock(machine.machineId);
-  if (!lock || lock.ownerId !== req.user!.id)
-    return res.status(403).json({ success: false, error: { code: 'NO_CONTROL_LOCK', message: '제어권이 없습니다.' } });
-
   // 축 → axisIdx 변환 (X=0, Y=1, Z=2, R=3) — FocasDataReader.WriteWearOffset 순서와 일치
   const AXIS_MAP: Record<string, number> = { X: 0, Y: 1, Z: 2, R: 3 };
   const axisIdx = AXIS_MAP[axis?.toUpperCase()];
@@ -776,7 +802,9 @@ router.put('/:id/offsets', asyncHandler(async (
     return res.status(400).json({ success: false, error: { code: 'INVALID_DELTA', message: '+INPUT 값은 유효한 숫자여야 합니다.' } });
   }
 
-  const params = { path: path ?? 1, toolNo: no, axisIdx, value };
+  if (!Number.isFinite(value) || !Number.isInteger(no) || no < 1 || no > 64 || ![1, 2].includes(path ?? 1))
+    return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: 'Path, 공구 번호와 유효한 값을 확인하세요.' } });
+  const params = { path: path ?? 1, toolNo: no, axisIdx, value, additiveDelta };
   const historyParams = additiveDelta === undefined ? params : { ...params, additiveDelta };
   try {
     const cmdResult = await sendNcCommand(machine.id, machine.machineId, 'WRITE_OFFSET',
@@ -816,10 +844,10 @@ router.get('/:id/count', asyncHandler(async (
 
 /**
  * PUT /machines/:id/count
- * 카운터 변수 쓰기 (제어권 필요)
+ * 카운터 변수 쓰기 (수정 권한 필요)
  * body: { varNo, value, key?, varType? }
  */
-router.put('/:id/count', asyncHandler(async (
+router.put('/:id/count', authorize(UserRole.ADMIN, UserRole.HQ_ENGINEER), asyncHandler(async (
   req: Request,
   res: Response<ApiResponse>
 ) => {
@@ -831,12 +859,10 @@ router.put('/:id/count', asyncHandler(async (
   });
   if (!machine) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '장비를 찾을 수 없습니다.' } });
 
-  const lock = await redisService.getControlLock(machine.machineId);
-  if (!lock || lock.ownerId !== req.user!.id)
-    return res.status(403).json({ success: false, error: { code: 'NO_CONTROL_LOCK', message: '제어권이 없습니다.' } });
-
   try {
-    const cmdResult = await sendNcCommand(machine.id, machine.machineId, 'WRITE_COUNT', { varNo, value, key, varType });
+    if (!Number.isFinite(value) || !Number.isInteger(varNo) || varNo < 0 || (['preset', 'count', 'total'].includes(key ?? '') && (!Number.isInteger(value) || value < 0 || value > 2147483647)))
+      return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: '변수 번호와 값을 확인하세요.' } });
+    const cmdResult = await sendNcCommand(machine.id, machine.machineId, 'WRITE_COUNT', { varNo, value, key, varType }, req.user, req.ip);
     if (cmdResult.status !== 'success')
       return res.status(502).json({ success: false, error: { code: cmdResult.errorCode ?? 'AGENT_ERROR', message: cmdResult.errorMessage ?? '카운터 쓰기 실패' } });
     return res.json({ success: true, data: cmdResult.result });
@@ -873,27 +899,25 @@ router.get('/:id/tool-life', asyncHandler(async (
 
 /**
  * PUT /machines/:id/tool-life
- * 공구 수명 변수 쓰기 (제어권 필요)
- * body: { varNo, value, varType?, dataType? }
+ * 공구 수명 변수 쓰기 (수정 권한 필요)
+ * body: { varNo, value, varType?, dataType?, path? }
  */
-router.put('/:id/tool-life', asyncHandler(async (
+router.put('/:id/tool-life', authorize(UserRole.ADMIN, UserRole.HQ_ENGINEER), asyncHandler(async (
   req: Request,
   res: Response<ApiResponse>
 ) => {
   const { id } = req.params;
-  const { varNo, value, varType, dataType } = req.body as { varNo: number; value: number; varType?: string; dataType?: string };
+  const { varNo, value, varType, dataType, path = 1 } = req.body as { varNo: number; value: number; varType?: string; dataType?: string; path?: number };
 
   const machine = await prisma.machine.findFirst({
     where: { OR: [{ id }, { machineId: id }] },
   });
   if (!machine) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: '장비를 찾을 수 없습니다.' } });
 
-  const lock = await redisService.getControlLock(machine.machineId);
-  if (!lock || lock.ownerId !== req.user!.id)
-    return res.status(403).json({ success: false, error: { code: 'NO_CONTROL_LOCK', message: '제어권이 없습니다.' } });
-
   try {
-    const cmdResult = await sendNcCommand(machine.id, machine.machineId, 'WRITE_TOOL_LIFE_PRESET', { varNo, value, varType, dataType });
+    if (!Number.isFinite(value) || !Number.isInteger(varNo) || varNo < 0 || ![1, 2].includes(path))
+      return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: '변수 번호와 값을 확인하세요.' } });
+    const cmdResult = await sendNcCommand(machine.id, machine.machineId, 'WRITE_TOOL_LIFE_PRESET', { varNo, value, varType, dataType, path }, req.user, req.ip);
     if (cmdResult.status !== 'success')
       return res.status(502).json({ success: false, error: { code: cmdResult.errorCode ?? 'AGENT_ERROR', message: cmdResult.errorMessage ?? '공구 수명 쓰기 실패' } });
     return res.json({ success: true, data: cmdResult.result });

@@ -7,6 +7,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { authApi, machineApi } from '../lib/api';
 import { useMachineStore } from '../stores/machineStore';
+import { RoleTestControl } from './RoleTestControl';
+import { useFeatureStore } from '../stores/featureStore';
 
 interface LayoutProps {
   children: ReactNode;
@@ -17,6 +19,7 @@ export function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
+  const mesEnabled = useFeatureStore(s => s.mesEnabled);
   const controlLockMap = useMachineStore((s) => s.controlLockMap);
   const releaseControlLock = useMachineStore((s) => s.releaseControlLock);
 
@@ -38,7 +41,7 @@ export function Layout({ children }: LayoutProps) {
     setSidebarOpen(false);
   };
 
-  const isHqEngineer = user?.role === 'HQ_ENGINEER' || user?.role === 'ADMIN';
+  const isHqEngineer = user?.role === 'HQ_ENGINEER';
   const isHqEngineerOnly = user?.role === 'HQ_ENGINEER';
 
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({ machines: false, admin: false });
@@ -54,7 +57,7 @@ export function Layout({ children }: LayoutProps) {
     { path: '/alarms', label: 'Alarms', icon: AlarmIcon },
     { path: '/audit', label: 'Audit Log', icon: AuditIcon },
     { path: '/settings', label: 'Settings', icon: SettingsIcon },
-  ];
+  ].filter(item => (item.path !== '/audit' || user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER') && (item.path !== '/work-orders' || mesEnabled));
 
   const machineSubMenus = [
     { path: '/remote', label: 'Remote Panel', icon: RemotePanelIcon, desktopOnly: false },
@@ -290,12 +293,13 @@ export function Layout({ children }: LayoutProps) {
 
         {/* User */}
         <div className="p-4 border-t border-gray-700">
+          <RoleTestControl />
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 max-lg:w-10 max-lg:h-10 bg-blue-600 rounded-full flex items-center justify-center font-bold">
-              {user?.username?.[0]?.toUpperCase() || 'U'}
+              {(user?.displayName || user?.username)?.[0]?.toUpperCase() || 'U'}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm max-lg:text-base font-medium truncate">{user?.username}</p>
+              <p className="text-sm max-lg:text-base font-medium truncate">{user?.displayName || user?.username}</p>
               <p className="text-xs max-lg:text-sm text-gray-400">{user?.role}</p>
             </div>
             <button
@@ -329,8 +333,9 @@ export function Layout({ children }: LayoutProps) {
           </h1>
         </header>
 
+        <RoleTestControl banner />
         {/* Page Content */}
-        <main className="flex-1 overflow-auto relative">
+        <main key={user?.role} className="flex-1 overflow-auto relative">
           {/* Landscape 모바일 플로팅 햄버거 — PC(lg:) 및 portrait에서 숨김 */}
           <button
             onClick={() => setSidebarOpen(true)}

@@ -119,8 +119,9 @@ export function PanelEditor() {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [selectedKeyId, setSelectedKeyId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [draftSource, setDraftSource] = useState({ id: '', updatedAt: '' });
 
-  const canEdit = user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER';
+  const canEdit = user?.role === 'HQ_ENGINEER';
 
   // 초기 로드
   useEffect(() => {
@@ -130,13 +131,15 @@ export function PanelEditor() {
   // 템플릿 전환 시 panelLayout 로드
   useEffect(() => {
     const tpl = templates.find((t) => t.id === selectedTemplateId);
+    if (dirty && draftSource.id === selectedTemplateId) return;
     if (tpl) {
+      setDraftSource({ id: tpl.id, updatedAt: tpl.updatedAt });
       setGroups(structuredClone(tpl.panelLayout || []));
       setDirty(false);
       setSelectedGroupId(null);
       setSelectedKeyId(null);
     }
-  }, [selectedTemplateId, templates]);
+  }, [selectedTemplateId, templates, dirty, draftSource.id]);
 
   const selectedGroup = groups.find((g) => g.id === selectedGroupId);
   const selectedKey = selectedGroup?.keys.find((k) => k.id === selectedKeyId);
@@ -232,10 +235,10 @@ export function PanelEditor() {
   }, []);
 
   // ── Save ──
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!selectedTemplateId) return;
-    updateTemplate(selectedTemplateId, { panelLayout: groups });
-    setDirty(false);
+    try { await updateTemplate(selectedTemplateId, { panelLayout: groups, updatedAt: draftSource.updatedAt }); setDirty(false); }
+    catch (error) { alert(error instanceof Error ? error.message : '저장 또는 적용 실패'); }
   };
 
   // ── 기본 조작반 불러오기 ──
@@ -281,7 +284,7 @@ export function PanelEditor() {
     return (
       <div className="p-6">
         <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-6 rounded-lg">
-          관리자 또는 HQ 엔지니어만 접근할 수 있습니다.
+          본사 엔지니어만 접근할 수 있습니다.
         </div>
       </div>
     );

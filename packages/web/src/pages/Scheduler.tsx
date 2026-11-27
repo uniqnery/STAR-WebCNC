@@ -692,6 +692,9 @@ function SchedulerRowItem({
           {mainPgm && <span className={`ml-1 text-[10px] ${programCheck?.status === 'exists' ? 'text-green-400' : programCheck?.status === 'missing' ? 'text-red-400' : programCheck?.status === 'changed' ? 'text-orange-400' : programCheck?.status === 'protected' ? 'text-yellow-400' : 'text-gray-400'}`} title={programCheck?.status === 'exists' ? '프로그램 확인됨' : programCheck?.status === 'missing' ? '프로그램 없음' : programCheck?.status === 'changed' ? '등록 이후 프로그램 변경됨' : programCheck?.status === 'protected' ? '파라미터 3202#4(NE9) 보호 프로그램' : '프로그램 확인 불가'}>{programCheck?.status === 'exists' ? '●' : programCheck?.status === 'missing' ? '●' : programCheck?.status === 'changed' ? '!' : programCheck?.status === 'protected' ? '🔒' : '?'}</span>}
           {programCheck?.status === 'changed' && <button type="button" onClick={onResync} disabled={!canEdit} title="현재 저장소 파일로 재확인" className="ml-1 text-[10px] text-blue-400 disabled:opacity-30">↻</button>}
         </div>
+        <input key={`${row.id}:${row.productionComment}`} aria-label="스케줄러 생산 코멘트" defaultValue={row.productionComment ?? ''}
+          maxLength={500} disabled={!canEdit} onBlur={e => onBlur(row.id, 'productionComment', e.target.value.trim())}
+          placeholder="생산 코멘트 (선택)" className="mt-1 w-full min-w-24 px-1 py-0.5 text-xs bg-gray-700 text-white rounded disabled:opacity-50" />
       </td>
 
       {/* 서브 PGM */}

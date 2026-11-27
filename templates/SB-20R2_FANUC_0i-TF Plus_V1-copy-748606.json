@@ -760,30 +760,23 @@
       {
         "key": "preset",
         "label": "PRESET",
-        "varNo": 500,
-        "varType": "macro",
+        "varNo": 10000,
+        "varType": "pcode",
         "readonly": false
       },
       {
         "key": "count",
         "label": "COUNT",
-        "varNo": 501,
+        "varNo": 900,
         "varType": "macro",
         "readonly": false
       },
       {
         "key": "total",
         "label": "TOTAL",
-        "varNo": 502,
-        "varType": "macro",
-        "readonly": true
-      },
-      {
-        "key": "remaining",
-        "label": "REMAINING",
-        "varNo": 503,
-        "varType": "macro",
-        "readonly": true
+        "varNo": 10001,
+        "varType": "pcode",
+        "readonly": false
       }
     ]
   },
@@ -795,95 +788,170 @@
           {
             "key": "preset",
             "label": "PRESET",
-            "varType": "macro",
+            "varType": "pcode",
             "readonly": false
           },
           {
             "key": "count",
             "label": "COUNT",
-            "varType": "macro",
+            "varType": "pcode",
             "readonly": true
           }
         ],
         "entries": [
           {
             "id": "p1-t1",
-            "toolNo": "T0101",
+            "toolNo": "T0100",
             "varNos": {
-              "count": 3002,
-              "preset": 3001
+              "count": 14280,
+              "preset": 14040
             },
             "isSeparator": false
           },
           {
             "id": "p1-t2",
-            "toolNo": "T0202",
+            "toolNo": "T0200",
             "varNos": {
-              "count": 3004,
-              "preset": 3003
+              "count": 14284,
+              "preset": 14044
             },
             "isSeparator": false
           },
           {
             "id": "p1-t3",
-            "toolNo": "T0303",
+            "toolNo": "T0300",
             "varNos": {
-              "count": 3006,
-              "preset": 3005
+              "count": 14288,
+              "preset": 14048
             },
             "isSeparator": false
           },
           {
             "id": "p1-t4",
-            "toolNo": "T0404",
+            "toolNo": "T0400",
             "varNos": {
-              "count": 3008,
-              "preset": 3007
+              "count": 14292,
+              "preset": 14052
             },
             "isSeparator": false
           },
           {
             "id": "p1-t5",
-            "toolNo": "T0505",
+            "toolNo": "T0500",
             "varNos": {
-              "count": 3010,
-              "preset": 3009
+              "count": 14296,
+              "preset": 14056
             },
             "isSeparator": false
           },
           {
             "id": "p1-t6",
-            "toolNo": "T0606",
+            "toolNo": "T0600",
             "varNos": {
-              "count": 3012,
-              "preset": 3011
+              "count": 14300,
+              "preset": 14060
             },
             "isSeparator": false
           },
           {
+            "id": "tl-1795650954386-rssl",
+            "toolNo": "",
+            "varNos": {},
+            "isSeparator": true
+          },
+          {
             "id": "p1-t7",
-            "toolNo": "T0707",
+            "toolNo": "T1100",
             "varNos": {
-              "count": 3014,
-              "preset": 3013
+              "count": 14320,
+              "preset": 14080
             },
             "isSeparator": false
           },
           {
             "id": "p1-t8",
-            "toolNo": "T0808",
+            "toolNo": "T1200",
             "varNos": {
-              "count": 3016,
-              "preset": 3015
+              "count": 14324,
+              "preset": 14084
             },
             "isSeparator": false
           },
           {
             "id": "p1-t9",
-            "toolNo": "T0909",
+            "toolNo": "T1300",
             "varNos": {
-              "count": 3018,
-              "preset": 3017
+              "count": 14328,
+              "preset": 14088
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "tl-1795650716219-tsw8",
+            "toolNo": "T1400",
+            "varNos": {
+              "count": 14332,
+              "preset": 14092
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "tl-1795650716992-sctt",
+            "toolNo": "T1500",
+            "varNos": {
+              "count": 14336,
+              "preset": 14096
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "tl-1795650965605-9r77",
+            "toolNo": "",
+            "varNos": {},
+            "isSeparator": true
+          },
+          {
+            "id": "tl-1795650717681-5992",
+            "toolNo": "T3100",
+            "varNos": {
+              "count": 0,
+              "preset": 0
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "tl-1795650718581-p92d",
+            "toolNo": "T3200",
+            "varNos": {
+              "count": 0,
+              "preset": 0
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "tl-1795650730926-ddwz",
+            "toolNo": "T3300",
+            "varNos": {
+              "count": 0,
+              "preset": 0
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "tl-1795650731669-y9n2",
+            "toolNo": "T3400",
+            "varNos": {
+              "count": 0,
+              "preset": 0
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "tl-1795650732201-hf36",
+            "toolNo": "T3500",
+            "varNos": {
+              "count": 0,
+              "preset": 0
             },
             "isSeparator": false
           }
@@ -938,8 +1006,15 @@
       "macroNo": 500,
       "countMacroNo": 900,
       "countVarType": "macro",
+      "cycleTimeAddr": "D96",
       "presetMacroNo": 10000,
-      "presetVarType": "pcode"
+      "presetVarType": "pcode",
+      "cycleTimeMultiplier": 4,
+      "counterEnableMacroNo": 10002,
+      "counterEnableOnValue": 1,
+      "counterEnableVarType": "pcode",
+      "counterEnableOffValue": 0,
+      "cycleTimeHmsStartAddr": "D97"
     },
     "mainHeadAddr": "R6132.0",
     "maxQueueSize": 15,

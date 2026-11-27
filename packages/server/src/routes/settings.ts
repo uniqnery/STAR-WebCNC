@@ -16,7 +16,7 @@ router.get('/windows-startup', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER'
   }
 });
 
-router.put('/windows-startup', authenticate, requireRole(['HQ_ENGINEER']), async (req, res) => {
+router.put('/windows-startup', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req, res) => {
   if (typeof req.body?.enabled !== 'boolean') {
     return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: '자동 시작 활성화 여부를 지정해 주세요.' } });
   }

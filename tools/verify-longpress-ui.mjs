@@ -1,0 +1,58 @@
+// Real hook with deterministic frames and fake completion callbacks. No CNC/API.
+import { build } from 'esbuild';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const root=process.cwd(),runtime=path.join(root,'agent-runtime/startup/count-ui-check');
+const {Window}=await import(pathToFileURL(path.join(runtime,'node_modules/happy-dom/lib/index.js')));
+const window=new Window({url:'http://localhost/'});
+for(const name of ['window','document','navigator','HTMLElement','Event','PointerEvent'])Object.defineProperty(globalThis,name,{value:name==='window'?window:window[name],configurable:true});
+globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+let clock=1,id=0;const frames=new Map();
+globalThis.requestAnimationFrame=cb=>{frames.set(++id,cb);return id};
+globalThis.cancelAnimationFrame=id=>frames.delete(id);
+Object.defineProperty(performance,'now',{configurable:true,value:()=>clock});
+const React=await import('react'),{createRoot}=await import('react-dom/client'),{act}=React;
+const output=path.join(runtime,'LongPress-test.mjs');
+await build({entryPoints:[path.join(root,'packages/web/src/hooks/useLongPress.ts')],outfile:output,bundle:true,platform:'node',format:'esm',packages:'external'});
+const {useLongPress}=await import(pathToFileURL(output));
+let completed=0,cancelled=0,starts=0,progress=0,renders=0,latest=0,checks=0;
+const check=(condition,message)=>{assert(condition,message);checks++};
+let options={longPressMs:1000,disabled:false,trackProgress:false,onComplete:()=>completed++,onStart:()=>starts++,onCancel:()=>cancelled++,onProgress:p=>{progress=p}};
+function Test(){renders++;const result=useLongPress(options);return React.createElement('button',{...result.handlers,'data-pressed':result.isPressed,'data-progress':result.progress},'test')}
+const host=document.createElement('div');document.body.append(host);let view=createRoot(host);
+const flush=()=>new Promise(r=>setImmediate(r));
+const render=()=>act(async()=>{view.render(React.createElement(React.StrictMode,null,React.createElement(Test)));await flush()});
+const event=type=>{const button=host.querySelector('button');button.setPointerCapture=()=>{};button.dispatchEvent(new window.PointerEvent(type==='pointerleave'?'pointerout':type,{bubbles:true,pointerId:1}))};
+const send=type=>act(async()=>{event(type);await flush()});
+const advance=ms=>act(async()=>{clock+=ms;const pending=[...frames.values()];frames.clear();pending.forEach(cb=>cb(clock));await flush()});
+try{
+ await render();await send('pointerdown');
+ const before=renders;await advance(500);
+ check(progress===0.5&&renders===before,'progress updates without React renders');
+ check(completed===0,'half duration never executes');
+ await advance(499);check(completed===0,'duration must be fully reached');
+ await advance(1);check(completed===1&&frames.size===0,'full duration executes exactly once and stops frames');
+ await advance(1000);await send('pointerup');check(completed===1&&cancelled===0,'release after completion does not execute or cancel twice');
+ await send('pointerdown');await advance(100);await send('pointerup');await advance(2000);
+ check(completed===1&&cancelled===1&&progress===0,'early release cancels and clears animation');
+ await send('pointerdown');await send('pointerdown');await advance(1000);
+ check(completed===2&&starts===3,'duplicate pointer-down does not create duplicate execution');
+ await send('pointerup');
+ await send('pointerdown');options={...options,disabled:true};await render();await advance(2000);
+ check(completed===2&&frames.size===0,'losing permission while held cancels execution');
+ const oldStarts=starts;await send('pointerdown');check(starts===oldStarts&&frames.size===0,'disabled control cannot start');
+ options={...options,disabled:false};await render();await send('pointerdown');
+ options={...options,onComplete:()=>{completed++;latest++}};await render();await advance(1000);
+ check(latest===1&&completed===3,'completion uses current callbacks after a rerender');
+ await send('pointerup');await send('pointerdown');
+ await act(async()=>view.unmount());await advance(2000);
+ check(completed===3&&frames.size===0,'unmount stops pending execution');
+ view=createRoot(host);options={...options,trackProgress:true};await render();await send('pointerdown');await advance(250);
+ check(Number(host.querySelector('button').dataset.progress)===0.25,'other screens retain default React progress updates');
+ await send('pointercancel');await advance(2000);check(completed===3,'pointer cancellation never executes');
+ await send('pointerdown');await send('pointerleave');await advance(2000);check(completed===3,'pointer leave cancels');
+ await act(async()=>{event('pointerdown');event('pointerup');await flush()});await advance(2000);
+ check(completed===3&&frames.size===0,'rapid release before React commit still cancels');
+ console.log(`Long-press checks passed: ${checks}; no CNC/API calls.`);
+} finally{await act(async()=>view.unmount());window.happyDOM.abort()}

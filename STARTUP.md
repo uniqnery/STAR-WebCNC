@@ -2,7 +2,9 @@
 
 ## Windows 로그인 시 자동 시작
 
-- 웹앱 **설정 → Windows 로그인 시 자동 시작**에서 등록한다. PC·모바일·태블릿 모두 같은 서버 PC 설정을 변경하며, 변경은 `HQ_ENGINEER`만 가능하다. `ADMIN`은 상태만 조회한다.
+- 2026-11-27 운영 DB 확인: 현재 서버 `.env`의 `localhost:5432/starwebcnc` 연결은 Windows PostgreSQL 17 서비스(`::1`)를 사용한다. 이름이 같은 Docker PostgreSQL 15 DB와 구분해야 한다. 백업·복구·스키마 변경 시 실제 연결 대상의 버전·테이블을 먼저 확인한다. 이번 이름 필드 추가 전 백업은 Windows PostgreSQL 17의 `pg_dump`로 생성하고 사용자·생산 이력 테이블 포함 여부를 `pg_restore --list`로 검증했다. Docker 기동 검사만으로 운영 DB 백업 대상을 정하지 않는다.
+
+- 웹앱 **설정 → Windows 로그인 시 자동 시작**에서 등록한다. PC·모바일·태블릿 모두 같은 서버 PC 설정을 변경하며, `HQ_ENGINEER`와 업체 관리자 `ADMIN`이 조회·변경할 수 있다. 일반 사용자는 변경할 수 없다.
 - 서버를 실행한 Windows 계정의 **로그인 시점**에 예약 작업이 실행된다. 전원을 켜기만 하고 해당 계정으로 로그인하지 않으면 시작되지 않는다. Windows 자동 로그인이나 업데이트 정책을 바꾸지는 않는다.
 - 체크하면 실제 Windows 예약 작업을 등록하고 등록 결과를 다시 확인한다. 권한 부족 시 오류를 표시하며 체크된 것으로 저장하지 않는다. 최초 설치에서 권한이 필요하면 서버 PC에서 같은 Windows 계정으로 관리자 PowerShell을 열어 다음을 실행한다.
 
@@ -17,6 +19,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/windows-startup.ps
 - 체크 해제는 다음 로그인부터 자동 시작하지 않도록 설정하고 기동 관리자를 종료한다. 이미 실행한 웹앱·API·Agent·컨테이너는 계속 실행한다. 체크만으로 즉시 기동하지는 않는다.
 - 예약 작업 이름은 `Star-WebCNC-Startup-<설치 경로 해시>`이며 비밀번호를 저장하지 않는 현재 사용자·일반 권한 작업이다. 경로나 Windows 계정을 바꾸면 재등록이 필요하다.
 - 로그: `agent-runtime/startup/startup.log`, `api.log`, `web.log`, `MC-xxx.log`. 마지막 확인 결과는 `status.json`에 기록된다. 로그와 실행 설정 파일은 배포 소스로 커밋하지 않는다.
+- 2026-11-26 터미널 숨김 보완: 예약 작업의 PowerShell 래퍼는 Node 관리자를 `UseShellExecute=false`·`CreateNoWindow=true`로 실행하고 종료를 기다린다. 관리자가 시작하는 서비스는 `windowsHide=true`, `detached=false`, 파일 로그 리디렉션을 사용한다. Windows의 별도 콘솔/기본 터미널 생성 경로를 피하며 기존 중복 실행 방지·준비 상태 검사·로그 저장은 유지한다.
+- 같은 날 적용 검증: 시작 관리자만 재기동한 뒤 기존 웹·API·Agent 프로세스 7개의 PID 유지, Agent 4개 ready, API health ok 및 예약 작업 Running을 확인했다. JS/PowerShell 구문·실행 옵션 검사와 실제 무창 자식 프로세스의 실행·파일 로그·정상 종료를 검증했다. 표시 중이던 관련 Windows Terminal은 프로세스를 종료하지 않고 창 표시만 숨겼다. 실제 PC 재부팅 검증은 별도다.
+- 2026-11-26 추가 수정: 예약 작업이 PowerShell을 직접 시작하면 `-WindowStyle Hidden` 적용 전에 기본 Windows Terminal 창이 생성되는 경로를 확인했다. 이제 GUI 호스트 `wscript.exe //B //Nologo tools/windows-startup.vbs`가 PowerShell을 처음부터 숨김(0)으로 실행하고 종료를 기다린다. PowerShell→Node의 `CreateNoWindow`와 서비스 로그 리디렉션은 유지한다. 현재 사용자·설치 경로가 일치하는 기존 PowerShell 작업만 새 방식으로 이전하며, 다른 작업에 대한 충돌 검사는 유지한다. Windows Script Host 사용이 허용된 환경이 필요하다.
+- 추가 수정 운영 검증: 오전 9:44 예약 작업을 새 방식으로 실제 실행해 GUI 호스트 1개·관리자 1개·표시 중인 Terminal 0개를 확인했다. 이전 관리자 종료 시 기존 예약 작업 실행 그룹의 API·Agent도 함께 종료돼 자동 재기동됐다(기존 서비스 PID 유지 검증은 이번 전환에서 실패). 오전 9:44:52에 Agent 프로세스 4개 ready 및 2호기 READ_COUNT 완료 로그로 통신 복구를 확인했다. 기존 작업 XML은 `agent-runtime/startup/rollback-startup-task-20261126-094346.xml`에 보관했다. 실제 Windows 재부팅 검증은 남아 있다.
 - 2026-11-23 검증: 서버·웹 빌드, 실제 예약 작업 수동 실행, API·MQTT·Redis 준비, Agent 4개 기동, 관리자 조회/변경 권한 제한, 설정 활성화·해제, 중복 관리자 실행 방지를 확인했다. 실제 Windows 재부팅 및 모바일 화면 조작 검증은 미실시다.
 
 ## 빠른 시작 (Quick Start)

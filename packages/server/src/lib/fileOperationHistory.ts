@@ -33,6 +33,7 @@ interface RecordFileOperationInput {
   correlationId?: string | null;
   userId: string;
   username: string;
+  displayName?: string;
   errorMessage?: string | null;
   fileSizeBefore?: number | null;
   fileSizeAfter?: number | null;
@@ -52,7 +53,7 @@ export function toFileOperationDto(row: NonNullable<FileOperationRow>): FileOper
     path: row.path,
     status: row.status,
     correlationId: row.correlationId,
-    userName: row.username,
+    userName: row.actorDisplayName ?? row.username,
     errorMessage: row.errorMessage,
     fileSizeBefore: row.fileSizeBefore,
     fileSizeAfter: row.fileSizeAfter,
@@ -91,6 +92,7 @@ export async function recordFileOperation(input: RecordFileOperationInput): Prom
       correlationId: input.correlationId ?? null,
       userId: input.userId,
       username: input.username,
+      actorDisplayName: input.displayName || input.username,
       errorMessage: input.errorMessage ?? null,
       fileSizeBefore: input.fileSizeBefore ?? null,
       fileSizeAfter: input.fileSizeAfter ?? null,

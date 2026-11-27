@@ -11,12 +11,14 @@ import { config } from '../config';
 import { prisma } from './prisma';
 import { UserRole } from '@prisma/client';
 import { recordUserActivity } from './userActivityHistory';
+import { resolveTestRole } from '../auth/roleTest';
 
 // Client info attached to WebSocket
 export interface WsClient {
   id: string;
   userId: string;
   username: string;
+  displayName?: string;
   role: UserRole;
   subscribedMachines: Set<string>;
   isAlive: boolean;
@@ -69,12 +71,15 @@ class WebSocketService {
       verifyClient: async (info, callback) => {
         try {
           const user = await this.authenticateRequest(info.req);
+          const requestedRole = new URL(info.req.url ?? '', 'http://localhost').searchParams.get('testRole');
+          if (user && requestedRole !== null) user.role = await resolveTestRole(user, requestedRole);
           if (user) {
             // Attach user to request for later use
             (info.req as IncomingMessage & { user: WsClient }).user = {
               id: uuidv4(),
               userId: user.id,
               username: user.username,
+              displayName: user.displayName,
               role: user.role,
               subscribedMachines: new Set(),
               isAlive: true,
@@ -107,7 +112,7 @@ class WebSocketService {
    */
   private async authenticateRequest(
     req: IncomingMessage
-  ): Promise<{ id: string; username: string; role: UserRole } | null> {
+  ): Promise<{ id: string; username: string; displayName?: string; role: UserRole } | null> {
     // Try Authorization header first
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith('Bearer ')) {
@@ -117,6 +122,7 @@ class WebSocketService {
         return {
           id: payload.sub,
           username: payload.username,
+          displayName: payload.displayName || payload.username,
           role: payload.role,
         };
       }
@@ -141,6 +147,7 @@ class WebSocketService {
             return {
               id: storedToken.user.id,
               username: storedToken.user.username,
+              displayName: storedToken.user.displayName || storedToken.user.username,
               role: storedToken.user.role,
             };
           }
@@ -157,6 +164,7 @@ class WebSocketService {
         return {
           id: payload.sub,
           username: payload.username,
+          displayName: payload.displayName || payload.username,
           role: payload.role,
         };
       }
@@ -182,6 +190,7 @@ class WebSocketService {
       payload: {
         clientId: client.id,
         username: client.username,
+        displayName: client.displayName || client.username,
         role: client.role,
       },
     });
@@ -415,11 +424,11 @@ class WebSocketService {
   /**
    * Send PMC bits fast update to subscribed clients (100ms 주기 — 램프 응답용)
    */
-  sendPmcBits(machineId: string, pmcBits: Record<string, 0 | 1>): void {
+  sendPmcBits(machineId: string, pmcBits: Record<string, 0 | 1>, signature?: string): void {
     this.broadcastToMachine(machineId, {
       type: 'pmc_update',
       timestamp: new Date().toISOString(),
-      payload: { machineId, pmcBits },
+      payload: { machineId, pmcBits, signature },
     });
   }
 
@@ -429,7 +438,7 @@ class WebSocketService {
   sendUserActivity(
     machineId: string,
     page: 'scheduler' | 'control',
-    actor: { id?: string; username: string; role: string } | null,
+    actor: { id?: string; username: string; displayName?: string; role: string } | null,
     action: string,
     detail?: string
   ): void {

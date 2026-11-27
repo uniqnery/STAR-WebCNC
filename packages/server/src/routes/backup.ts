@@ -152,7 +152,7 @@ router.post('/:machineId', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), 
       fileSize: 0,
       status: 'PENDING',
       createdAt: timestamp,
-      createdBy: req.user!.username,
+      createdBy: req.user!.displayName || req.user!.username,
     };
     backupRecords.set(backupId, backupRecord);
     await saveIndex();

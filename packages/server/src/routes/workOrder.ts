@@ -4,11 +4,14 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../lib/prisma';
 import { authenticate, requireRole } from '../middleware/auth';
 import { createAuditLog } from './audit';
+import { mesEnabled } from '../lib/productionTracking';
 
 const router = Router();
+router.use(authenticate);
+router.use(async (_req, res, next) => { try { if (!await mesEnabled()) { res.status(403).json({ success: false, error: { code: 'MES_DISABLED', message: 'MES 기능이 비활성화되어 있습니다.' } }); return; } next(); } catch (e) { next(e); } });
 
 // Get all work orders with pagination and filtering
-router.get('/', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
@@ -49,7 +52,7 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
 });
 
 // Get single work order
-router.get('/:id', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 
@@ -74,7 +77,7 @@ router.get('/:id', authenticate, async (req: Request, res: Response, next: NextF
 });
 
 // Create work order
-router.post('/', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const {
       orderNumber,
@@ -83,6 +86,7 @@ router.post('/', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req
       targetQuantity,
       assignedMachine,
       programNumber,
+      productionComment,
       priority,
       scheduledStart,
       scheduledEnd,
@@ -116,6 +120,7 @@ router.post('/', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req
         targetQuantity,
         assignedMachine,
         programNumber,
+        productionComment: typeof productionComment === 'string' ? productionComment.trim().slice(0, 500) : undefined,
         priority: priority || 0,
         scheduledStart: scheduledStart ? new Date(scheduledStart) : null,
         scheduledEnd: scheduledEnd ? new Date(scheduledEnd) : null,
@@ -145,12 +150,13 @@ router.post('/', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req
 });
 
 // Update work order
-router.put('/:id', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
+router.put('/:id', requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const {
       assignedMachine,
       programNumber,
+      productionComment,
       priority,
       scheduledStart,
       scheduledEnd,
@@ -180,12 +186,14 @@ router.put('/:id', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (r
       data: {
         assignedMachine,
         programNumber,
+        productionComment: typeof productionComment === 'string' ? productionComment.trim().slice(0, 500) : undefined,
         priority,
         scheduledStart: scheduledStart ? new Date(scheduledStart) : undefined,
         scheduledEnd: scheduledEnd ? new Date(scheduledEnd) : undefined,
       },
     });
 
+    if (typeof updated !== 'undefined' && ['COMPLETED', 'CANCELLED'].includes(updated.status)) await prisma.productionAssignment.updateMany({ where: { workOrderId: updated.id, endedAt: null }, data: { endedAt: updated.actualEnd ?? updated.updatedAt } });
     // Audit log
     await createAuditLog({
       userId: req.user!.id,
@@ -208,7 +216,7 @@ router.put('/:id', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (r
 });
 
 // Start work order
-router.post('/:id/start', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/start', requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 
@@ -238,6 +246,7 @@ router.post('/:id/start', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), a
       },
     });
 
+    if (typeof updated !== 'undefined' && ['COMPLETED', 'CANCELLED'].includes(updated.status)) await prisma.productionAssignment.updateMany({ where: { workOrderId: updated.id, endedAt: null }, data: { endedAt: updated.actualEnd ?? updated.updatedAt } });
     // Audit log
     await createAuditLog({
       userId: req.user!.id,
@@ -260,7 +269,7 @@ router.post('/:id/start', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), a
 });
 
 // Complete work order
-router.post('/:id/complete', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/complete', requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 
@@ -290,6 +299,7 @@ router.post('/:id/complete', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER'])
       },
     });
 
+    if (typeof updated !== 'undefined' && ['COMPLETED', 'CANCELLED'].includes(updated.status)) await prisma.productionAssignment.updateMany({ where: { workOrderId: updated.id, endedAt: null }, data: { endedAt: updated.actualEnd ?? updated.updatedAt } });
     // Audit log
     await createAuditLog({
       userId: req.user!.id,
@@ -312,7 +322,7 @@ router.post('/:id/complete', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER'])
 });
 
 // Cancel work order
-router.post('/:id/cancel', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:id/cancel', requireRole(['ADMIN', 'HQ_ENGINEER']), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
 
@@ -341,6 +351,7 @@ router.post('/:id/cancel', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), 
       },
     });
 
+    if (typeof updated !== 'undefined' && ['COMPLETED', 'CANCELLED'].includes(updated.status)) await prisma.productionAssignment.updateMany({ where: { workOrderId: updated.id, endedAt: null }, data: { endedAt: updated.actualEnd ?? updated.updatedAt } });
     // Audit log
     await createAuditLog({
       userId: req.user!.id,
