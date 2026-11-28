@@ -4,42 +4,17 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { authApi } from '../lib/api';
-
-const REMEMBERED_USERNAME_KEY = 'star-webcnc-remembered-username';
-
-function getRememberedUsername(): string {
-  try {
-    return localStorage.getItem(REMEMBERED_USERNAME_KEY) ?? '';
-  } catch {
-    return '';
-  }
-}
-
-function saveRememberedUsername(username: string | null): void {
-  try {
-    if (username) localStorage.setItem(REMEMBERED_USERNAME_KEY, username);
-    else localStorage.removeItem(REMEMBERED_USERNAME_KEY);
-  } catch {
-    // 저장소를 사용할 수 없는 경우에도 로그인은 계속 진행
-  }
-}
+import { AuthCard } from './AuthCard';
 
 export function Login() {
   const navigate = useNavigate();
   const setAuth = useAuthStore((state) => state.setAuth);
-  const devLogin = useAuthStore((state) => state.devLogin);
 
-  const rememberedUsername = getRememberedUsername();
-  const [username, setUsername] = useState(rememberedUsername);
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberUsername, setRememberUsername] = useState(Boolean(rememberedUsername));
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
-  const handleDevLogin = () => {
-    devLogin();
-    navigate('/');
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,15 +22,10 @@ export function Login() {
     setIsLoading(true);
 
     try {
-      const response = await authApi.login(username, password);
+      const response = await authApi.login(username, password, rememberMe);
 
       if (response.success && response.data) {
-        if (rememberUsername) {
-          saveRememberedUsername(username.trim());
-        } else {
-          saveRememberedUsername(null);
-        }
-        setAuth(response.data.user, response.data.accessToken);
+        setAuth(response.data.user, response.data.accessToken, rememberMe);
         navigate('/');
       } else {
         setError(response.error?.message || '로그인에 실패했습니다.');
@@ -68,33 +38,18 @@ export function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
-      <div className="max-w-md w-full mx-4">
-        {/* Logo */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            Star-WebCNC
-          </h1>
-          <p className="text-gray-500 mt-2">CNC 스마트팩토리 시스템</p>
-        </div>
-
-        {/* Login Form */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">
-            로그인
-          </h2>
-
+    <AuthCard>
           {error && (
             <div className="mb-4 p-3 bg-red-100 border border-red-300 text-red-700 rounded">
               {error}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4" autoComplete="on">
+          <form onSubmit={handleSubmit} className="space-y-[20px]" autoComplete="on" aria-label="로그인">
             <div>
               <label
                 htmlFor="username"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                className="block text-[14px] leading-[20px] font-medium text-gray-700 dark:text-gray-300 mb-[4px]"
               >
                 로그인 ID
               </label>
@@ -104,7 +59,7 @@ export function Login() {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                className="w-full h-[48px] px-[12px] py-[8px] text-[16px] border border-gray-300 dark:border-gray-600 rounded-lg
                          bg-white dark:bg-gray-700 text-gray-900 dark:text-white
                          focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="로그인 ID 입력"
@@ -118,7 +73,7 @@ export function Login() {
             <div>
               <label
                 htmlFor="password"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                className="block text-[14px] leading-[20px] font-medium text-gray-700 dark:text-gray-300 mb-[4px]"
               >
                 비밀번호
               </label>
@@ -128,7 +83,7 @@ export function Login() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                className="w-full h-[48px] px-[12px] py-[8px] text-[16px] border border-gray-300 dark:border-gray-600 rounded-lg
                          bg-white dark:bg-gray-700 text-gray-900 dark:text-white
                          focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="비밀번호 입력"
@@ -137,20 +92,20 @@ export function Login() {
               />
             </div>
 
-            <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+            <label className="flex items-center gap-[8px] text-[14px] leading-[20px] text-gray-600 dark:text-gray-300">
               <input
                 type="checkbox"
-                checked={rememberUsername}
-                onChange={(e) => setRememberUsername(e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="h-[16px] w-[16px] rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
-              아이디 기억
+              자동 로그인
             </label>
 
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400
+              className="w-full h-[48px] py-[8px] px-[16px] text-[16px] bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400
                        text-white font-medium rounded-lg transition-colors
                        focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
@@ -183,39 +138,12 @@ export function Login() {
             </button>
           </form>
 
-          {/* Register Link */}
-          <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700 text-center">
-            <p className="text-sm text-gray-500">
-              계정이 없으신가요?{' '}
-              <Link
-                to="/register"
-                className="text-blue-600 hover:text-blue-700 font-medium"
-              >
-                회원가입
-              </Link>
-            </p>
-          </div>
+          <nav aria-label="계정 도움말" className="mt-[32px] flex flex-wrap items-center justify-center gap-x-[8px] text-[12px] sm:text-[14px] leading-[20px] text-gray-500 dark:text-gray-400">
+            <Link to="/account/find-id" className="py-2 hover:text-blue-500">아이디 찾기</Link><span aria-hidden="true" className="text-gray-300 dark:text-gray-600">|</span>
+            <Link to="/account/forgot-password" className="py-2 hover:text-blue-500">비밀번호 찾기</Link><span aria-hidden="true" className="text-gray-300 dark:text-gray-600">|</span>
+            <Link to="/register" className="py-2 hover:text-blue-500">회원가입</Link>
+          </nav>
 
-          {/* Dev Login */}
-          <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <p className="text-sm text-gray-500 text-center mb-3">백엔드 없이 UI 테스트</p>
-            <button
-              type="button"
-              onClick={handleDevLogin}
-              className="w-full py-2 px-4 bg-gray-600 hover:bg-gray-700
-                       text-white font-medium rounded-lg transition-colors
-                       focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
-            >
-              개발자 로그인 (Mock 데이터)
-            </button>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <p className="text-center text-gray-500 text-sm mt-8">
-          &copy; 2026 Star-WebCNC. All rights reserved.
-        </p>
-      </div>
-    </div>
+    </AuthCard>
   );
 }

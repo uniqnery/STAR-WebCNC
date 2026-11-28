@@ -4,10 +4,12 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 const mock=vi.hoisted(()=>({find:vi.fn(),unique:vi.fn(),create:vi.fn(),update:vi.fn(),audit:vi.fn(),refresh:vi.fn()}));
 vi.mock('../src/lib/prisma',()=>({prisma:{user:{findFirst:mock.find,findUnique:mock.unique,create:mock.create,update:mock.update},
- globalSetting:{findUnique:vi.fn(async()=>null)},refreshToken:{create:mock.refresh},auditLog:{create:mock.audit},
- $transaction:async(fn:any)=>fn({user:{update:mock.update},auditLog:{create:mock.audit}})}}));
+ globalSetting:{findUnique:vi.fn(async()=>({value:'test-company-code'}))},refreshToken:{create:mock.refresh},auditLog:{create:mock.audit},
+ $transaction:async(fn:any)=>fn({user:{update:mock.update,create:mock.create},auditLog:{create:mock.audit}})}}));
 vi.mock('../src/lib/redis',()=>({redisService:{}}));
+vi.mock('../src/auth/accountPolicy',async original=>({...await original<any>(),accountAttempt:vi.fn()}));
 vi.mock('../src/auth/password',()=>({hashPassword:async()=> 'hash',verifyPassword:async(p:string)=>p==='correct'}));
+vi.mock('../src/routes/accountRecovery',async()=>({default:(await import('express')).Router(),registerEmailRate:vi.fn(),consumeEmailVerification:vi.fn(),RecoveryError:class extends Error{}}));
 import auth from '../src/routes/auth';
 import { generateAccessToken } from '../src/auth/jwt';
 let server:Server,base:string;
@@ -22,8 +24,8 @@ it('requires login ID, and does not authenticate with a display name',async()=>{
  expect(response.status).toBe(200);expect((await response.json()).data.user).toMatchObject({username:'hong01',displayName:'홍길동'});
 });
 it('registers separate login ID and name without a unique-name restriction',async()=>{
- const response=await request('/auth/register',{username:'hong02',displayName:'홍길동',email:'second@example.test',password:'correct'});
- expect(response.status).toBe(201);expect(mock.create.mock.calls[0][0].data).toMatchObject({username:'hong02',displayName:'홍길동',role:'USER',isApproved:false});
+ const response=await request('/auth/register',{username:'hong02',displayName:'홍길동',email:'second@example.test',password:'correct',registrationCode:'test-company-code'});
+ expect(response.status).toBe(201);expect(mock.create.mock.calls[0][0].data).toMatchObject({username:'hong02',displayName:'홍길동',role:'USER',isApproved:true});
 });
 it('requires a name for new registrations',async()=>{
  expect((await request('/auth/register',{username:'hong02',email:'second@example.test',password:'correct'})).status).toBe(400);

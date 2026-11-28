@@ -542,20 +542,6 @@
           "hasLamp": true,
           "reqAddr": "R6140.0",
           "lampAddr": "Y52.5"
-        },
-        {
-          "id": "DNC",
-          "size": "normal",
-          "color": "gray",
-          "label": "DNC",
-          "timing": {
-            "holdMs": 300,
-            "timeoutMs": 2000,
-            "longPressMs": 1000
-          },
-          "hasLamp": true,
-          "reqAddr": "R6135.0",
-          "lampAddr": "D8.6"
         }
       ],
       "name": "MODE"
@@ -863,8 +849,8 @@
             "id": "p1-t7",
             "toolNo": "T1100",
             "varNos": {
-              "count": 14320,
-              "preset": 14080
+              "count": 14340,
+              "preset": 14100
             },
             "isSeparator": false
           },
@@ -872,8 +858,8 @@
             "id": "p1-t8",
             "toolNo": "T1200",
             "varNos": {
-              "count": 14324,
-              "preset": 14084
+              "count": 14344,
+              "preset": 14104
             },
             "isSeparator": false
           },
@@ -881,8 +867,8 @@
             "id": "p1-t9",
             "toolNo": "T1300",
             "varNos": {
-              "count": 14328,
-              "preset": 14088
+              "count": 14348,
+              "preset": 14108
             },
             "isSeparator": false
           },
@@ -890,8 +876,8 @@
             "id": "tl-1795650716219-tsw8",
             "toolNo": "T1400",
             "varNos": {
-              "count": 14332,
-              "preset": 14092
+              "count": 14352,
+              "preset": 14112
             },
             "isSeparator": false
           },
@@ -899,8 +885,8 @@
             "id": "tl-1795650716992-sctt",
             "toolNo": "T1500",
             "varNos": {
-              "count": 14336,
-              "preset": 14096
+              "count": 14356,
+              "preset": 14116
             },
             "isSeparator": false
           },
@@ -914,8 +900,8 @@
             "id": "tl-1795650717681-5992",
             "toolNo": "T3100",
             "varNos": {
-              "count": 0,
-              "preset": 0
+              "count": 14360,
+              "preset": 14120
             },
             "isSeparator": false
           },
@@ -923,8 +909,8 @@
             "id": "tl-1795650718581-p92d",
             "toolNo": "T3200",
             "varNos": {
-              "count": 0,
-              "preset": 0
+              "count": 14364,
+              "preset": 14124
             },
             "isSeparator": false
           },
@@ -932,8 +918,8 @@
             "id": "tl-1795650730926-ddwz",
             "toolNo": "T3300",
             "varNos": {
-              "count": 0,
-              "preset": 0
+              "count": 14368,
+              "preset": 14128
             },
             "isSeparator": false
           },
@@ -941,8 +927,8 @@
             "id": "tl-1795650731669-y9n2",
             "toolNo": "T3400",
             "varNos": {
-              "count": 0,
-              "preset": 0
+              "count": 14372,
+              "preset": 14132
             },
             "isSeparator": false
           },
@@ -950,8 +936,26 @@
             "id": "tl-1795650732201-hf36",
             "toolNo": "T3500",
             "varNos": {
-              "count": 0,
-              "preset": 0
+              "count": 14376,
+              "preset": 14136
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "sr20j2b-p1-T4100",
+            "toolNo": "T4100",
+            "varNos": {
+              "count": 14440,
+              "preset": 14200
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "sr20j2b-p1-T4200",
+            "toolNo": "T4200",
+            "varNos": {
+              "count": 14444,
+              "preset": 14204
             },
             "isSeparator": false
           }
@@ -963,32 +967,131 @@
           {
             "key": "preset",
             "label": "PRESET",
-            "varType": "macro",
+            "varType": "pcode",
             "readonly": false
           },
           {
             "key": "count",
             "label": "COUNT",
-            "varType": "macro",
+            "varType": "pcode",
             "readonly": true
           }
         ],
         "entries": [
           {
-            "id": "p2-t1",
-            "toolNo": "T3101",
+            "id": "sr20j2b-p2-T2100",
+            "toolNo": "T2100",
             "varNos": {
-              "count": 3102,
-              "preset": 3101
+              "count": 14404,
+              "preset": 14164
             },
             "isSeparator": false
           },
           {
-            "id": "p2-t2",
-            "toolNo": "T3202",
+            "id": "sr20j2b-p2-T2200",
+            "toolNo": "T2200",
             "varNos": {
-              "count": 3104,
-              "preset": 3103
+              "count": 14408,
+              "preset": 14168
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "sr20j2b-p2-T2300",
+            "toolNo": "T2300",
+            "varNos": {
+              "count": 14412,
+              "preset": 14172
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "sr20j2b-p2-T2400",
+            "toolNo": "T2400",
+            "varNos": {
+              "count": 14416,
+              "preset": 14176
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "sr20j2b-p2-T2500",
+            "toolNo": "T2500",
+            "varNos": {
+              "count": 14420,
+              "preset": 14180
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "sr20j2b-p2-T2600",
+            "toolNo": "T2600",
+            "varNos": {
+              "count": 14424,
+              "preset": 14184
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "sr20j2b-p2-T2700",
+            "toolNo": "T2700",
+            "varNos": {
+              "count": 14428,
+              "preset": 14188
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "sr20j2b-p2-T2800",
+            "toolNo": "T2800",
+            "varNos": {
+              "count": 14432,
+              "preset": 14192
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "sr20j2b-p2-T1100B",
+            "toolNo": "T1100B",
+            "varNos": {
+              "count": 14460,
+              "preset": 14220
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "sr20j2b-p2-T1200B",
+            "toolNo": "T1200B",
+            "varNos": {
+              "count": 14464,
+              "preset": 14224
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "sr20j2b-p2-T1300B",
+            "toolNo": "T1300B",
+            "varNos": {
+              "count": 14468,
+              "preset": 14228
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "sr20j2b-p2-T1400B",
+            "toolNo": "T1400B",
+            "varNos": {
+              "count": 14472,
+              "preset": 14232
+            },
+            "isSeparator": false
+          },
+          {
+            "id": "sr20j2b-p2-T1500B",
+            "toolNo": "T1500B",
+            "varNos": {
+              "count": 14476,
+              "preset": 14236
             },
             "isSeparator": false
           }

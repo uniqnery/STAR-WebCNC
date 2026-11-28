@@ -15,12 +15,14 @@ export function generateAccessToken(payload: {
   username: string;
   displayName?: string;
   role: UserRole;
+  authVersion?: number;
 }): string {
   const tokenPayload: AccessTokenPayload = {
     sub: payload.userId,
     username: payload.username,
     displayName: payload.displayName || payload.username,
     role: payload.role,
+    authVersion: payload.authVersion ?? 0,
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,7 +35,7 @@ export function generateAccessToken(payload: {
  * Generate Refresh Token (long-lived)
  * Returns both the token and the JTI for storage
  */
-export function generateRefreshToken(userId: string): {
+export function generateRefreshToken(userId: string, rememberMe = true, authVersion = 0): {
   token: string;
   jti: string;
   expiresAt: Date;
@@ -71,6 +73,8 @@ export function generateRefreshToken(userId: string): {
   const tokenPayload: RefreshTokenPayload = {
     sub: userId,
     jti,
+    rememberMe,
+    authVersion,
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

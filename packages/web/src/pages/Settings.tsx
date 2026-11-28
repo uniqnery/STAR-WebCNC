@@ -8,6 +8,8 @@ import { diagnosticsApi, DiagnosticsData, AgentDiagStatus, settingsApi, notifica
 import type { WindowsStartupStatus } from '../lib/api';
 import { useFeatureStore } from '../stores/featureStore';
 import { ProfileSettings } from '../components/ProfileSettings';
+import { UserManagement } from '../components/UserManagement';
+import { PasswordChange } from '../components/PasswordChange';
 
 export function Settings() {
   const user = useAuthStore((state) => state.user);
@@ -66,22 +68,6 @@ export function Settings() {
   const [editingCamera, setEditingCamera] = useState<CameraConfig | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
-  // 등록 코드 설정
-  const [regCodes, setRegCodes] = useState({ adminCode: '', operatorCode: '' });
-  const [regEdit, setRegEdit] = useState({ adminCode: '', operatorCode: '' });
-  const [regSaving, setRegSaving] = useState(false);
-  const [regMsg, setRegMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
-
-  useEffect(() => {
-    if (!isAdmin) return;
-    settingsApi.getRegistrationCodes().then((res) => {
-      if (res.success && res.data) {
-        setRegCodes({ adminCode: res.data.adminCode, operatorCode: res.data.operatorCode });
-        setRegEdit({ adminCode: res.data.adminCode, operatorCode: res.data.operatorCode });
-      }
-    });
-  }, [isAdmin]);
-
   const openCreateModal = () => {
     setEditingCamera({
       id: `cam-${Date.now()}`,
@@ -121,26 +107,6 @@ export function Settings() {
     removeCamera(id);
   };
 
-  const handleRegSave = async () => {
-    setRegSaving(true);
-    setRegMsg(null);
-    try {
-      const payload: { adminCode?: string; operatorCode?: string } = {};
-      if (regEdit.adminCode !== regCodes.adminCode) payload.adminCode = regEdit.adminCode;
-      if (regEdit.operatorCode !== regCodes.operatorCode) payload.operatorCode = regEdit.operatorCode;
-      if (Object.keys(payload).length === 0) { setRegMsg({ type: 'ok', text: '변경 사항 없음' }); return; }
-      const res = await settingsApi.updateRegistrationCodes(payload);
-      if (res.success) {
-        setRegCodes({ ...regCodes, ...payload });
-        setRegMsg({ type: 'ok', text: '저장되었습니다.' });
-      } else {
-        setRegMsg({ type: 'err', text: res.error?.message ?? '저장 실패' });
-      }
-    } finally {
-      setRegSaving(false);
-    }
-  };
-
   return (
     <div className="p-6 max-w-4xl">
       {/* Header */}
@@ -150,6 +116,7 @@ export function Settings() {
       </div>
 
       <ProfileSettings />
+      <PasswordChange />
       {isAdmin && (
         <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
           <label className="flex items-center gap-3 mb-2">
@@ -362,68 +329,7 @@ export function Settings() {
         />
       )}
 
-      {/* 등록 코드 관리 (ADMIN only) */}
-      {isAdmin && (
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-            회원가입 등록 코드
-          </h2>
-          <p className="text-sm text-gray-500 mb-4">
-            신규 가입 시 코드에 따라 역할이 자동 부여됩니다. 코드 없이 가입하면 승인 대기 상태가 됩니다.
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                관리자 코드 <span className="text-xs text-gray-400 font-normal">(가입 즉시 ADMIN 승인)</span>
-              </label>
-              <input
-                type="text"
-                value={regEdit.adminCode}
-                onChange={(e) => setRegEdit((p) => ({ ...p, adminCode: e.target.value }))}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
-                           bg-white dark:bg-gray-700 text-gray-900 dark:text-white
-                           focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-                placeholder="최소 4자"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                오퍼레이터 코드 <span className="text-xs text-gray-400 font-normal">(가입 즉시 USER 승인)</span>
-              </label>
-              <input
-                type="text"
-                value={regEdit.operatorCode}
-                onChange={(e) => setRegEdit((p) => ({ ...p, operatorCode: e.target.value }))}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
-                           bg-white dark:bg-gray-700 text-gray-900 dark:text-white
-                           focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-                placeholder="최소 4자"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleRegSave}
-              disabled={regSaving}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400
-                         text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              {regSaving ? '저장 중...' : '저장'}
-            </button>
-            {regMsg && (
-              <span className={`text-sm ${regMsg.type === 'ok' ? 'text-green-600' : 'text-red-500'}`}>
-                {regMsg.text}
-              </span>
-            )}
-          </div>
-
-          <p className="mt-3 text-xs text-gray-400">
-            본사 엔지니어 코드(HQ_ENGINEER)는 서버 환경변수로 관리되며 이 화면에서 변경할 수 없습니다.
-          </p>
-        </div>
-      )}
+      {isAdmin && <UserManagement />}
 
       {/* 푸시 알림 */}
       <PushNotificationSection />

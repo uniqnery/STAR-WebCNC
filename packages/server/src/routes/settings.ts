@@ -31,26 +31,20 @@ router.put('/windows-startup', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER'
 
 /**
  * GET /api/settings/registration-codes
- * 현재 등록 코드 조회 (ADMIN 이상)
- * HQ 코드는 노출하지 않음 — 마스킹 처리
+ * 업체 대표/관리자만 조회. 본사 엔지니어에게도 코드 값은 제공하지 않는다.
  */
-router.get('/registration-codes', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (
+router.get('/registration-codes', authenticate, requireRole(['ADMIN']), async (
   _req: Request,
   res: Response
 ) => {
   try {
-    const [adminRow, opRow] = await Promise.all([
-      prisma.globalSetting.findUnique({ where: { key: 'registration.adminCode' } }),
-      prisma.globalSetting.findUnique({ where: { key: 'registration.operatorCode' } }),
-    ]);
+    if (_req.user?.actualRole === 'HQ_ENGINEER') return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: '업체 관리자만 가입 코드를 확인할 수 있습니다.' } });
+    const opRow = await prisma.globalSetting.findUnique({ where: { key: 'registration.operatorCode' } });
 
     return res.json({
       success: true,
       data: {
-        adminCode:    (adminRow?.value as string) ?? '',
         operatorCode: (opRow?.value   as string) ?? '',
-        // HQ 코드는 설정 여부만 알려줌 (값 비공개)
-        hqCodeSet: !!(process.env.HQ_REGISTRATION_CODE),
       },
     });
   } catch (error) {
@@ -61,46 +55,26 @@ router.get('/registration-codes', authenticate, requireRole(['ADMIN', 'HQ_ENGINE
 
 /**
  * PUT /api/settings/registration-codes
- * 등록 코드 변경 (ADMIN 이상)
- * adminCode, operatorCode 중 전달된 것만 업데이트
+ * 일반 사용자 가입 코드만 관리한다. 관리자 권한은 사용자 관리에서 지정한다.
  */
-router.put('/registration-codes', authenticate, requireRole(['ADMIN', 'HQ_ENGINEER']), async (
+router.put('/registration-codes', authenticate, requireRole(['ADMIN']), async (
   req: Request,
   res: Response
 ) => {
   try {
-    const { adminCode, operatorCode } = req.body as { adminCode?: string; operatorCode?: string };
+    if (req.user?.actualRole === 'HQ_ENGINEER') return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: '업체 관리자만 가입 코드를 변경할 수 있습니다.' } });
+    const operatorCode = typeof req.body?.operatorCode === 'string' ? req.body.operatorCode.trim() : '';
     const updatedBy = req.user?.username ?? 'unknown';
-
-    const ops: Promise<unknown>[] = [];
-
-    if (adminCode !== undefined) {
-      if (adminCode.length < 4) {
-        return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: '관리자 코드는 4자 이상이어야 합니다.' } });
-      }
-      ops.push(prisma.globalSetting.upsert({
-        where:  { key: 'registration.adminCode' },
-        update: { value: adminCode, updatedBy },
-        create: { key: 'registration.adminCode', value: adminCode, updatedBy },
-      }));
+    if (Object.keys(req.body ?? {}).some(key => key !== 'operatorCode') || operatorCode.length < 4 || operatorCode.length > 128
+      || operatorCode === process.env.HQ_REGISTRATION_CODE) {
+      return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: '가입 코드를 4~128자로 입력하세요.' } });
     }
-
-    if (operatorCode !== undefined) {
-      if (operatorCode.length < 4) {
-        return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: '오퍼레이터 코드는 4자 이상이어야 합니다.' } });
-      }
-      ops.push(prisma.globalSetting.upsert({
-        where:  { key: 'registration.operatorCode' },
-        update: { value: operatorCode, updatedBy },
-        create: { key: 'registration.operatorCode', value: operatorCode, updatedBy },
-      }));
-    }
-
-    if (ops.length === 0) {
-      return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: '변경할 코드를 입력해주세요.' } });
-    }
-
-    await Promise.all(ops);
+    await prisma.$transaction(async tx => {
+      await tx.globalSetting.upsert({ where: { key: 'registration.operatorCode' }, update: { value: operatorCode, updatedBy },
+        create: { key: 'registration.operatorCode', value: operatorCode, updatedBy } });
+      await tx.auditLog.create({ data: { userId: req.user!.id, actorDisplayName: req.user!.displayName || updatedBy, userRole: req.user!.role,
+        action: 'users.registration_code_change', targetType: 'setting', targetId: 'registration.operatorCode', result: 'success', ipAddress: req.ip ?? 'unknown' } });
+    });
 
     return res.json({ success: true });
   } catch (error) {

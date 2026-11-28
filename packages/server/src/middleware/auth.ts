@@ -43,19 +43,44 @@ export async function authenticate(
     return;
   }
 
-  // Attach user info to request
+  if (req.headers['x-role-test'] !== undefined && payload.role !== 'HQ_ENGINEER') {
+    res.status(403).json({ success: false, error: { code: 'ROLE_TEST_FORBIDDEN', message: '본사 엔지니어만 권한을 테스트할 수 있습니다.' } });
+    return;
+  }
+  // Read current permissions: an old signed token must not retain a removed role.
+  let account;
+  try {
+    account = await prisma.user.findUnique({ where: { id: payload.sub }, select: { id: true, username: true, displayName: true, role: true, isRepresentative: true, isActive: true, isApproved: true, authVersion: true, mustChangePassword: true, deletedAt: true } });
+  } catch {
+    res.status(503).json({ success: false, error: { code: 'AUTH_UNAVAILABLE', message: '계정 상태를 확인하지 못했습니다.' } });
+    return;
+  }
+  if (!account?.isActive || !account.isApproved || account.deletedAt) {
+    res.status(403).json({ success: false, error: { code: 'ACCOUNT_DISABLED', message: '사용할 수 없는 계정입니다.' } });
+    return;
+  }
+  if ((payload.authVersion ?? 0) !== (account.authVersion ?? 0)) {
+    res.status(401).json({ success: false, error: { code: 'SESSION_REVOKED', message: '다시 로그인하세요.' } });
+    return;
+  }
+  if (account.mustChangePassword && !['/api/auth/me', '/api/auth/change-password', '/api/auth/logout', '/auth/me', '/auth/change-password', '/auth/logout'].includes(req.originalUrl.split('?')[0])) {
+    res.status(403).json({ success: false, error: { code: 'PASSWORD_CHANGE_REQUIRED', message: '임시 비밀번호를 변경한 후 이용하세요.' } });
+    return;
+  }
   req.user = {
-    id: payload.sub,
-    username: payload.username,
-    displayName: payload.displayName || payload.username,
-    role: payload.role,
+    id: account.id,
+    username: account.username,
+    displayName: account.displayName || account.username,
+    role: account.role,
+    isRepresentative: account.isRepresentative,
   };
 
   const testRole = req.headers['x-role-test'];
   if (testRole !== undefined) {
     try {
       req.user.role = await resolveTestRole(req.user, testRole);
-      req.user.actualRole = payload.role;
+      req.user.actualRole = account.role;
+      req.user.isRepresentative = false;
       req.user.testRole = req.user.role;
       const actor = req.user;
       if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !req.originalUrl.startsWith('/api/auth/role-test')) {

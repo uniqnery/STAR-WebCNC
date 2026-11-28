@@ -4,6 +4,7 @@ import { UserRole } from '@prisma/client';
 
 // JWT Payload
 export interface AccessTokenPayload {
+  authVersion?: number;
   displayName?: string;
   sub: string;        // User ID
   username: string;
@@ -13,6 +14,8 @@ export interface AccessTokenPayload {
 }
 
 export interface RefreshTokenPayload {
+  authVersion?: number;
+  rememberMe?: boolean;
   sub: string;        // User ID
   jti: string;        // JWT ID for revocation
   iat?: number;
@@ -21,6 +24,7 @@ export interface RefreshTokenPayload {
 
 // Auth Request/Response
 export interface LoginRequest {
+  rememberMe?: boolean;
   username: string;
   password: string;
 }
@@ -31,12 +35,15 @@ export interface LoginResponse {
     id: string;
     username: string;
     displayName?: string;
-    email: string;
+    email: string | null;
+    mustChangePassword?: boolean;
     role: UserRole;
+    isRepresentative?: boolean;
   };
 }
 
 export interface RefreshResponse {
+  rememberMe?: boolean;
   accessToken: string;
 }
 
@@ -49,6 +56,7 @@ declare global {
         username: string;
         displayName?: string;
         role: UserRole;
+        isRepresentative?: boolean;
         actualRole?: UserRole;
         testRole?: UserRole;
       };

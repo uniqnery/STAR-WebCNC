@@ -20,7 +20,22 @@ interface AuditLogEntry {
   createdAt: string;
 }
 
-type ActionFilter = 'all' | 'control' | 'scheduler' | 'transfer' | 'auth' | 'admin';
+type ActionFilter = 'all' | 'control' | 'scheduler' | 'transfer' | 'auth' | 'admin' | 'users';
+
+function userManagementDetail(log: AuditLogEntry): string | null {
+  if (log.action === 'users.representative_change') {
+    const before = log.params?.before as { name?: string } | null;
+    const after = log.params?.after as { name?: string } | null;
+    return `${before?.name || '미지정'} → ${after?.name || '미지정'}`;
+  }
+  if (log.action !== 'users.permissions_change') return null;
+  const describe = (value: unknown) => {
+    const v = value as { role?: string; isActive?: boolean; isApproved?: boolean } | undefined;
+    if (!v) return '—';
+    return `${v.role === 'ADMIN' ? '업체 관리자' : '일반 사용자'} / ${v.isApproved ? '승인' : '승인 대기'} / ${v.isActive ? '활성' : '비활성'}`;
+  };
+  return `${log.params?.name || ''} · ${describe(log.params?.before)} → ${describe(log.params?.after)}`;
+}
 
 function writeDetail(log: AuditLogEntry): string | null {
   if (!['command.write_offset', 'command.write_count', 'command.write_tool_life_preset'].includes(log.action)) return null;
@@ -124,6 +139,7 @@ export function AuditLog() {
               <option value="transfer">전송</option>
               <option value="auth">인증</option>
               <option value="admin">관리</option>
+              <option value="users">사용자 관리</option>
             </select>
           </div>
 
@@ -255,6 +271,7 @@ export function AuditLog() {
                       {formatAction(log.action)}
                     </span>
                     {writeDetail(log) && <p className="text-xs text-gray-500 mt-1 whitespace-normal">{writeDetail(log)}</p>}
+                    {userManagementDetail(log) && <p className="text-xs text-gray-500 mt-1 whitespace-normal">{userManagementDetail(log)}</p>}
                     {(log.params?.roleTest || log.params?.actualRole) ? <p className="text-xs text-amber-600">권한 테스트 · 실제 본사 엔지니어 → {log.userRole}</p> : null}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-500">
@@ -314,6 +331,9 @@ export function AuditLog() {
 // Format action string for display
 function formatAction(action: string): string {
   const actionMap: Record<string, string> = {
+    'users.representative_change': '대표 관리자 변경',
+    'users.permissions_change': '사용자 권한·상태 변경',
+    'users.registration_code_change': '가입 코드 변경',
     'auth.role_test': '권한 테스트 전환',
     'auth.role_test_request': '권한 테스트 요청',
     'command.write_offset': '오프셋 수정',

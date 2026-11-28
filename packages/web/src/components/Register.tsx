@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { authApi } from '../lib/api';
+import { AuthBrand } from './AuthBrand';
 
 export function Register() {
   const navigate = useNavigate();
@@ -50,7 +51,7 @@ export function Register() {
       );
 
       if (response.success) {
-        alert('회원가입이 완료되었습니다. 로그인해주세요.');
+        alert('회원가입이 완료되었습니다. 로그인해 주세요.');
         navigate('/login');
       } else {
         setError(response.error?.message || '회원가입에 실패했습니다.');
@@ -63,24 +64,17 @@ export function Register() {
   };
 
   const inputCls =
-    'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg ' +
+    'w-full h-[48px] px-[12px] py-[8px] text-[16px] border border-gray-300 dark:border-gray-600 rounded-lg ' +
     'bg-white dark:bg-gray-700 text-gray-900 dark:text-white ' +
     'focus:outline-none focus:ring-2 focus:ring-blue-500';
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100 dark:bg-gray-900">
-      <div className="max-w-md w-full mx-4">
-        {/* Logo */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            Star-WebCNC
-          </h1>
-          <p className="text-gray-500 mt-2">CNC 스마트팩토리 시스템</p>
-        </div>
-
+    <div className="min-h-screen min-h-[100svh] flex items-center justify-center bg-gray-100 dark:bg-gray-900 px-[16px] py-[32px]">
+      <div className="max-w-[400px] w-full">
         {/* Register Form */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg px-[24px] py-[36px] sm:px-[32px] sm:py-[40px]">
+          <AuthBrand compact />
+          <h2 className="text-[18px] leading-[24px] font-semibold text-gray-900 dark:text-white mb-[24px]">
             회원가입
           </h2>
 
@@ -90,11 +84,11 @@ export function Register() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-[20px]">
             <div>
               <label
                 htmlFor="username"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                className="block text-[14px] leading-[20px] font-medium text-gray-700 dark:text-gray-300 mb-[4px]"
               >
                 로그인 ID
               </label>
@@ -114,7 +108,7 @@ export function Register() {
             <div>
               <label
                 htmlFor="displayName"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                className="block text-[14px] leading-[20px] font-medium text-gray-700 dark:text-gray-300 mb-[4px]"
               >
                 사용자명 (이름)
               </label>
@@ -125,9 +119,9 @@ export function Register() {
             <div>
               <label
                 htmlFor="email"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                className="block text-[14px] leading-[20px] font-medium text-gray-700 dark:text-gray-300 mb-[4px]"
               >
-                이메일
+                이메일 (선택)
               </label>
               <input
                 id="email"
@@ -136,8 +130,7 @@ export function Register() {
                 value={formData.email}
                 onChange={handleChange}
                 className={inputCls}
-                placeholder="이메일 입력"
-                required
+                placeholder="이메일 입력 (선택)"
                 autoComplete="email"
               />
             </div>
@@ -145,7 +138,7 @@ export function Register() {
             <div>
               <label
                 htmlFor="password"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                className="block text-[14px] leading-[20px] font-medium text-gray-700 dark:text-gray-300 mb-[4px]"
               >
                 비밀번호
               </label>
@@ -165,7 +158,7 @@ export function Register() {
             <div>
               <label
                 htmlFor="passwordConfirm"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                className="block text-[14px] leading-[20px] font-medium text-gray-700 dark:text-gray-300 mb-[4px]"
               >
                 비밀번호 확인
               </label>
@@ -186,10 +179,9 @@ export function Register() {
             <div>
               <label
                 htmlFor="registrationCode"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+                className="block text-[14px] leading-[20px] font-medium text-gray-700 dark:text-gray-300 mb-[4px]"
               >
-                등록 코드{' '}
-                <span className="text-gray-400 font-normal">(없으면 일반 사용자로 가입)</span>
+                가입 코드
               </label>
               <input
                 id="registrationCode"
@@ -198,18 +190,19 @@ export function Register() {
                 value={formData.registrationCode}
                 onChange={handleChange}
                 className={inputCls}
-                placeholder="관리자 코드 또는 HQ 엔지니어 코드 입력"
+                placeholder="업체 가입 코드 입력"
+                required
                 autoComplete="off"
               />
-              <p className="mt-1 text-xs text-gray-400">
-                코드 없음 → 일반 사용자 · 관리자 코드 → 고객사 관리자 · HQ 코드 → 본사 엔지니어
+              <p className="mt-[4px] text-[12px] leading-[20px] text-gray-400">
+                업체 관리자에게 받은 가입 코드가 필요합니다.
               </p>
             </div>
 
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400
+              className="w-full h-[48px] py-[8px] px-[16px] text-[16px] bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400
                        text-white font-medium rounded-lg transition-colors
                        focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
@@ -243,8 +236,8 @@ export function Register() {
           </form>
 
           {/* Login Link */}
-          <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700 text-center">
-            <p className="text-sm text-gray-500">
+          <div className="mt-[32px] text-center">
+            <p className="text-[12px] sm:text-[14px] leading-[20px] text-gray-500">
               이미 계정이 있으신가요?{' '}
               <Link
                 to="/login"

@@ -1,6 +1,7 @@
 // API Client
 
 import { useAuthStore } from '../stores/authStore';
+import type { User } from '../stores/authStore';
 import type { DailyRunSummary } from '../stores/machineStore';
 import type { CounterField } from '../stores/templateStore';
 
@@ -130,9 +131,10 @@ class ApiClient {
     });
   }
 
-  async delete<T>(path: string): Promise<ApiResponse<T>> {
+  async delete<T>(path: string, body?: unknown): Promise<ApiResponse<T>> {
     return this.request<T>(`${this.baseUrl}${path}`, {
       method: 'DELETE',
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       headers: this.getHeaders(),
       credentials: 'include',
     });
@@ -160,38 +162,47 @@ export const api = new ApiClient(API_BASE_URL);
 export const authApi = {
   setTestRole: (role: 'USER' | 'ADMIN' | 'HQ_ENGINEER') =>
     api.post<{ role: 'USER' | 'ADMIN' | 'HQ_ENGINEER'; releasedMachines: string[] }>('/api/auth/role-test', { role }),
-  login: (username: string, password: string) =>
+  login: (username: string, password: string, rememberMe = false) =>
     api.post<{
       accessToken: string;
       user: {
         id: string;
         username: string;
         displayName?: string;
-        email: string;
+        email: string | null;
+        mustChangePassword?: boolean;
         role: 'USER' | 'ADMIN' | 'HQ_ENGINEER';
+        isRepresentative?: boolean;
       };
-    }>('/api/auth/login', { username, password }),
+    }>('/api/auth/login', { username, password, rememberMe }),
 
   register: (username: string, email: string, password: string, registrationCode: string, displayName: string) =>
-    api.post<{ id: string; username: string; email: string }>(
+    api.post<{ id: string; username: string; email: string | null }>(
       '/api/auth/register',
       { username, displayName, email, password, registrationCode }
     ),
 
   logout: () => api.post('/api/auth/logout'),
+  findId: (name: string, email: string) => api.post<{ maskedId: string | null }>('/api/auth/find-id', { name, email }),
+  changePassword: (currentPassword: string, password: string, passwordConfirm: string) => api.post('/api/auth/change-password', { currentPassword, password, passwordConfirm }),
   updateProfile: (displayName: string) => api.put<{ accessToken: string; user: import('../stores/authStore').User }>('/api/auth/profile', { displayName }),
 
   refresh: () =>
     api.post<{ accessToken: string }>('/api/auth/refresh'),
 
   me: () =>
-    api.get<{
-      id: string;
-      username: string;
-      displayName?: string;
-      email: string;
-      role: 'USER' | 'ADMIN' | 'HQ_ENGINEER';
-    }>('/api/auth/me'),
+    api.get<User>('/api/auth/me'),
+};
+
+export interface AccountMailConfig { host: string; port: number; username: string; from: string; publicUrl: string; hasPassword: boolean }
+export const accountRecoveryApi = {
+  request: (mode: 'find-id' | 'forgot-password' | 'verify-email', email: string, username = '') =>
+    api.post<{ message: string; retryAfter: number }>(`/api/auth/recovery/${mode}`, { email, username }),
+  reset: (token: string, password: string, passwordConfirm: string) =>
+    api.post<{ message: string; userId?: string }>('/api/auth/recovery/reset-password', { token, password, passwordConfirm }),
+  mailSettings: () => api.get<AccountMailConfig | null>('/api/auth/recovery/mail-settings'),
+  saveMailSettings: (settings: { host: string; port: number; username: string; from: string; publicUrl: string; password?: string }) => api.put('/api/auth/recovery/mail-settings', settings),
+  testMail: (email: string) => api.post('/api/auth/recovery/mail-test', { email }),
 };
 
 // Machine API
@@ -667,11 +678,27 @@ export const settingsApi = {
   getWindowsStartup: () => api.get<WindowsStartupStatus>('/api/settings/windows-startup'),
   setWindowsStartup: (enabled: boolean) => api.put<WindowsStartupStatus>('/api/settings/windows-startup', { enabled }),
   getRegistrationCodes: () =>
-    api.get<{ adminCode: string; operatorCode: string; hqCodeSet: boolean }>(
+    api.get<{ operatorCode: string }>(
       '/api/settings/registration-codes'
     ),
-  updateRegistrationCodes: (codes: { adminCode?: string; operatorCode?: string }) =>
+  updateRegistrationCodes: (codes: { operatorCode: string }) =>
     api.put('/api/settings/registration-codes', codes),
+};
+
+export interface ManagedUser extends User {
+  isApproved: boolean;
+  isActive: boolean;
+  createdAt: string;
+  lastLoginAt: string | null;
+}
+
+export const usersApi = {
+  list: () => api.get<{ items: ManagedUser[] }>('/api/users'),
+  update: (id: string, changes: { role?: 'USER' | 'ADMIN'; isApproved?: boolean; isActive?: boolean }) =>
+    api.patch(`/api/users/${encodeURIComponent(id)}`, changes),
+  setRepresentative: (userId: string | null) => api.put('/api/users/representative', { userId }),
+  resetPassword: (id: string) => api.post<{ temporaryPassword: string }>(`/api/users/${encodeURIComponent(id)}/reset-password`),
+  remove: (id: string, confirmUsername: string) => api.delete(`/api/users/${encodeURIComponent(id)}`, { confirmUsername }),
 };
 
 export const layoutApi = {

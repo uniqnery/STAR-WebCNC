@@ -1,15 +1,8 @@
 // Auth Store - Zustand
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
 import { readRoleTest, writeRoleTest, type TestRole } from '../lib/roleTestSession';
-
-const MOCK_USER = {
-  id: 'dev-user-001',
-  username: 'admin',
-  email: 'admin@star-webcnc.local',
-  role: 'HQ_ENGINEER' as const,
-};
 
 export type UserRole = 'USER' | 'ADMIN' | 'HQ_ENGINEER';
 
@@ -17,8 +10,10 @@ export interface User {
   id: string;
   username: string;
   displayName?: string;
-  email: string;
+  email: string | null;
+  mustChangePassword?: boolean;
   role: UserRole;
+  isRepresentative?: boolean;
   actualRole?: UserRole;
 }
 
@@ -26,6 +21,7 @@ interface AuthState {
   user: User | null;
   accessToken: string | null;
   isAuthenticated: boolean;
+  rememberMe: boolean;
   testRole: TestRole | null;
   roleTestChanging: boolean;
   setRoleTestChanging: (changing: boolean) => void;
@@ -33,11 +29,25 @@ interface AuthState {
   restoreTestRole: (user?: User) => void;
 
   // Actions
-  setAuth: (user: User, accessToken: string) => void;
+  setAuth: (user: User, accessToken: string, rememberMe?: boolean) => void;
   setAccessToken: (token: string) => void;
   logout: () => void;
-  devLogin: () => void;
 }
+
+// Persistent sessions survive reopening; unchecked sessions stay in this tab only.
+const authStorage: StateStorage = {
+  getItem: name => {
+    try { return sessionStorage.getItem(name) ?? localStorage.getItem(name); } catch { return null; }
+  },
+  setItem: (name, value) => {
+    try {
+      const remember = JSON.parse(value).state.rememberMe !== false;
+      (remember ? localStorage : sessionStorage).setItem(name, value);
+      (remember ? sessionStorage : localStorage).removeItem(name);
+    } catch { /* Private browsing can disable storage; keep the in-memory session. */ }
+  },
+  removeItem: name => { try { localStorage.removeItem(name); sessionStorage.removeItem(name); } catch {} },
+};
 
 export const useAuthStore = create<AuthState>()(
   persist(
@@ -45,6 +55,7 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       accessToken: null,
       isAuthenticated: false,
+      rememberMe: true, // Preserve previously issued sessions until the next explicit login.
       testRole: null,
       roleTestChanging: false,
       setRoleTestChanging: (roleTestChanging) => set({ roleTestChanging }),
@@ -63,7 +74,7 @@ export const useAuthStore = create<AuthState>()(
         set({ testRole, user: { ...user, actualRole, role: testRole ?? actualRole } });
       },
 
-      setAuth: (user, accessToken) => {
+      setAuth: (user, accessToken, rememberMe = get().rememberMe) => {
         const actualRole = user.actualRole ?? user.role;
         const testRole = actualRole === 'HQ_ENGINEER' ? readRoleTest(user.id) : null;
         set({
@@ -71,6 +82,7 @@ export const useAuthStore = create<AuthState>()(
           testRole,
           accessToken,
           isAuthenticated: true,
+          rememberMe,
         });
       },
 
@@ -84,26 +96,24 @@ export const useAuthStore = create<AuthState>()(
           user: null,
           accessToken: null,
           isAuthenticated: false,
+          rememberMe: false,
         });
       },
 
-      devLogin: () => {
-        set({
-          testRole: null,
-          user: MOCK_USER,
-          accessToken: 'dev-token',
-          isAuthenticated: true,
-        });
-      },
     }),
     {
       name: 'auth-storage',
+      storage: createJSONStorage(() => authStorage),
       partialize: (state) => ({
         user: state.user ? { ...state.user, role: state.user.actualRole ?? state.user.role } : null,
         accessToken: state.accessToken,
         isAuthenticated: state.isAuthenticated,
+        rememberMe: state.rememberMe,
       }),
-      onRehydrateStorage: () => state => state?.restoreTestRole(state.user ?? undefined),
+      onRehydrateStorage: () => state => {
+        if (state?.accessToken === 'dev-token') state.logout();
+        else state?.restoreTestRole(state.user ?? undefined);
+      },
     }
   )
 );

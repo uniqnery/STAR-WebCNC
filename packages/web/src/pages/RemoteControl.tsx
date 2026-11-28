@@ -1,6 +1,6 @@
 // RemoteControl Page - 리모트 오퍼레이션 패널
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   useMachineStore,
   useMachineTelemetry,
@@ -36,6 +36,7 @@ export function RemoteControl() {
   const activeAlarms = useMachineAlarms(selectedMachineId || '');
   const controlLock = useControlLock(selectedMachineId || '');
   const selectedMachine = machines.find((m) => m.machineId === selectedMachineId);
+  const userActivityContent = useMemo(() => <UserActivityFeed machineId={selectedMachineId || ''} page="control" />, [selectedMachineId]);
 
   // 템플릿에서 panelLayout 로드: 장비에 할당된 템플릿을 우선 사용
   const { templates, loadTemplates, selectedTemplateId } = useTemplateStore();
@@ -277,7 +278,7 @@ export function RemoteControl() {
               </div>
               {/* 모바일 portrait 전용 로그 — PC(lg:) 및 landscape에서 숨김 */}
               <div className="lg:hidden landscape:hidden shrink-0 h-40 max-lg:portrait:mt-0">
-                <FocasEventLog events={focasEvents} userActivityContent={<UserActivityFeed machineId={selectedMachineId || ''} page="control" />} />
+                <FocasEventLog events={focasEvents} userActivityContent={userActivityContent} />
               </div>
             </div>
 
@@ -299,14 +300,14 @@ export function RemoteControl() {
               </div>
               {/* 모바일 portrait 전용 로그 — PC(lg:) 및 landscape에서 숨김 */}
               <div className="lg:hidden landscape:hidden shrink-0 h-40 max-lg:portrait:mt-0">
-                <FocasEventLog events={focasEvents} userActivityContent={<UserActivityFeed machineId={selectedMachineId || ''} page="control" />} />
+                <FocasEventLog events={focasEvents} userActivityContent={userActivityContent} />
               </div>
             </div>
           </div>
 
           {/* 이벤트 로그 — PC: 나머지 공간 채움(최소 5rem), 모바일 portrait: 숨김 */}
           <div className="max-lg:hidden lg:flex-1 lg:min-h-[4rem] lg:overflow-hidden">
-            <FocasEventLog events={focasEvents} userActivityContent={<UserActivityFeed machineId={selectedMachineId || ''} page="control" />} />
+            <FocasEventLog events={focasEvents} userActivityContent={userActivityContent} />
           </div>
 
           {/* 롱프레스 중앙 오버레이 */}

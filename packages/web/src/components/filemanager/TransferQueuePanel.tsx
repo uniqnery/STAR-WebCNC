@@ -13,7 +13,7 @@ export function TransferQueuePanel({ machineId }: TransferQueuePanelProps) {
   const fileHistoryLoading = useFileStore((s) => s.fileHistoryLoading);
   const loadFileHistory = useFileStore((s) => s.loadFileHistory);
 
-  const activeTransfers = transferQueue.filter((job) => job.status === 'PENDING' || job.status === 'TRANSFERRING' || job.status === 'DONE');
+  const activeTransfers = transferQueue.filter((job) => job.status === 'PENDING' || job.status === 'TRANSFERRING');
 
   useEffect(() => {
     if (machineId) void loadFileHistory(machineId);

@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useFeatureStore } from '../stores/featureStore';
 import { productionApi } from '../lib/api';
 import { parsePopData, type PopData, type CounterHistory } from '../lib/popData';
+import { ProductionBoard } from '../components/pop/ProductionBoard';
 
 type TimeRange = 'today' | 'week' | 'month';
 const sources: Record<string, string> = { mes: 'MES 작업지시', scheduler: '스케줄러', program: '프로그램 코멘트', unassigned: '미지정', legacy: '과거 이력' };
@@ -15,7 +16,7 @@ const duration = (seconds: number) => `${Math.floor(seconds / 3600)}시간 ${Mat
 
 export function POP() {
   const machines = useMachineStore(s => s.machines);
-  const [machineId, setMachineId] = useState(useMachineStore.getState().selectedMachineId ?? '');
+  const [machineId, setMachineId] = useState('');
   const [range, setRange] = useState<TimeRange>('today');
   const [data, setData] = useState<PopData | null>(null);
   const [error, setError] = useState('');
@@ -42,10 +43,10 @@ export function POP() {
     void load(); const timer = setInterval(load, 5000);
     return () => { active = false; clearInterval(timer); };
   }, [machineId, range, refresh]);
-  const count = data?.stats.reduce((n, s) => n + s.totalParts, 0);
+
   return <div className="p-4 lg:p-6 space-y-5">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><h1 className="text-2xl font-bold dark:text-white">생산 실적 (POP)</h1><p className="text-sm text-gray-500">카운터 증가량 기준 · 5초 자동 갱신 · 한국시간</p></div>
+      <div><h1 className="text-2xl font-semibold tracking-tight dark:text-white">생산 현황 <span className="text-sm font-normal text-gray-400">POP</span></h1><p className="text-xs text-gray-400 mt-1">{updatedAt ? `마지막 갱신 ${time(updatedAt)}` : '실적을 불러오는 중'}</p></div>
       <div className="flex flex-wrap gap-2">
         <select aria-label="설비" value={machineId} onChange={e => setMachineId(e.target.value)} className="border rounded p-2 dark:bg-gray-800 dark:text-white"><option value="">전체 설비</option>{machines.map(m => <option key={m.machineId} value={m.machineId}>{m.name}</option>)}</select>
         <select aria-label="집계 기간" value={range} onChange={e => setRange(e.target.value as TimeRange)} className="border rounded p-2 dark:bg-gray-800 dark:text-white"><option value="today">오늘</option><option value="week">이번 주</option><option value="month">이번 달</option></select>
@@ -53,10 +54,26 @@ export function POP() {
       </div>
     </div>
     {error && <p role="alert" className="text-red-500">{error}{data ? ' · 마지막 조회 결과를 표시합니다.' : ''}</p>}
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      {[['집계 수량 (추정·보정 포함)', count === undefined ? '—' : `${count.toLocaleString()}개`], ['단절 구간 추정', data ? `${data.stats.reduce((n,s) => n + (s.estimatedParts ?? 0),0)}개` : '—'], ['확인 필요 (집계 제외)', data ? `${data.reviewQuantity ?? 0}개` : '—'], ['수동 보정', data ? `${data.stats.reduce((n,s) => n + (s.correctedParts ?? 0),0)}개` : '—']].map(([label, value]) => <div key={label} className="p-4 rounded shadow bg-white dark:bg-gray-800"><div className="text-sm text-gray-500">{label}</div><div className="text-xl font-semibold mt-2 dark:text-white">{value}</div></div>)}
-    </div>
-    <p className="text-xs text-gray-500">프리셋·카운터 초기화는 기존 생산 실적을 지우지 않습니다. 추정·보정 수량은 작업지시에 자동 반영하지 않습니다. 양품·불량 및 OEE는 아직 계산하지 않습니다. 적용 전 생산량을 소급 생성하지 않습니다.{updatedAt && ` 마지막 확인: ${time(updatedAt)}`}</p>
+    <ProductionBoard data={data} range={range} updatedAt={updatedAt} onSelectMachine={setMachineId} />
+    {data?.mesEnabled && machineId && <OrderAssignment machineId={machineId} />}
+    <details className="bg-white dark:bg-gray-800 rounded-2xl border dark:border-gray-700 overflow-hidden">
+      <summary className="font-medium p-4 cursor-pointer dark:text-white">생산 항목·구간별 실적</summary>
+      <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-sm dark:text-gray-200"><thead className="bg-gray-100 dark:bg-gray-700"><tr>{['설비', '생산 항목', '출처 / 프로그램', '작업지시', '최초·최근 완료', '수량'].map(x => <th key={x} className="p-3 text-left">{x}</th>)}</tr></thead><tbody>
+        {data?.products.map(p => <tr key={p.runKey + ':' + p.countQuality} className="border-t dark:border-gray-700"><td className="p-3">{p.machineId}</td><td className="p-3">{p.productionName}{p.contextStatus === 'conflict' && <p className="text-amber-600 text-xs">작업지시·프로그램 불일치</p>}{p.contextStatus === 'mes_unlinked' && <p className="text-amber-600 text-xs">작업지시 미연결</p>}</td><td className="p-3">{sources[p.commentSource]}<br />{p.programNo}</td><td className="p-3">{p.workOrderNumber ?? '—'}</td><td className="p-3 text-xs">{time(p.firstAt)}<br />{time(p.lastAt)}</td><td className="p-3 font-bold">{p.partsCount}<p className="text-xs text-gray-500">{quality[p.countQuality ?? 'confirmed']}</p></td></tr>)}
+        {!data?.products.length && <tr><td colSpan={6} className="p-8 text-center text-gray-500">{data ? '선택 기간의 생산 완료 기록이 없습니다.' : '생산 실적 확인 중…'}</td></tr>}
+      </tbody></table></div>
+    </details>
+    <details className="bg-white dark:bg-gray-800 rounded-2xl border dark:border-gray-700 overflow-hidden">
+      <summary className="font-medium p-4 cursor-pointer dark:text-white">카운터·프리셋 변경 및 보정 이력 (최근 100건)</summary>
+      <div className="overflow-x-auto"><table className="w-full min-w-[800px] text-sm dark:text-gray-200"><thead><tr>{['시각 / 설비', '변경 내용', '프로그램 / 코멘트', '카운트', '프리셋', '집계 / 구분', '작업자 / 사유'].map(x=><th key={x} className="p-3 text-left">{x}</th>)}</tr></thead><tbody>{(data?.events ?? []).map(e=><tr key={e.eventId} className="border-t dark:border-gray-700"><td className="p-3">{time(e.observedAt)}<br/>{e.machineCode}</td><td className="p-3">{kinds[e.kind] ?? e.kind}{e.messagesBefore !== e.messagesAfter && <details className="mt-1 text-xs text-gray-500"><summary>메시지 발생·해제</summary><p className="whitespace-pre-wrap">이전: {e.messagesBefore ?? '조회 불가'}</p><p className="whitespace-pre-wrap">현재: {e.messagesAfter ?? '조회 불가'}</p></details>}</td><td className="p-3">{e.programNo ?? '—'}<br/>{e.programComment || '—'}</td><td className="p-3">{e.countBefore ?? '—'} → {e.countAfter ?? '—'}</td><td className="p-3">{e.presetBefore ?? '—'} → {e.presetAfter ?? '—'}</td><td className="p-3">{e.quantity}개 / {quality[e.quality] ?? e.quality}</td><td className="p-3">{e.actor || '—'}{e.reason && <p>{e.reason}</p>}{e.correlationId && <p className="text-xs text-gray-500 break-all">수정 번호: {e.correlationId}</p>}{(user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER') && e.kind !== 'correction' && <button className="block mt-2 border rounded px-2 py-1" onClick={()=>setCorrection(e)}>실적 보정</button>}</td></tr>)}</tbody></table></div>
+      {!data?.events?.length && <p className="p-4 text-gray-500">변경 이력이 없습니다.</p>}
+    </details>
+    {correction && (user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER') && <CorrectionForm key={correction.eventId} event={correction} onClose={()=>setCorrection(null)} onSaved={()=>{setCorrection(null);setRefresh(n=>n+1)}} />}
+    <details className="bg-white dark:bg-gray-800 rounded-2xl border dark:border-gray-700 overflow-hidden">
+      <summary className="font-medium p-4 cursor-pointer dark:text-white">최근 생산 실적 (최대 50건)</summary>
+      <div className="overflow-x-auto"><table className="w-full min-w-[600px] text-sm dark:text-gray-200"><thead className="bg-gray-100 dark:bg-gray-700"><tr>{['완료 시각', '설비', '생산 항목 / 원본', '원본·실행 프로그램', '수량'].map(x => <th key={x} className="p-3 text-left">{x}</th>)}</tr></thead><tbody>{data?.recent.map(log => <tr key={log.id} className="border-t dark:border-gray-700"><td className="p-3">{time(log.endTime)}</td><td className="p-3">{log.machineCode}</td><td className="p-3">{log.productionName ?? log.programNo}<details className="text-xs text-gray-500 mt-1"><summary>코멘트 원본 · {sources[log.commentSource ?? 'legacy']}</summary><p>MES: {log.mesComment || '—'}</p><p>스케줄러: {log.schedulerComment || '—'}</p><p>프로그램: {log.programComment || '—'}</p></details></td><td className="p-3">{log.programNo} / {log.executingProgramNo ?? '—'}</td><td className="p-3">{log.partsCount}</td></tr>)}</tbody></table></div>
+    </details>
+    <details className="bg-white dark:bg-gray-800 rounded-2xl border dark:border-gray-700 overflow-hidden"><summary className="font-medium p-4 cursor-pointer dark:text-white">상태별 시간·구간 상세</summary>
     <section className="bg-white dark:bg-gray-800 rounded shadow p-4 space-y-3">
       <h2 className="font-semibold dark:text-white">최근 카운터 및 상태별 시간</h2>
       <p className="text-xs text-gray-500">상단 표시와 동일한 가동·알람 정보 사용 · 초록 우선 · 수집 중단 시간은 확인 불가</p>
@@ -66,30 +83,8 @@ export function POP() {
       <h2 className="font-semibold mb-3 dark:text-white">가동 상태 구간 (최근 200건)</h2>
       <div className="overflow-x-auto"><table className="w-full min-w-[500px] text-sm dark:text-gray-200"><thead><tr>{['설비','상태','시작','종료 / 최근 확인'].map(x=><th key={x} className="p-2 text-left">{x}</th>)}</tr></thead><tbody>{(data?.segments ?? []).map((s,i)=><tr key={`${s.machineCode}:${s.startAt}:${i}`} className="border-t dark:border-gray-700"><td className="p-2">{s.machineCode}</td><td className="p-2">{stateNames[s.state] ?? s.state}</td><td className="p-2">{time(s.startAt)}</td><td className="p-2">{time(s.endAt)}</td></tr>)}</tbody></table></div>
     </section>
-    {data?.mesEnabled && machineId && <OrderAssignment machineId={machineId} />}
-    <section className="bg-white dark:bg-gray-800 rounded shadow p-4">
-      <h2 className="font-semibold dark:text-white mb-3">생산량 추이</h2>
-      <div className="flex items-end gap-2 overflow-x-auto h-36">
-        {data?.chart.map(point => <div key={point.date} className="min-w-10 flex-1 text-center text-xs text-gray-500"><div>{point.production}</div><div className="mx-auto bg-blue-500 rounded-t w-6" style={{ height: `${Math.max(2, point.production / Math.max(1, ...data.chart.map(c => c.production)) * 90)}px` }} /><span>{point.date}</span></div>)}
-      </div>
-    </section>
-    <section className="bg-white dark:bg-gray-800 rounded shadow overflow-hidden">
-      <h2 className="font-semibold p-4 dark:text-white">생산 항목·구간별 실적</h2>
-      <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-sm dark:text-gray-200"><thead className="bg-gray-100 dark:bg-gray-700"><tr>{['설비', '생산 항목', '출처 / 프로그램', '작업지시', '최초·최근 완료', '수량'].map(x => <th key={x} className="p-3 text-left">{x}</th>)}</tr></thead><tbody>
-        {data?.products.map(p => <tr key={p.runKey + ':' + p.countQuality} className="border-t dark:border-gray-700"><td className="p-3">{p.machineId}</td><td className="p-3">{p.productionName}{p.contextStatus === 'conflict' && <p className="text-amber-600 text-xs">작업지시·프로그램 불일치</p>}{p.contextStatus === 'mes_unlinked' && <p className="text-amber-600 text-xs">작업지시 미연결</p>}</td><td className="p-3">{sources[p.commentSource]}<br />{p.programNo}</td><td className="p-3">{p.workOrderNumber ?? '—'}</td><td className="p-3 text-xs">{time(p.firstAt)}<br />{time(p.lastAt)}</td><td className="p-3 font-bold">{p.partsCount}<p className="text-xs text-gray-500">{quality[p.countQuality ?? 'confirmed']}</p></td></tr>)}
-        {!data?.products.length && <tr><td colSpan={6} className="p-8 text-center text-gray-500">{data ? '선택 기간의 생산 완료 기록이 없습니다.' : '생산 실적 확인 중…'}</td></tr>}
-      </tbody></table></div>
-    </section>
-    <section className="bg-white dark:bg-gray-800 rounded shadow overflow-hidden">
-      <h2 className="font-semibold p-4 dark:text-white">카운터·프리셋 변경 및 보정 이력 (최근 100건)</h2>
-      <div className="overflow-x-auto"><table className="w-full min-w-[800px] text-sm dark:text-gray-200"><thead><tr>{['시각 / 설비', '변경 내용', '프로그램 / 코멘트', '카운트', '프리셋', '집계 / 구분', '작업자 / 사유'].map(x=><th key={x} className="p-3 text-left">{x}</th>)}</tr></thead><tbody>{(data?.events ?? []).map(e=><tr key={e.eventId} className="border-t dark:border-gray-700"><td className="p-3">{time(e.observedAt)}<br/>{e.machineCode}</td><td className="p-3">{kinds[e.kind] ?? e.kind}{e.messagesBefore !== e.messagesAfter && <details className="mt-1 text-xs text-gray-500"><summary>메시지 발생·해제</summary><p className="whitespace-pre-wrap">이전: {e.messagesBefore ?? '조회 불가'}</p><p className="whitespace-pre-wrap">현재: {e.messagesAfter ?? '조회 불가'}</p></details>}</td><td className="p-3">{e.programNo ?? '—'}<br/>{e.programComment || '—'}</td><td className="p-3">{e.countBefore ?? '—'} → {e.countAfter ?? '—'}</td><td className="p-3">{e.presetBefore ?? '—'} → {e.presetAfter ?? '—'}</td><td className="p-3">{e.quantity}개 / {quality[e.quality] ?? e.quality}</td><td className="p-3">{e.actor || '—'}{e.reason && <p>{e.reason}</p>}{e.correlationId && <p className="text-xs text-gray-500 break-all">수정 번호: {e.correlationId}</p>}{(user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER') && e.kind !== 'correction' && <button className="block mt-2 border rounded px-2 py-1" onClick={()=>setCorrection(e)}>실적 보정</button>}</td></tr>)}</tbody></table></div>
-      {!data?.events?.length && <p className="p-4 text-gray-500">변경 이력이 없습니다.</p>}
-    </section>
-    {correction && (user?.role === 'ADMIN' || user?.role === 'HQ_ENGINEER') && <CorrectionForm key={correction.eventId} event={correction} onClose={()=>setCorrection(null)} onSaved={()=>{setCorrection(null);setRefresh(n=>n+1)}} />}
-    <section className="bg-white dark:bg-gray-800 rounded shadow overflow-hidden">
-      <h2 className="font-semibold p-4 dark:text-white">최근 생산 실적 (최대 50건)</h2>
-      <div className="overflow-x-auto"><table className="w-full min-w-[600px] text-sm dark:text-gray-200"><thead className="bg-gray-100 dark:bg-gray-700"><tr>{['완료 시각', '설비', '생산 항목 / 원본', '원본·실행 프로그램', '수량'].map(x => <th key={x} className="p-3 text-left">{x}</th>)}</tr></thead><tbody>{data?.recent.map(log => <tr key={log.id} className="border-t dark:border-gray-700"><td className="p-3">{time(log.endTime)}</td><td className="p-3">{log.machineCode}</td><td className="p-3">{log.productionName ?? log.programNo}<details className="text-xs text-gray-500 mt-1"><summary>코멘트 원본 · {sources[log.commentSource ?? 'legacy']}</summary><p>MES: {log.mesComment || '—'}</p><p>스케줄러: {log.schedulerComment || '—'}</p><p>프로그램: {log.programComment || '—'}</p></details></td><td className="p-3">{log.programNo} / {log.executingProgramNo ?? '—'}</td><td className="p-3">{log.partsCount}</td></tr>)}</tbody></table></div>
-    </section>
+    </details>
+    <details className="text-xs text-gray-500 px-1"><summary className="cursor-pointer">집계 기준</summary><p className="mt-2 leading-relaxed">카운터 증가량 기준으로 5초마다 갱신합니다. 프리셋·카운터 초기화는 기존 생산 실적을 지우지 않습니다. 추정·보정 수량은 작업지시에 자동 반영하지 않습니다. 양품·불량 및 OEE는 계산하지 않으며 적용 전 생산량은 소급 생성하지 않습니다. 시간축은 최근 200개 구간을 사용하며 구간 기록 없음은 통신 불가로 단정하지 않습니다.</p></details>
   </div>;
 }
 

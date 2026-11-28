@@ -119,12 +119,7 @@ class WebSocketService {
       const token = authHeader.slice(7);
       const payload = verifyAccessToken(token);
       if (payload) {
-        return {
-          id: payload.sub,
-          username: payload.username,
-          displayName: payload.displayName || payload.username,
-          role: payload.role,
-        };
+        return this.currentAccount(payload.sub, payload.authVersion ?? 0);
       }
     }
 
@@ -143,7 +138,7 @@ class WebSocketService {
             include: { user: true },
           });
 
-          if (storedToken && !storedToken.revokedAt && storedToken.user.isActive) {
+          if (storedToken && !storedToken.revokedAt && storedToken.expiresAt > new Date() && storedToken.user.isActive && storedToken.user.isApproved && !storedToken.user.mustChangePassword && !storedToken.user.deletedAt && (payload.authVersion ?? 0) === (storedToken.user.authVersion ?? 0)) {
             return {
               id: storedToken.user.id,
               username: storedToken.user.username,
@@ -161,16 +156,26 @@ class WebSocketService {
     if (token) {
       const payload = verifyAccessToken(token);
       if (payload) {
-        return {
-          id: payload.sub,
-          username: payload.username,
-          displayName: payload.displayName || payload.username,
-          role: payload.role,
-        };
+        return this.currentAccount(payload.sub, payload.authVersion ?? 0);
       }
     }
 
     return null;
+  }
+
+  private async currentAccount(id: string, authVersion = 0) {
+    const user = await prisma.user.findUnique({ where: { id }, select: { id: true, username: true, displayName: true, role: true, isActive: true, isApproved: true, authVersion: true, mustChangePassword: true, deletedAt: true } });
+    return user?.isActive && user.isApproved && !user.mustChangePassword && !user.deletedAt && (user.authVersion ?? 0) === authVersion ? user : null;
+  }
+
+  notifyAccountsChanged(userIds: string[], disabled = false): void {
+    this.clients.forEach((ws) => {
+      if (!userIds.includes(ws.client.userId)) return;
+      this.sendTo(ws, { type: 'account_changed', timestamp: new Date().toISOString(), payload: null });
+      // Reconnect authenticates the current role; disabled accounts cannot reconnect.
+      ws.close(disabled ? 4003 : 4001, 'Account changed');
+    });
+    this.broadcastToRoles(['ADMIN', 'HQ_ENGINEER'], { type: 'users_changed', timestamp: new Date().toISOString(), payload: null });
   }
 
   /**

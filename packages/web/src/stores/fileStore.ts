@@ -161,7 +161,14 @@ export const useFileStore = create<FileState>((set, get) => ({
       const res = await fileApi.getFileHistory(machineId, TRANSFER_HISTORY_MAX);
       const data = res.data as { items?: FileOperationHistoryItem[] } | FileOperationHistoryItem[] | undefined;
       const items = Array.isArray(data) ? data : data?.items ?? [];
-      set({ fileHistory: items, fileHistoryLoading: false });
+      set((state) => ({
+        // A history request may have started before the completion event arrived.
+        fileHistory: items.map((item) => {
+          const current = state.fileHistory.find((entry) => entry.id === item.id);
+          return item.status === 'PENDING' && current && current.status !== 'PENDING' ? current : item;
+        }),
+        fileHistoryLoading: false,
+      }));
       return;
     } catch (err) {
       console.error('loadFileHistory failed:', err);
@@ -171,6 +178,8 @@ export const useFileStore = create<FileState>((set, get) => ({
 
   upsertFileHistory: (item) => {
     set((state) => {
+      const current = state.fileHistory.find((entry) => entry.id === item.id);
+      if (item.status === 'PENDING' && current && current.status !== 'PENDING') return state;
       const next = [item, ...state.fileHistory.filter((entry) => entry.id !== item.id)]
         .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
         .slice(0, TRANSFER_HISTORY_MAX);
@@ -341,7 +350,8 @@ export const useFileStore = create<FileState>((set, get) => ({
             // PC→CNC: 서버가 명령을 접수하면 진행 중으로 유지하고 Agent 결과 이벤트에서 완료 처리
             set((state) => ({
               transferQueue: state.transferQueue.map((j) =>
-                jobs.some((jb) => jb.id === j.id) ? { ...j, status: 'TRANSFERRING', progress: 70 } : j
+                jobs.some((jb) => jb.id === j.id) && j.status !== 'DONE' && j.status !== 'ERROR'
+                  ? { ...j, status: 'TRANSFERRING', progress: Math.max(j.progress, 70) } : j
               ),
             }));
           }

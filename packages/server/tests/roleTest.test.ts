@@ -38,9 +38,9 @@ it.each(['USER', 'ADMIN', 'HQ_ENGINEER'])('HQ can test %s while retaining actual
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({ id: 'hq-test', username: 'engineer', actualRole: 'HQ_ENGINEER', role, testRole: role });
 });
-it('normal requests retain their original role without DB test checks', async () => {
+it('normal requests verify current DB permissions', async () => {
   expect((await (await request('/probe', 'HQ_ENGINEER')).json()).role).toBe('HQ_ENGINEER');
-  expect(mocks.account).not.toHaveBeenCalled();
+  expect(mocks.account).toHaveBeenCalledOnce();
 });
 it.each(['USER', 'ADMIN'] as UserRole[])('ordinary %s cannot forge a test header', async role => {
   expect((await request('/probe', role, 'HQ_ENGINEER')).status).toBe(403);
@@ -80,6 +80,7 @@ it('does not report success when lease release fails', async () => {
   expect(mocks.audit).not.toHaveBeenCalled();
 });
 it('ordinary administrators cannot start a test session', async () => {
+  mocks.account.mockResolvedValue({ id: 'hq-test', username: 'engineer', role: 'ADMIN', isActive: true, isApproved: true });
   expect((await request('/api/auth/role-test', 'ADMIN', undefined, 'USER')).status).toBe(403);
 });
 it('audits denied test mutations with both identities', async () => {

@@ -1,6 +1,6 @@
 // FOCAS 이벤트 로그 + 사용자 기록 탭 공용 컴포넌트
 
-import { useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { FocasEvent } from '../stores/machineStore';
 
 function getEventIcon(type: FocasEvent['type']): string {
@@ -48,9 +48,15 @@ interface FocasEventLogProps {
   userActivityContent?: React.ReactNode;
 }
 
-export function FocasEventLog({ events, userActivityContent }: FocasEventLogProps) {
+const timeFormatter = new Intl.DateTimeFormat('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+export const FocasEventLog = memo(function FocasEventLog({ events, userActivityContent }: FocasEventLogProps) {
   const hasUserActivity = userActivityContent !== undefined;
   const [activeTab, setActiveTab] = useState<'user' | 'event'>('user');
+  const rows = useMemo(() => [...events].reverse().map(event => {
+    const date = new Date(event.timestamp);
+    return { event, time: Number.isFinite(date.getTime()) ? timeFormatter.format(date) : '—' };
+  }), [events]);
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow flex flex-col h-full">
@@ -92,13 +98,13 @@ export function FocasEventLog({ events, userActivityContent }: FocasEventLogProp
           events.length === 0 ? (
             <div className="text-center text-gray-500 py-4">이벤트 대기 중...</div>
           ) : (
-            [...events].reverse().map((event) => (
+            rows.map(({ event, time }) => (
               <div
                 key={event.id}
                 className={`flex items-center gap-2 px-1.5 h-6 shrink-0 ${getRowStyle(event)}`}
               >
                 <span className="text-gray-500 tabular-nums w-[72px] shrink-0">
-                  {new Date(event.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  {time}
                 </span>
                 <span className="w-5 text-center shrink-0 opacity-70">{getEventIcon(event.type)}</span>
                 <span className="flex-1 truncate">{event.message}</span>
@@ -109,4 +115,4 @@ export function FocasEventLog({ events, userActivityContent }: FocasEventLogProp
       </div>
     </div>
   );
-}
+});

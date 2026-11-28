@@ -11,6 +11,7 @@ import path from 'path';
 // Config & Routes
 import { config } from './config';
 import authRoutes from './routes/auth';
+import usersRoutes from './routes/users';
 import machineRoutes from './routes/machines';
 import commandRoutes from './routes/commands';
 import schedulerRoutes, {
@@ -253,6 +254,7 @@ app.get('/api', (req, res) => {
 
 // Auth Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/users', usersRoutes);
 
 // Machine Routes
 app.use('/api/machines', machineRoutes);

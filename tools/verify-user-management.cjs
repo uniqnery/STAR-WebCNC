@@ -1,0 +1,122 @@
+// Real API, JWT and PostgreSQL transactions in a disposable schema. No CNC commands.
+const assert = require('node:assert/strict');
+const { randomBytes } = require('node:crypto');
+const fs = require('node:fs');
+process.loadEnvFile('packages/server/.env');
+const { PrismaClient } = require('@prisma/client');
+const baseDb = new PrismaClient();
+const schema = `users_verify_${randomBytes(8).toString('hex')}`;
+const url = new URL(process.env.DATABASE_URL); url.searchParams.set('schema', schema);
+const db = new PrismaClient({ datasources: { db: { url: url.toString() } } });
+let checks = 0, created = false, server;
+const check = (actual, expected) => { assert.deepEqual(actual, expected); checks++; };
+(async () => {
+  assert(/^users_verify_[0-9a-f]{16}$/.test(schema));
+  await baseDb.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`); created = true;
+  for (const table of ['users', 'audit_logs', 'refresh_tokens', 'global_settings', 'account_rate_limits'])
+    await baseDb.$executeRawUnsafe(`CREATE TABLE "${schema}"."${table}" (LIKE public."${table}" INCLUDING ALL)`);
+  await db.$executeRawUnsafe(`CREATE TYPE "${schema}"."UserRole" AS ENUM ('USER', 'ADMIN', 'HQ_ENGINEER')`);
+  await db.$executeRawUnsafe('ALTER TABLE users DROP CONSTRAINT IF EXISTS users_representative_admin');
+  await db.$executeRawUnsafe('ALTER TABLE users ALTER COLUMN role DROP DEFAULT');
+  await db.$executeRawUnsafe(`ALTER TABLE users ALTER COLUMN role TYPE "${schema}"."UserRole" USING role::text::"${schema}"."UserRole"`);
+  await db.$executeRawUnsafe(`ALTER TABLE users ALTER COLUMN role SET DEFAULT 'USER'::"${schema}"."UserRole"`);
+  const columns = await db.$queryRaw`SELECT column_name FROM information_schema.columns WHERE table_schema = ${schema} AND table_name = 'users' AND column_name = 'is_representative'`;
+  if (!columns.length) {
+    const migration = fs.readFileSync('packages/server/prisma/migrations/20261127095000_company_user_management/migration.sql', 'utf8');
+    for (const statement of migration.split(';').filter(s => s.trim())) await db.$executeRawUnsafe(statement);
+  } else {
+    await db.$executeRawUnsafe(`ALTER TABLE users ADD CONSTRAINT users_representative_admin CHECK (NOT is_representative OR (role = 'ADMIN' AND is_active AND is_approved))`);
+  }
+  const prismaModule = require('../packages/server/dist/lib/prisma');
+  await prismaModule.prisma.$disconnect(); prismaModule.prisma = db;
+  const { wsService } = require('../packages/server/dist/lib/websocket');
+  const notifications = []; wsService.notifyAccountsChanged = (...args) => notifications.push(args);
+  const express = require('express');
+  const { generateAccessToken } = require('../packages/server/dist/auth/jwt');
+  const app = express(); app.use(express.json());
+  app.use('/api/users', require('../packages/server/dist/routes/users').default);
+  app.use('/api/auth', require('../packages/server/dist/routes/auth').default);
+  app.use('/api/settings', require('../packages/server/dist/routes/settings').default);
+  server = require('node:http').createServer(app);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const account = (name, role = 'USER', extra = {}) => db.user.create({ data: { username: name, displayName: `${name} 이름`, email: `${name}@example.test`, passwordHash: 'not-a-login-password', role, isApproved: true, ...extra } });
+  const hq = await account('hq', 'HQ_ENGINEER'), owner = await account('owner', 'ADMIN'), admin = await account('admin', 'ADMIN');
+  const user = await account('user'), other = await account('other'), pending = await account('pending', 'USER', { isApproved: false });
+  const token = u => generateAccessToken({ userId: u.id, username: u.username, role: u.role });
+  const staleAdminToken = token(admin);
+  const request = async (actor, method, path, body, headers = {}) => {
+    const response = await fetch(base + path, { method, headers: { 'Content-Type': 'application/json', ...(actor ? { Authorization: `Bearer ${typeof actor === 'string' ? actor : token(actor)}` } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: response.status, body: await response.json() };
+  };
+  check((await request(null, 'GET', '/api/users')).status, 401);
+  check((await request(user, 'GET', '/api/users')).status, 403);
+  const list = (await request(admin, 'GET', '/api/users')).body.data.items;
+  check(list.some(u => u.id === hq.id), false);
+  check(list.some(u => u.id === pending.id), true);
+  check(list.some(u => 'passwordHash' in u), false);
+  check((await request(hq, 'GET', '/api/users')).body.data.items.length, 6);
+  check((await request(admin, 'PUT', '/api/users/representative', { userId: owner.id })).status, 403);
+  check((await request(hq, 'PUT', '/api/users/representative', { userId: owner.id })).status, 200);
+  check((await db.user.findUnique({ where: { id: owner.id } })).isRepresentative, true);
+  check((await request(owner, 'PUT', '/api/users/representative', { userId: other.id })).status, 403);
+  check((await request(admin, 'PATCH', `/api/users/${user.id}`, { role: 'ADMIN' })).status, 403);
+  check((await request(owner, 'PATCH', `/api/users/${user.id}`, { role: 'ADMIN' })).status, 200);
+  check((await db.user.findUnique({ where: { id: user.id } })).role, 'ADMIN');
+  check((await request(owner, 'PATCH', `/api/users/${user.id}`, { role: 'USER' })).status, 200);
+  check((await request(admin, 'PATCH', `/api/users/${pending.id}`, { isApproved: true })).status, 200);
+  check((await request(admin, 'PATCH', `/api/users/${owner.id}`, { isActive: false })).status, 403);
+  check((await request(owner, 'PATCH', `/api/users/${hq.id}`, { role: 'USER' })).status, 403);
+  check((await request(owner, 'PATCH', `/api/users/${owner.id}`, { role: 'USER' })).status, 403);
+  check((await request(hq, 'PATCH', `/api/users/${user.id}`, { role: 'HQ_ENGINEER' })).status, 400);
+  check((await request(owner, 'PATCH', `/api/users/${user.id}`, { isRepresentative: true })).status, 400);
+  check((await request(hq, 'PUT', '/api/users/representative', { userId: hq.id })).status, 400);
+  const race = await Promise.all([user, other].map(u => request(hq, 'PUT', '/api/users/representative', { userId: u.id })));
+  check(race.map(r => r.status), [200, 200]);
+  check(await db.user.count({ where: { isRepresentative: true } }), 1);
+  check((await db.user.findUnique({ where: { id: owner.id } })).isRepresentative, false);
+  check((await db.user.findUnique({ where: { id: owner.id } })).role, 'ADMIN');
+  check((await request(owner, 'PATCH', `/api/users/${admin.id}`, { role: 'USER' })).status, 403);
+  await assert.rejects(db.user.update({ where: { id: owner.id }, data: { isRepresentative: true } })); checks++;
+  const representative = await db.user.findFirst({ where: { isRepresentative: true } });
+  await assert.rejects(db.user.update({ where: { id: representative.id }, data: { isApproved: false } })); checks++;
+  check((await request(hq, 'PUT', '/api/users/representative', { userId: null })).status, 200);
+  check(await db.user.count({ where: { isRepresentative: true } }), 0);
+  check((await request(hq, 'PATCH', `/api/users/${admin.id}`, { role: 'USER' })).status, 200);
+  check((await request(staleAdminToken, 'GET', '/api/users')).status, 403);
+  await db.refreshToken.create({ data: { jti: 'test-refresh', userId: admin.id, expiresAt: new Date(Date.now() + 100000) } });
+  check((await request(hq, 'PATCH', `/api/users/${admin.id}`, { isActive: false })).status, 200);
+  check((await request(staleAdminToken, 'GET', '/api/auth/me')).status, 403);
+  check(!!(await db.refreshToken.findUnique({ where: { jti: 'test-refresh' } })).revokedAt, true);
+  const wsUser = await wsService.authenticateRequest({ headers: { authorization: `Bearer ${staleAdminToken}` } });
+  check(wsUser, null);
+  check((await request(hq, 'GET', '/api/settings/registration-codes')).status, 403);
+  check((await request(user, 'GET', '/api/settings/registration-codes')).status, 200); // promoted during representative race
+  check((await request(hq, 'GET', '/api/settings/registration-codes', undefined, { 'X-Role-Test': 'ADMIN' })).status, 403);
+  check((await request(user, 'PUT', '/api/settings/registration-codes', { operatorCode: 'company-test-code' })).status, 200);
+  check((await request(user, 'GET', '/api/settings/registration-codes')).body.data, { operatorCode: 'company-test-code' });
+  check((await request(user, 'PUT', '/api/settings/registration-codes', { adminCode: 'forbidden' })).status, 400);
+  await db.globalSetting.create({ data: { key: 'registration.adminCode', value: 'old-admin-code' } });
+  const register = (name, code) => request(null, 'POST', '/api/auth/register', { username: name, displayName: name, email: `${name}@example.test`, password: 'test-password', registrationCode: code });
+  check((await register('old-code', 'old-admin-code')).status, 400);
+  check(await db.user.findUnique({ where: { username: 'old-code' } }), null);
+  check((await register('new-code', 'company-test-code')).body.data.role, 'USER');
+  check((await db.user.findUnique({ where: { username: 'new-code' } })).isApproved, true);
+  check((await request(hq, 'GET', '/api/auth/me')).body.data.isRepresentative, false);
+  const audit = await db.auditLog.findMany({ where: { action: 'users.permissions_change' } });
+  check(audit.every(a => a.actorDisplayName && a.params.before && a.params.after && a.createdAt), true);
+  check((await db.auditLog.findMany({ where: { action: 'users.representative_change' } })).length >= 3, true);
+  check(JSON.stringify(await db.auditLog.findMany()).includes('company-test-code'), false);
+  check(notifications.some(([ids, disabled]) => ids.includes(admin.id) && disabled), true);
+  // Make audit persistence fail, then verify the permission mutation rolls back.
+  await db.$executeRawUnsafe(`CREATE FUNCTION "${schema}".reject_user_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'isolated audit failure'; END $$`);
+  await db.$executeRawUnsafe(`CREATE TRIGGER reject_user_audit BEFORE INSERT ON "${schema}".audit_logs FOR EACH ROW EXECUTE FUNCTION "${schema}".reject_user_audit()`);
+  check((await request(hq, 'PATCH', `/api/users/${pending.id}`, { role: 'ADMIN' })).status, 503);
+  check((await db.user.findUnique({ where: { id: pending.id } })).role, 'USER');
+  console.log(`User management API/DB checks passed: ${checks}; disposable schema only, no CNC commands.`);
+})().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
+  if (server) { server.closeIdleConnections(); await new Promise(resolve => server.close(resolve)); }
+  await db.$disconnect();
+  if (created) await baseDb.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);
+  await baseDb.$disconnect();
+});

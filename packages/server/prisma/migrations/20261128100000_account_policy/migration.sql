@@ -1,0 +1,3 @@
+ALTER TABLE "users" ALTER COLUMN "email" DROP NOT NULL;
+ALTER TABLE "users" ADD COLUMN "must_change_password" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "users" ADD COLUMN "deleted_at" TIMESTAMP(3);

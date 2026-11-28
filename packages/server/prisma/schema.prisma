@@ -18,9 +18,14 @@ model User {
   id           String    @id @default(uuid())
   username     String    @unique
   displayName  String    @default("") @map("display_name")
-  email        String    @unique
+  email        String?   @unique
   passwordHash String    @map("password_hash")
+  authVersion Int @default(0) @map("auth_version")
+  emailVerifiedAt DateTime? @map("email_verified_at")
+  mustChangePassword Boolean @default(false) @map("must_change_password")
+  deletedAt DateTime? @map("deleted_at")
   role         UserRole  @default(USER)
+  isRepresentative Boolean @default(false) @map("is_representative")
   isActive     Boolean   @default(true) @map("is_active")
   isApproved   Boolean   @default(false) @map("is_approved")
   createdAt    DateTime  @default(now()) @map("created_at")
@@ -43,6 +48,28 @@ enum UserRole {
   USER // 일반 사용자 (모니터링 전용)
   ADMIN // 관리자 (스케줄러, 설정 변경)
   HQ_ENGINEER // 본사 엔지니어 (템플릿 관리, 전체 접근)
+}
+
+model AccountChallenge {
+  id String @id @default(uuid())
+  tokenHash String @unique @map("token_hash")
+  purpose String
+  email String
+  userId String? @map("user_id")
+  attempts Int @default(0)
+  expiresAt DateTime @map("expires_at")
+  usedAt DateTime? @map("used_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  @@index([email, purpose, createdAt])
+  @@map("account_challenges")
+}
+
+model AccountRateLimit {
+  key String @id
+  count Int @default(0)
+  windowAt DateTime @map("window_at")
+  lastAt DateTime @map("last_at")
+  @@map("account_rate_limits")
 }
 
 model RefreshToken {

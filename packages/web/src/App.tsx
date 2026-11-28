@@ -6,6 +6,8 @@ import { useMachineStore } from './stores/machineStore';
 import { useCameraStore } from './stores/cameraStore';
 import { Login } from './components/Login';
 import { Register } from './components/Register';
+import { AccountRecovery } from './pages/AccountRecovery';
+import { PasswordChange } from './components/PasswordChange';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { RemoteControl } from './pages/RemoteControl';
@@ -24,6 +26,8 @@ import { SchedulerConfig } from './pages/SchedulerConfig';
 import { Simtos } from './pages/Simtos';
 import { Monitoring } from './pages/Monitoring';
 import { useTemplateSync } from './hooks/useTemplateSync';
+import { useAccountSync } from './hooks/useAccountSync';
+import { restorePersistentSession } from './lib/restoreSession';
 
 // ── Copy Button ───────────────────────────────────────────
 function CopyButton({ text }: { text: string }) {
@@ -120,53 +124,33 @@ clearStaleMockCache();
 // ── WebSocket lifecycle + machines loading on login ───────
 function WsConnector() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  useTemplateSync(isAuthenticated);
+  const mustChangePassword = useAuthStore(s => !!s.user?.mustChangePassword);
+  useTemplateSync(isAuthenticated && !mustChangePassword);
+  useAccountSync(isAuthenticated);
   const accessToken = useAuthStore((s) => s.accessToken);
   const setAuth = useAuthStore((s) => s.setAuth);
   const setAccessToken = useAuthStore((s) => s.setAccessToken);
   const testRole = useAuthStore((s) => s.testRole);
   useEffect(() => {
-    if (!isAuthenticated || !accessToken) return;
+    if (!isAuthenticated || !accessToken || mustChangePassword) return;
     const load = () => { void useFeatureStore.getState().load().catch(() => undefined); };
     load(); const timer = setInterval(load, 15000); return () => clearInterval(timer);
-  }, [isAuthenticated, accessToken]);
+  }, [isAuthenticated, accessToken, mustChangePassword]);
   const logout = useAuthStore((s) => s.logout);
   const initWebSocket = useMachineStore((s) => s.initWebSocket);
   const destroyWebSocket = useMachineStore((s) => s.destroyWebSocket);
   const fetchMachines = useMachineStore((s) => s.fetchMachines);
 
-  // iOS PWA가 localStorage 인증 상태를 잃어도 refresh token 쿠키가 남아 있으면 세션 복구
+  // Only persistent sessions may restore an unauthenticated app/new tab.
   useEffect(() => {
     if (isAuthenticated) return;
-
-    const restoreSession = async () => {
-      try {
-        const refreshResponse = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
-        if (!refreshResponse.ok) return;
-        const refreshData = await refreshResponse.json() as { success: boolean; data?: { accessToken: string } };
-        const restoredAccessToken = refreshData.data?.accessToken;
-        if (!refreshData.success || !restoredAccessToken) return;
-
-        const meResponse = await fetch('/api/auth/me', {
-          credentials: 'include',
-          headers: { Authorization: `Bearer ${restoredAccessToken}` },
-        });
-        if (!meResponse.ok) return;
-        const meData = await meResponse.json() as {
-          success: boolean;
-          data?: { id: string; username: string; email: string; role: 'USER' | 'ADMIN' | 'HQ_ENGINEER' };
-        };
-        if (meData.success && meData.data) {
-          setAuth(meData.data, restoredAccessToken);
-        }
-      } catch {
-        // 쿠키가 없거나 네트워크가 끊긴 경우 로그인 화면 유지
-      }
-    };
-
-    void restoreSession();
+    let active = true;
+    void restorePersistentSession().then(session => {
+      if (active && session && !useAuthStore.getState().isAuthenticated)
+        setAuth(session.user, session.accessToken, true);
+    });
+    return () => { active = false; };
   }, [isAuthenticated, setAuth]);
-
   // 페이지 새로고침 시 accessToken이 없으면 refresh token 쿠키로 재발급
   useEffect(() => {
     if (isAuthenticated && !accessToken) {
@@ -185,7 +169,7 @@ function WsConnector() {
   }, [isAuthenticated]);
 
   useEffect(() => {
-    if (isAuthenticated && accessToken) {
+    if (isAuthenticated && accessToken && !mustChangePassword) {
       initWebSocket(accessToken);
       void fetchMachines();
       void (useCameraStore.getState() as unknown as { loadFromServer: () => Promise<void> }).loadFromServer();
@@ -195,7 +179,7 @@ function WsConnector() {
     return () => {
       destroyWebSocket();
     };
-  }, [isAuthenticated, accessToken, testRole, initWebSocket, destroyWebSocket, fetchMachines]);
+  }, [isAuthenticated, accessToken, mustChangePassword, testRole, initWebSocket, destroyWebSocket, fetchMachines]);
 
   return null;
 }
@@ -203,11 +187,13 @@ function WsConnector() {
 // Protected Route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const mustChangePassword = useAuthStore(state => state.user?.mustChangePassword);
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
 
+  if (mustChangePassword) return <div className="min-h-screen bg-gray-100 dark:bg-gray-900 px-[16px] py-[32px] flex items-center justify-center"><div className="w-full max-w-[400px]"><PasswordChange required /></div></div>;
   return <Layout>{children}</Layout>;
 }
 
@@ -251,6 +237,10 @@ function App() {
           </PublicRoute>
         }
       />
+
+      <Route path="/account/find-id" element={<AccountRecovery key="find-id" mode="find-id" />} />
+      <Route path="/account/forgot-password" element={<AccountRecovery key="forgot-password" mode="forgot-password" />} />
+      <Route path="/account/reset" element={<AccountRecovery key="reset" mode="reset" />} />
 
       {/* Protected Routes */}
       <Route

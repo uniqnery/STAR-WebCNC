@@ -12,8 +12,10 @@ const dependencies = vi.hoisted(() => ({
   commandCreate: vi.fn(), auditCreate: vi.fn(), wait: vi.fn(),
   machineTemplate: vi.fn(), templateLookup: vi.fn(), pmcGet: vi.fn(),
   productionPolicy: vi.fn(),
+  account: vi.fn(),
 }));
 vi.mock('../src/lib/prisma', () => ({ prisma: {
+  user: { findUnique: dependencies.account },
   machine: { findFirst: dependencies.machineFind, findMany: dependencies.machineList, count: dependencies.machineCount, findUnique: dependencies.machineTemplate },
   template: { findFirst: dependencies.templateFind, findMany: dependencies.templateList, findUnique: dependencies.templateLookup, updateMany: dependencies.templateUpdateMany, findUniqueOrThrow: dependencies.templateAfter },
   commandLog: { create: dependencies.commandCreate }, auditLog: { create: dependencies.auditCreate },
@@ -60,6 +62,7 @@ const control: Endpoint[] = [
 ];
 
 async function request(method: string, path: string, role?: UserRole, body: object = {}) {
+  dependencies.account.mockResolvedValue({ id: 'test-user', username: 'tester', role, isActive: true, isApproved: true, isRepresentative: false });
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (role) headers.Authorization = `Bearer ${generateAccessToken({ userId: 'test-user', username: 'tester', role })}`;
   return fetch(base + path, { method, headers, body: method === 'GET' ? undefined : JSON.stringify(body) });
